@@ -1,5 +1,5 @@
 // 합력 락픽: 힘 카드를 골라 합력을 목표 힘과 똑같이 맞추면 자물쇠가 풀립니다.
-// 오른쪽 방향을 +, 왼쪽 방향을 − 로 계산해요.
+// 오른쪽 방향을 +, 왼쪽 방향을 − 로 계산한다.
 
 export const CARD_COUNT = 6;
 
@@ -52,6 +52,6 @@ export function formula(puzzle, selected) {
   puzzle.cards.forEach((c, i) => {
     if (selected[i]) parts.push(`(${signed(c.dir * c.mag)})`);
   });
-  if (!parts.length) return '카드를 골라 힘을 더해 보세요';
+  if (!parts.length) return '힘 카드 선택 대기';
   return `${parts.join(' + ')} = ${signed(netForce(puzzle, selected))} N`;
 }

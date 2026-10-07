@@ -54,7 +54,7 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
 });
 
 test('합력 강화장치: 소총 24 → 27, 몸통 4발에 쓰러짐', () => {
-  const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad']]]) });
+  const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const p = match.player;
   const victim = match.agents.find((a) => a.team === TEAMS.FORCE);
@@ -67,7 +67,7 @@ test('합력 강화장치: 소총 24 → 27, 몸통 4발에 쓰러짐', () => {
 });
 
 test('중력 강화장막: 날아오던 투사체가 서서히 멈추고 피해를 주지 않음, 끝나면 떨어짐', () => {
-  const match = new Match({ seed: 5, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['gravityVeil', 'elasticPad']]]) });
+  const match = new Match({ seed: 5, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['gravityVeil', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const me = match.player;
   const enemy = match.agents.find((a) => a.team === TEAMS.FORCE);
@@ -98,7 +98,7 @@ test('중력 강화장막: 날아오던 투사체가 서서히 멈추고 피해�
   }
   assert.ok(!match.projectiles.includes(proj), '장막이 끝나면 바닥에 떨어져 사라짐');
   function enemyWeapon() {
-    return { id: 'rifle', rpm: 600, damage: 24, speed: 160, spreadBase: 0, spreadMove: 0, spreadAir: 0, bloomPerShot: 0, bloomMax: 0, recoilKick: 0, recoilMax: 0 };
+    return { id: 'rifle', rpm: 600, damage: 24, speed: 160, spreadBase: 0, spreadMove: 0, spreadAir: 0, bloomPerShot: 0, bloomMax: 0, recoilPitch: [0], recoilYaw: [0], recoilMax: 0, recoilYawMax: 0, adsSpread: 1, adsRecoil: 1, crouchSpread: 1 };
   }
 });
 

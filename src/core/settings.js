@@ -1,4 +1,4 @@
-// 설정은 이 브라우저에만 저장됩니다. 저장이 막힌 환경(시크릿 창 등)에서도 기본값으로 정상 동작해요.
+// 설정은 이 브라우저에만 저장된다. 저장이 막힌 환경(시크릿 창 등)에서도 기본값으로 동작.
 const KEY = 'forcebound.settings.v1';
 
 export const DEFAULT_SETTINGS = {
@@ -9,6 +9,8 @@ export const DEFAULT_SETTINGS = {
   quality: 'high',
   invertY: false,
   difficulty: 'normal',
+  bodycam: true, // 바디캠 렌즈 효과
+  shake: 1, // 화면 흔들림 세기
 };
 
 export function loadSettings() {

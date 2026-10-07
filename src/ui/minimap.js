@@ -1,7 +1,8 @@
 import { TEAM_INFO } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
 
-const SITE = { A: '#ffc24a', B: '#b98cff' };
+const SITE = { A: '#d9a441', B: '#9b8ac4' };
+const ZONE_FILL = { friction: 'rgba(150,200,215,0.22)', storm: 'rgba(196,150,90,0.26)', net: 'rgba(181,154,223,0.3)', collapse: 'rgba(181,154,223,0.32)' };
 
 // 위가 북쪽(포스팀 진영)인 고정 미니맵
 export class Minimap {
@@ -28,13 +29,13 @@ export class Minimap {
       for (let c = 0; c < map.cols; c++) {
         const ch = map.charAt(c, r);
         const kind = TILES[ch]?.kind;
-        if (kind === 'wall') b.fillStyle = 'rgba(14,18,26,0.92)';
-        else if (kind) b.fillStyle = 'rgba(120,132,150,0.75)';
-        else if ('aA'.includes(ch)) b.fillStyle = 'rgba(255,194,74,0.28)';
-        else if ('bB'.includes(ch)) b.fillStyle = 'rgba(185,140,255,0.28)';
-        else if (ch === 'F') b.fillStyle = 'rgba(255,122,47,0.3)';
-        else if (ch === 'D') b.fillStyle = 'rgba(63,216,255,0.3)';
-        else b.fillStyle = 'rgba(70,82,100,0.55)';
+        if (kind === 'wall') b.fillStyle = 'rgba(8,10,12,0.94)';
+        else if (kind) b.fillStyle = 'rgba(112,118,124,0.8)';
+        else if ('aA'.includes(ch)) b.fillStyle = 'rgba(217,164,65,0.24)';
+        else if ('bB'.includes(ch)) b.fillStyle = 'rgba(155,138,196,0.24)';
+        else if (ch === 'F') b.fillStyle = 'rgba(224,138,60,0.22)';
+        else if (ch === 'D') b.fillStyle = 'rgba(94,196,214,0.22)';
+        else b.fillStyle = 'rgba(58,63,70,0.6)';
         b.fillRect(c * S, r * S, S, S);
       }
     }
@@ -59,23 +60,23 @@ export class Minimap {
       const [x, y] = this.toPx(z.x, z.z);
       g.beginPath();
       g.arc(x, y, (z.radius / m.map.width) * m.map.cols * this.S, 0, Math.PI * 2);
-      g.fillStyle = z.type === 'friction' ? 'rgba(159,243,255,0.25)' : 'rgba(196,125,255,0.3)';
+      g.fillStyle = ZONE_FILL[z.type] ?? 'rgba(200,200,200,0.2)';
       g.fill();
     }
 
     for (const b of m.bombs) {
       const [x, y] = this.toPx(b.x, b.z);
-      const col = b.state === 'defused' ? '#4dff9a' : b.picker ? '#ffd23a' : SITE[b.id];
+      const col = b.state === 'defused' ? '#6fcf8e' : b.picker ? '#e3b341' : SITE[b.id];
       const pulse = b.state === 'armed' ? 1 + Math.sin(this.t * 6) * 0.15 : 1;
       g.beginPath();
       g.arc(x, y, 6 * pulse, 0, Math.PI * 2);
-      g.fillStyle = 'rgba(8,10,16,0.85)';
+      g.fillStyle = 'rgba(6,8,10,0.88)';
       g.fill();
       g.strokeStyle = col;
       g.lineWidth = 2;
       g.stroke();
       g.fillStyle = col;
-      g.font = '800 8px sans-serif';
+      g.font = '700 8px Rajdhani, sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(b.id, x, y + 0.5);
@@ -114,7 +115,7 @@ export class Minimap {
       } else {
         g.beginPath();
         g.arc(0, 0, 3.2, 0, Math.PI * 2);
-        g.fillStyle = spotted ? '#ff4d5e' : col;
+        g.fillStyle = spotted ? '#e0524a' : col;
         g.fill();
         g.beginPath();
         g.moveTo(0, -5.5);

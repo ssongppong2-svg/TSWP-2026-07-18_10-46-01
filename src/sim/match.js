@@ -1,9 +1,9 @@
 import { Emitter } from '../core/events.js';
 import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
-import { createAgent, emptyIntent, eyePos, chestPos, stepMovement } from './agent.js';
+import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, SWAP_TIME, TEAM_SIZE, TEAMS, ULT,
+  BOMB, BOT_NAMES, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, TEAM_SIZE, TEAMS, ULT,
 } from './constants.js';
 import { PATCHES, WEAPONS } from './data.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
@@ -43,6 +43,19 @@ function spreadDir(dir, spread, rng) {
   return { x: x / l, y: y / l, z: z / l };
 }
 
+// 선분 a→b 와 세워진 방패 판(가로 2·halfW, 세로 y0~y1)의 교차 t(0~1). 없으면 -1.
+export function segmentShield(a, b, sh) {
+  const nx = -Math.sin(sh.yaw), nz = -Math.cos(sh.yaw);
+  const da = (a.x - sh.x) * nx + (a.z - sh.z) * nz;
+  const db = (b.x - sh.x) * nx + (b.z - sh.z) * nz;
+  if ((da > 0 && db > 0) || (da < 0 && db < 0) || da === db) return -1;
+  const t = da / (da - db);
+  const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t, pz = a.z + (b.z - a.z) * t;
+  const lx = (px - sh.x) * Math.cos(sh.yaw) - (pz - sh.z) * Math.sin(sh.yaw);
+  if (Math.abs(lx) > sh.halfW || py < sh.y0 || py > sh.y1) return -1;
+  return t;
+}
+
 export class Match {
   constructor({ map = null, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now() } = {}) {
     this.map = map ?? new GameMap();
@@ -55,6 +68,7 @@ export class Match {
     this.projectiles = [];
     this.veils = [];
     this.zones = [];
+    this.shields = [];
     this.noises = [];
     this.nextId = 1;
     this.time = 0;
@@ -119,6 +133,7 @@ export class Match {
     if (this.phase === 'ended') {
       this.endT += dt;
       this.updateVeils(dt);
+      this.updateShields(dt);
       this.updateProjectiles(dt);
       return;
     }
@@ -144,6 +159,7 @@ export class Match {
     }
     this.separateAgents();
     this.updateVeils(dt);
+    this.updateShields(dt);
     this.updateProjectiles(dt);
     this.updateVisibility(dt);
     this.noises = this.noises.filter((n) => this.time - n.t < 1.2);
@@ -164,10 +180,14 @@ export class Match {
     a.yaw = intent.yaw;
     a.pitch = clamp(intent.pitch, -1.45, 1.45);
     for (const p of a.patches) {
+      if (!p) continue;
       if (p.cd > 0) p.cd = Math.max(0, p.cd - dt);
       if (p.activeT > 0) p.activeT = Math.max(0, p.activeT - dt);
     }
     if (a.ampT > 0) a.ampT = Math.max(0, a.ampT - dt);
+    if (a.bounceT > 0) a.bounceT = Math.max(0, a.bounceT - dt);
+    if (a.tagT > 0) a.tagT = Math.max(0, a.tagT - dt);
+    a.punch *= Math.exp(-dt * 8);
     if (live) a.ult = Math.min(ULT.max, a.ult + ULT.perSecond * dt);
 
     const canAct = live && !a.held;
@@ -180,6 +200,10 @@ export class Match {
         });
       }
     }
+    // 정조준: 총을 들고 있고 재장전·교체 중이 아닐 때만
+    const w = WEAPONS[a.weapon];
+    a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
+    a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * 7, 0, 1);
     this.stepWeapon(a, intent, dt, live && !a.lockpick);
 
     const wasGround = a.onGround;
@@ -213,27 +237,53 @@ export class Match {
 
   // ───────────────────────── 총기 ─────────────────────────
   stepWeapon(a, intent, dt, canFire) {
-    let w = WEAPONS[a.weapon];
-    let ws = a.weapons[a.weapon];
+    const w = WEAPONS[a.weapon];
+    const ws = a.weapons[a.weapon];
     a.fireCd = Math.max(0, a.fireCd - dt);
+    a.meleeCd = Math.max(0, a.meleeCd - dt);
     a.sinceShot += dt;
-    a.bloom = Math.max(0, a.bloom - w.bloomRecover * dt);
-    if (a.sinceShot > 0.12) a.recoil = Math.max(0, a.recoil - w.recoilRecover * dt);
+    if (!w.melee) {
+      a.bloom = Math.max(0, a.bloom - w.bloomRecover * dt);
+      if (a.sinceShot > 0.12) {
+        a.recoil = Math.max(0, a.recoil - w.recoilRecover * dt);
+        const ry = w.recoilRecover * 0.5 * dt;
+        a.recoilYaw = Math.abs(a.recoilYaw) <= ry ? 0 : a.recoilYaw - Math.sign(a.recoilYaw) * ry;
+      }
+    } else {
+      a.recoil = Math.max(0, a.recoil - 0.4 * dt);
+      a.recoilYaw = 0;
+    }
 
     if (intent.switchTo && intent.switchTo !== a.weapon && WEAPONS[intent.switchTo] && !a.lockpick) {
       a.weapon = intent.switchTo;
-      a.swapT = SWAP_TIME;
+      a.swapT = WEAPONS[a.weapon].draw;
       a.reloadT = 0;
       a.bloom = 0;
       a.triggerLatch = intent.fire;
+      a.adsLatch = intent.ads;
       this.emit('swap', { agent: a, weapon: a.weapon });
       return;
     }
     if (a.swapT > 0) {
       a.swapT = Math.max(0, a.swapT - dt);
       a.triggerLatch = intent.fire;
+      a.adsLatch = intent.ads;
       return;
     }
+
+    // 근접 무기: 왼쪽 클릭 = 베기, 오른쪽 클릭 = 찌르기
+    if (w.melee) {
+      const heavyPressed = intent.ads && !a.adsLatch;
+      a.adsLatch = intent.ads;
+      a.triggerLatch = intent.fire;
+      if (canFire && a.meleeCd <= 0) {
+        if (intent.fire) this.melee(a, false);
+        else if (heavyPressed || intent.ads) this.melee(a, true);
+      }
+      return;
+    }
+    a.adsLatch = intent.ads;
+
     if (a.reloadT > 0) {
       a.reloadT -= dt;
       if (a.reloadT <= 0) {
@@ -269,11 +319,13 @@ export class Match {
   fire(a, w, ws) {
     ws.mag--;
     a.fireCd = 60 / w.rpm;
+    if (a.sinceShot > 0.4) a.sprayIndex = 0;
     a.sinceShot = 0;
     const moving = Math.hypot(a.vel.x, a.vel.z) > 1.2;
     let spread = w.spreadBase + a.bloom + (moving ? w.spreadMove : 0) + (!a.onGround ? w.spreadAir : 0);
+    spread *= (1 + (w.adsSpread - 1) * a.adsT) * (1 + (w.crouchSpread - 1) * a.crouch);
     if (a.held) spread += w.spreadMove * 0.5;
-    const dir = spreadDir(dirFromAngles(a.yaw, a.pitch + a.recoil), spread, this.rng);
+    const dir = spreadDir(dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch), spread, this.rng);
     const amp = w.id === 'rifle' && a.ampT > 0;
     const damage = w.damage + (amp ? PATCHES.resultantAmp.bonus : 0);
     const origin = eyePos(a);
@@ -284,6 +336,7 @@ export class Match {
       weapon: w.id,
       damage,
       amp,
+      bounces: a.bounceT > 0 ? 1 : 0,
       pos: origin,
       prev: copy(origin),
       vel: scale(dir, w.speed),
@@ -292,10 +345,44 @@ export class Match {
       inVeil: false,
     };
     this.projectiles.push(p);
+    // 연사 반동 패턴 (정조준·앉기 중에는 줄어듦)
+    const i = a.sprayIndex++;
+    const rm = (1 + (w.adsRecoil - 1) * a.adsT) * (a.crouch > 0.5 ? 0.85 : 1);
+    a.recoil = Math.min(w.recoilMax, a.recoil + w.recoilPitch[Math.min(i, w.recoilPitch.length - 1)] * rm);
+    a.recoilYaw = clamp(a.recoilYaw + w.recoilYaw[i % w.recoilYaw.length] * rm, -w.recoilYawMax, w.recoilYawMax);
     a.bloom = Math.min(w.bloomMax, a.bloom + w.bloomPerShot);
-    a.recoil = Math.min(w.recoilMax, a.recoil + w.recoilKick);
     this.noises.push({ x: a.pos.x, z: a.pos.z, team: a.team, agentId: a.id, t: this.time });
     this.emit('shot', { agent: a, weapon: w.id, origin, dir, amp, projectile: p });
+  }
+
+  melee(a, heavy) {
+    const w = WEAPONS.knife;
+    const m = heavy ? w.heavy : w.light;
+    a.meleeCd = m.rate;
+    const eye = eyePos(a);
+    const d = dirFromAngles(a.yaw, a.pitch);
+    let best = null, bestD = Infinity;
+    for (const e of this.agents) {
+      if (!e.alive || e.team === a.team) continue;
+      const c = chestPos(e);
+      const vx = c.x - eye.x, vy = c.y - eye.y, vz = c.z - eye.z;
+      const dd = Math.hypot(vx, vy, vz);
+      if (dd > m.range + 0.35) continue;
+      if (dd > 0.9 && (vx * d.x + vy * d.y + vz * d.z) / dd < 0.78) continue;
+      if (!this.clearLine(eye, c)) continue;
+      if (dd < bestD) {
+        bestD = dd;
+        best = e;
+      }
+    }
+    this.emit('melee', { agent: a, heavy, target: best });
+    if (!best) return;
+    // 등 뒤에서 찌르면 피해 1.5배
+    const fx = -Math.sin(best.yaw), fz = -Math.cos(best.yaw);
+    const tx = best.pos.x - a.pos.x, tz = best.pos.z - a.pos.z;
+    const tl = Math.hypot(tx, tz) || 1;
+    const backstab = (fx * tx + fz * tz) / tl > 0.5;
+    this.applyDamage(best, m.damage * (backstab ? w.backstabMult : 1), a, { weapon: 'knife', pos: chestPos(best), backstab });
   }
 
   // ───────────────────────── 투사체 ─────────────────────────
@@ -332,43 +419,71 @@ export class Match {
       const next = { x: p.pos.x + p.vel.x * dt, y: p.pos.y + p.vel.y * dt, z: p.pos.z + p.vel.z * dt };
       const mh = this.map.raycast(p.pos, next);
       let tHit = mh ? mh.t : Infinity;
-      let target = null, head = false;
+      let target = null, head = false, shield = null;
+      for (const sh of this.shields) {
+        const ts = segmentShield(p.pos, next, sh);
+        if (ts >= 0 && ts < tHit) {
+          tHit = ts;
+          shield = sh;
+        }
+      }
       if (!p.harmless) {
         for (const a of this.agents) {
           if (!a.alive || a.team === p.team) continue;
-          const hc = { x: a.pos.x, y: a.pos.y + PLAYER.headY, z: a.pos.z };
-          const th = segmentSphere(p.pos, next, hc, PLAYER.headRadius);
+          const th = segmentSphere(p.pos, next, eyePos(a), PLAYER.headRadius);
           if (th >= 0 && th < tHit) {
             tHit = th;
             target = a;
             head = true;
+            shield = null;
           }
           const tb = segmentAabb(
             p.pos,
             next,
             { x: a.pos.x - PLAYER.bodyHalf, y: a.pos.y, z: a.pos.z - PLAYER.bodyHalf },
-            { x: a.pos.x + PLAYER.bodyHalf, y: a.pos.y + PLAYER.bodyTop, z: a.pos.z + PLAYER.bodyHalf },
+            { x: a.pos.x + PLAYER.bodyHalf, y: a.pos.y + bodyTop(a), z: a.pos.z + PLAYER.bodyHalf },
           );
           if (tb >= 0 && tb < tHit) {
             tHit = tb;
             target = a;
             head = false;
+            shield = null;
           }
         }
       }
+      const at = (t) => ({ x: p.pos.x + (next.x - p.pos.x) * t, y: p.pos.y + (next.y - p.pos.y) * t, z: p.pos.z + (next.z - p.pos.z) * t });
       if (target) {
-        const hitPos = {
-          x: p.pos.x + (next.x - p.pos.x) * tHit,
-          y: p.pos.y + (next.y - p.pos.y) * tHit,
-          z: p.pos.z + (next.z - p.pos.z) * tHit,
-        };
+        const hitPos = at(tHit);
         const owner = this.agentById(p.ownerId);
         const mult = head ? WEAPONS[p.weapon].headMult : 1;
-        this.emit('impact', { ...hitPos, kind: 'flesh', projectile: p });
+        this.emit('impact', { ...hitPos, kind: 'flesh', projectile: p, headshot: head });
         this.applyDamage(target, p.damage * mult, owner, { headshot: head, weapon: p.weapon, pos: hitPos });
         continue;
       }
+      if (shield) {
+        const hp = at(tHit);
+        if (!p.harmless) shield.hp -= p.damage;
+        this.emit('impact', { ...hp, nx: -Math.sin(shield.yaw), ny: 0, nz: -Math.cos(shield.yaw), kind: 'shield', projectile: p });
+        continue;
+      }
       if (mh) {
+        // 작용·반작용 도탄: 벽이 탄을 같은 크기의 힘으로 밀어내 반사
+        if (p.bounces > 0 && !p.harmless) {
+          const vn = p.vel.x * mh.nx + p.vel.y * mh.ny + p.vel.z * mh.nz;
+          const k = PROJECTILE.bounceKeep;
+          p.vel.x = (p.vel.x - 2 * vn * mh.nx) * k;
+          p.vel.y = (p.vel.y - 2 * vn * mh.ny) * k;
+          p.vel.z = (p.vel.z - 2 * vn * mh.nz) * k;
+          p.damage *= k;
+          p.bounces--;
+          p.bounced = true;
+          p.pos.x = mh.x + mh.nx * 0.03;
+          p.pos.y = mh.y + mh.ny * 0.03;
+          p.pos.z = mh.z + mh.nz * 0.03;
+          this.emit('ricochet', { x: mh.x, y: mh.y, z: mh.z, nx: mh.nx, ny: mh.ny, nz: mh.nz, projectile: p });
+          keep.push(p);
+          continue;
+        }
         this.emit('impact', { x: mh.x, y: mh.y, z: mh.z, nx: mh.nx, ny: mh.ny, nz: mh.nz, kind: p.harmless ? 'debris' : 'surface', projectile: p });
         continue;
       }
@@ -381,13 +496,16 @@ export class Match {
     this.projectiles = keep;
   }
 
-  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null } = {}) {
+  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false } = {}) {
     if (!t.alive || this.phase === 'ended') return;
     amount = Math.round(amount);
     const dealt = Math.min(t.hp, amount);
     t.hp -= amount;
     t.lastHurtT = this.time;
     t.lastHurtBy = attacker?.id ?? null;
+    // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
+    t.tagT = PLAYER.tagTime;
+    t.punch = Math.min(0.09, t.punch + (headshot ? 0.045 : 0.022));
     if (t.lockpick) this.cancelLockpick(t, 'hit');
     if (attacker) {
       attacker.stats.damage += dealt;
@@ -395,7 +513,7 @@ export class Match {
       if (headshot) attacker.stats.headshots++;
     }
     const killed = t.hp <= 0;
-    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos });
+    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos, backstab });
     if (killed) this.kill(t, attacker, { headshot, weapon });
   }
 
@@ -405,6 +523,8 @@ export class Match {
     t.deadT = 0;
     t.held = null;
     t.slippery = false;
+    t.mired = false;
+    t.ads = false;
     t.stats.deaths++;
     if (t.lockpick) this.cancelLockpick(t, 'dead');
     if (attacker && attacker !== t) {
@@ -465,6 +585,84 @@ export class Match {
       case 'frictionZero': {
         const pt = this.aimPoint(a, def.range);
         const zone = { id: this.nextId++, type: 'friction', ownerId: a.id, team: a.team, ...pt, radius: def.radius, t: def.duration, duration: def.duration, age: 0 };
+        this.zones.push(zone);
+        payload.zone = zone;
+        break;
+      }
+      case 'reactionRounds': {
+        a.bounceT = def.duration;
+        p.activeT = def.duration;
+        break;
+      }
+      case 'buoyShield': {
+        const fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw);
+        let d = 2.0;
+        const clear = (dd) => {
+          const { c, r } = this.map.toCell(a.pos.x + fx * dd, a.pos.z + fz * dd);
+          return this.map.walkable(c, r) && this.map.lineOfSight(eyePos(a), { x: a.pos.x + fx * dd, y: a.pos.y + 1, z: a.pos.z + fz * dd });
+        };
+        while (d > 0.8 && !clear(d)) d -= 0.3;
+        const base = a.pos.y + 0.2;
+        const shield = {
+          id: this.nextId++,
+          ownerId: a.id,
+          team: a.team,
+          x: a.pos.x + fx * d,
+          z: a.pos.z + fz * d,
+          yaw: a.yaw,
+          y0: base,
+          y1: base + def.height,
+          halfW: def.width / 2,
+          hp: def.hp,
+          maxHp: def.hp,
+          t: def.duration,
+          duration: def.duration,
+        };
+        this.shields.push(shield);
+        payload.shield = shield;
+        break;
+      }
+      case 'elasticNet': {
+        const pt = this.aimPoint(a, def.range);
+        const zone = { id: this.nextId++, type: 'net', ownerId: a.id, team: a.team, ...pt, radius: def.radius, t: def.holdTime, duration: def.holdTime, age: 0, captured: [] };
+        for (const e of this.agents) {
+          if (!e.alive || e.team === a.team || e.held) continue;
+          if (Math.hypot(e.pos.x - pt.x, e.pos.z - pt.z) > def.radius || Math.abs(e.pos.y - pt.y) > 2) continue;
+          if (!this.map.lineOfSight({ x: pt.x, y: pt.y + 1, z: pt.z }, chestPos(e))) continue;
+          e.held = { zoneId: zone.id, x: e.pos.x, y: e.pos.y + 0.35, z: e.pos.z };
+          zone.captured.push(e.id);
+          if (e.lockpick) this.cancelLockpick(e, 'captured');
+          this.emit('captured', { agent: e, zone });
+        }
+        this.zones.push(zone);
+        payload.zone = zone;
+        break;
+      }
+      case 'weightScanner': {
+        const revealed = [];
+        for (const e of this.agents) {
+          if (!e.alive || e.team === a.team) continue;
+          if (dist(e.pos, a.pos) > def.radius) continue;
+          e.revealedUntil = this.time + def.duration;
+          revealed.push(e.id);
+        }
+        payload.revealed = revealed;
+        payload.radius = def.radius;
+        payload.pos = copy(a.pos);
+        break;
+      }
+      case 'resultantSurge': {
+        payload.affected = [];
+        for (const m of this.agents) {
+          if (!m.alive || m.team !== a.team) continue;
+          m.ampT = Math.max(m.ampT, def.duration);
+          payload.affected.push(m.id);
+        }
+        break;
+      }
+      case 'frictionStorm': {
+        const pt = this.aimPoint(a, def.range);
+        const zone = { id: this.nextId++, type: 'storm', ownerId: a.id, team: a.team, ...pt, radius: def.radius, t: def.duration, duration: def.duration, age: 0 };
         this.zones.push(zone);
         payload.zone = zone;
         break;
@@ -552,8 +750,28 @@ export class Match {
     this.veils = keep;
   }
 
+  updateShields(dt) {
+    const keep = [];
+    for (const sh of this.shields) {
+      sh.t -= dt;
+      if (sh.t > 0 && sh.hp > 0) keep.push(sh);
+      else this.emit('shieldEnd', { shield: sh, broken: sh.hp <= 0 });
+    }
+    this.shields = keep;
+  }
+
+  // 벽과 부력 방패를 모두 고려한 직선 시야
+  clearLine(a, b) {
+    if (!this.map.lineOfSight(a, b)) return false;
+    for (const sh of this.shields) if (segmentShield(a, b, sh) >= 0) return false;
+    return true;
+  }
+
   updateZones(dt) {
-    for (const a of this.agents) a.slippery = false;
+    for (const a of this.agents) {
+      a.slippery = false;
+      a.mired = false;
+    }
     const keep = [];
     for (const z of this.zones) {
       z.t -= dt;
@@ -562,6 +780,11 @@ export class Match {
         for (const a of this.agents) {
           if (!a.alive || a.team === z.team || !a.onGround) continue;
           if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) <= z.radius && Math.abs(a.pos.y - z.y) < 0.6) a.slippery = true;
+        }
+      } else if (z.type === 'storm') {
+        for (const a of this.agents) {
+          if (!a.alive || a.team === z.team) continue;
+          if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) <= z.radius && Math.abs(a.pos.y - z.y) < 1.2) a.mired = true;
         }
       } else if (z.type === 'collapse' && z.age <= z.pullT) {
         for (const a of this.agents) {
@@ -587,6 +810,28 @@ export class Match {
               a.vel.x = a.vel.y = a.vel.z = 0;
             }
           }
+        }
+        if (z.type === 'net') {
+          // 늘어난 그물이 복원되며 바깥쪽으로 튕겨냄
+          const def = PATCHES.elasticNet;
+          for (const id of z.captured) {
+            const a = this.agentById(id);
+            if (a?.held?.zoneId !== z.id) continue;
+            a.held = null;
+            let dx = a.pos.x - z.x, dz = a.pos.z - z.z;
+            let l = Math.hypot(dx, dz);
+            if (l < 0.2) {
+              const ang = this.rng.next() * Math.PI * 2;
+              dx = Math.cos(ang);
+              dz = Math.sin(ang);
+              l = 1;
+            }
+            a.vel.x = (dx / l) * def.throwSpeed;
+            a.vel.z = (dz / l) * def.throwSpeed;
+            a.vel.y = def.throwUp;
+            a.onGround = false;
+          }
+          this.emit('netRelease', { zone: z });
         }
         this.emit('zoneEnd', { zone: z });
       }
@@ -689,7 +934,14 @@ export class Match {
     this.visT -= dt;
     if (this.visT > 0) return;
     this.visT = 0.15;
-    for (const a of this.agents) a.visibleEnemies = [];
+    for (const a of this.agents) {
+      a.visibleEnemies = [];
+      // 무게 감지기에 탐지된 적은 위치가 계속 갱신됨
+      if (a.alive && a.revealedUntil > this.time) {
+        a.spottedT = this.time;
+        a.spottedPos = copy(a.pos);
+      }
+    }
     for (const a of this.agents) {
       if (!a.alive) continue;
       const eye = eyePos(a);
@@ -701,8 +953,7 @@ export class Match {
         const d = Math.hypot(dx, dz);
         if (d > 80) continue;
         if (d > 3 && (dx * fx + dz * fz) / d < 0.3) continue;
-        const head = { x: e.pos.x, y: e.pos.y + PLAYER.headY, z: e.pos.z };
-        if (!this.map.lineOfSight(eye, head) && !this.map.lineOfSight(eye, ch)) continue;
+        if (!this.clearLine(eye, eyePos(e)) && !this.clearLine(eye, ch)) continue;
         a.visibleEnemies.push(e.id);
         e.spottedT = this.time;
         e.spottedPos = copy(e.pos);
@@ -712,13 +963,13 @@ export class Match {
 
   // ───────────────────────── 승패 ─────────────────────────
   checkEnd() {
-    if (this.bombs.every((b) => b.state === 'defused')) return this.end(TEAMS.DEFUSE, '폭탄 2개를 모두 해체했어요!');
-    if (this.alive(TEAMS.DEFUSE).length === 0) return this.end(TEAMS.FORCE, '해체팀이 모두 쓰러졌어요!');
+    if (this.bombs.every((b) => b.state === 'defused')) return this.end(TEAMS.DEFUSE, '폭탄 2기 해체 완료.');
+    if (this.alive(TEAMS.DEFUSE).length === 0) return this.end(TEAMS.FORCE, '해체팀 전원 제압.');
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       for (const b of this.bombs) if (b.state === 'armed') b.state = 'exploded';
       this.emit('explode', { bombs: this.bombs.filter((b) => b.state === 'exploded') });
-      return this.end(TEAMS.FORCE, '2분이 지나 폭탄이 터졌어요!');
+      return this.end(TEAMS.FORCE, '제한 시간 종료 — 폭탄 폭발.');
     }
     return null;
   }

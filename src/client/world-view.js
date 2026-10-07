@@ -1,27 +1,42 @@
 import * as THREE from 'three';
 import { CELL } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
-import { posterTexture, signTexture, siteDecal } from './textures.js';
+import { posterTexture, siteDecal, sprayTexture } from './textures.js';
 
-export const SITE_COLORS = { A: '#ffc24a', B: '#b98cff' };
+export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 
-// 맵(글자 격자)을 3D 메쉬로 만듭니다.
+// 조명 위치 (줄, 칸) — 가까운 벽에 등을 달고 그 앞에 빛을 둠. 앞쪽일수록 중요(낮은 품질에서도 켜짐).
+const LAMPS = [
+  { r: 5, c: 8, kind: 'sodium' }, { r: 5, c: 27, kind: 'sodium' },
+  { r: 16, c: 9, kind: 'fluo' }, { r: 16, c: 26, kind: 'fluo' },
+  { r: 10, c: 15, kind: 'sodium' }, { r: 28, c: 20, kind: 'sodium' },
+  { r: 21, c: 10, kind: 'fluo' }, { r: 23, c: 25, kind: 'fluo' },
+  { r: 25, c: 2, kind: 'sodium' }, { r: 25, c: 33, kind: 'sodium' },
+  { r: 20, c: 20, kind: 'fluo' },
+  { r: 38, c: 10, kind: 'sodium' }, { r: 38, c: 25, kind: 'sodium' }, { r: 32, c: 12, kind: 'fluo' },
+  { r: 1, c: 17, kind: 'sodium' }, { r: 1, c: 6, kind: 'fluo' }, { r: 1, c: 29, kind: 'fluo' },
+];
+const LAMP_STYLE = {
+  sodium: { color: '#ffb35c', intensity: 30, lens: '#ffd39a' },
+  fluo: { color: '#cfe0ff', intensity: 14, lens: '#dfe8f6' },
+};
+
+// 맵(글자 격자)을 3D 메쉬로 만든다.
 export function buildWorld(map, tex) {
   const group = new THREE.Group();
   group.name = 'world';
 
   // ── 바닥
-  const floorMat = new THREE.MeshStandardMaterial({ map: tex.floor, roughness: 0.82, metalness: 0.08 });
   tex.floor.repeat.set(map.width / 4, map.depth / 4);
+  tex.floorBump.repeat.set(map.width / 4, map.depth / 4);
+  const floorMat = new THREE.MeshStandardMaterial({ map: tex.floor, bumpMap: tex.floorBump, bumpScale: 1.2, roughness: 0.9, metalness: 0.02 });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
-
-  // 바닥 구역 표시 (구역 색칠 + 테두리)
   group.add(buildFloorMarkings(map));
 
-  // ── 벽: 보이는 면만 만들기 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
+  // ── 벽: 보이는 면만 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
   const sides = new QuadBuilder();
   const tops = new QuadBuilder();
   for (let r = 0; r < map.rows; r++) {
@@ -30,13 +45,13 @@ export function buildWorld(map, tex) {
       const h = map.heightAt(c, r);
       const x0 = map.originX + c * CELL, x1 = x0 + CELL;
       const z0 = map.originZ + r * CELL, z1 = z0 + CELL;
-      const sidesToCheck = [
+      const faces = [
         [0, -1, [x1, z0], [x0, z0], 0, 0, -1],
         [0, 1, [x0, z1], [x1, z1], 0, 0, 1],
         [-1, 0, [x0, z0], [x0, z1], -1, 0, 0],
         [1, 0, [x1, z1], [x1, z0], 1, 0, 0],
       ];
-      for (const [dc, dr, a, b, nx, ny, nz] of sidesToCheck) {
+      for (const [dc, dr, a, b, nx, ny, nz] of faces) {
         if (!map.inBounds(c + dc, r + dr)) continue;
         const nh = map.heightAt(c + dc, r + dr);
         if (nh >= h) continue;
@@ -52,28 +67,21 @@ export function buildWorld(map, tex) {
       tops.quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1]);
     }
   }
-  const wallMat = new THREE.MeshStandardMaterial({
-    map: tex.wall,
-    emissiveMap: tex.wallEmissive,
-    emissive: new THREE.Color('#ffffff'),
-    emissiveIntensity: 1.4,
-    roughness: 0.7,
-    metalness: 0.15,
-  });
+  const wallMat = new THREE.MeshStandardMaterial({ map: tex.wall, bumpMap: tex.wallBump, bumpScale: 2.0, roughness: 0.93, metalness: 0.02 });
   const wallMesh = new THREE.Mesh(sides.build(), wallMat);
   wallMesh.castShadow = true;
   wallMesh.receiveShadow = true;
   group.add(wallMesh);
-  const topMesh = new THREE.Mesh(tops.build(), new THREE.MeshStandardMaterial({ map: tex.wallTop, roughness: 0.6, metalness: 0.3 }));
+  const topMesh = new THREE.Mesh(tops.build(), new THREE.MeshStandardMaterial({ map: tex.wallTop, roughness: 0.7, metalness: 0.5 }));
   topMesh.castShadow = true;
   topMesh.receiveShadow = true;
   group.add(topMesh);
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
   const kinds = {
-    crate: { tex: tex.crate, top: '#b77a22', rough: 0.6, metal: 0.1 },
-    bigCrate: { tex: tex.container, top: '#24525c', rough: 0.45, metal: 0.45 },
-    barrier: { tex: tex.barrier, top: '#2a2d33', rough: 0.85, metal: 0.05 },
+    crate: { tex: tex.crate, top: '#3f432c', rough: 0.85, metal: 0.05, inset: 0.92 },
+    bigCrate: { tex: tex.container, top: '#2b373c', rough: 0.6, metal: 0.55, inset: 0.98 },
+    barrier: { tex: tex.barrier, top: '#77776f', rough: 0.95, metal: 0.0, inset: 0.96 },
   };
   for (const [kind, style] of Object.entries(kinds)) {
     const cells = [];
@@ -81,8 +89,8 @@ export function buildWorld(map, tex) {
       for (let c = 0; c < map.cols; c++) if (TILES[map.charAt(c, r)]?.kind === kind) cells.push([c, r]);
     }
     if (!cells.length) continue;
-    const h = TILES[Object.keys(TILES).find((k) => TILES[k].kind === kind)].h;
-    const geo = new THREE.BoxGeometry(CELL * 0.98, h, CELL * 0.98);
+    const h = Object.values(TILES).find((t) => t.kind === kind).h;
+    const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
     geo.translate(0, h / 2, 0);
     const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: style.rough, metalness: style.metal });
     const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: style.rough, metalness: style.metal });
@@ -99,25 +107,22 @@ export function buildWorld(map, tex) {
     group.add(mesh);
   }
 
-  // ── 구역 글자 (바닥) + 구역 조명
+  // ── 구역 글자 (바닥 페인트)
   for (const b of map.bombs) {
     const decal = new THREE.Mesh(
-      new THREE.PlaneGeometry(9, 9),
-      new THREE.MeshBasicMaterial({ map: siteDecal(b.id, SITE_COLORS[b.id]), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 }),
+      new THREE.PlaneGeometry(7, 7),
+      new THREE.MeshStandardMaterial({ map: siteDecal(b.id, '#d8d2bf'), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
     );
     decal.rotation.x = -Math.PI / 2;
-    decal.position.set(b.x, 0.02, b.z);
+    decal.position.set(b.x + 4.2, 0.02, b.z + 3.5);
+    decal.receiveShadow = true;
     group.add(decal);
-    const light = new THREE.PointLight(SITE_COLORS[b.id], 30, 18, 2);
-    light.position.set(b.x, 4.2, b.z);
-    group.add(light);
   }
 
-  // ── 표지판·포스터
+  const lights = addLamps(group, map);
   addDecor(group, map);
-
-  // ── 맵 밖 풍경 (먼 건물들)
   group.add(buildSkyline(map));
+  group.userData.lamps = lights;
   return group;
 }
 
@@ -146,164 +151,211 @@ class QuadBuilder {
   }
 }
 
+// 바닥 페인트 선 (구역 경계는 노란색, 진영은 흰색) — 닳은 느낌
 function buildFloorMarkings(map) {
   const S = 32;
   const c = document.createElement('canvas');
   c.width = map.cols * S;
   c.height = map.rows * S;
   const g = c.getContext('2d');
-  g.clearRect(0, 0, c.width, c.height);
-  const fills = { a: 'rgba(255,194,74,0.16)', A: 'rgba(255,194,74,0.16)', b: 'rgba(185,140,255,0.16)', B: 'rgba(185,140,255,0.16)', F: 'rgba(255,122,47,0.22)', D: 'rgba(63,216,255,0.22)' };
-  const edges = { a: '#ffc24a', A: '#ffc24a', b: '#b98cff', B: '#b98cff', F: '#ff7a2f', D: '#3fd8ff' };
+  const edges = { a: '#c9a43a', A: '#c9a43a', b: '#c9a43a', B: '#c9a43a', F: '#cfcac0', D: '#cfcac0' };
   const group = (ch) => (ch === 'A' ? 'a' : ch === 'B' ? 'b' : ch);
+  g.lineWidth = 5;
   for (let r = 0; r < map.rows; r++) {
     for (let col = 0; col < map.cols; col++) {
       const ch = map.charAt(col, r);
-      if (!fills[ch]) continue;
-      g.fillStyle = fills[ch];
-      g.fillRect(col * S, r * S, S, S);
+      if (!edges[ch]) continue;
       g.strokeStyle = edges[ch];
-      g.lineWidth = 3;
-      g.globalAlpha = 0.7;
+      g.globalAlpha = 0.5;
       const same = (dc, dr) => group(map.charAt(col + dc, r + dr)) === group(ch);
       g.beginPath();
-      if (!same(0, -1)) { g.moveTo(col * S, r * S + 1.5); g.lineTo(col * S + S, r * S + 1.5); }
-      if (!same(0, 1)) { g.moveTo(col * S, r * S + S - 1.5); g.lineTo(col * S + S, r * S + S - 1.5); }
-      if (!same(-1, 0)) { g.moveTo(col * S + 1.5, r * S); g.lineTo(col * S + 1.5, r * S + S); }
-      if (!same(1, 0)) { g.moveTo(col * S + S - 1.5, r * S); g.lineTo(col * S + S - 1.5, r * S + S); }
+      if (!same(0, -1)) { g.moveTo(col * S, r * S + 3); g.lineTo(col * S + S, r * S + 3); }
+      if (!same(0, 1)) { g.moveTo(col * S, r * S + S - 3); g.lineTo(col * S + S, r * S + S - 3); }
+      if (!same(-1, 0)) { g.moveTo(col * S + 3, r * S); g.lineTo(col * S + 3, r * S + S); }
+      if (!same(1, 0)) { g.moveTo(col * S + S - 3, r * S); g.lineTo(col * S + S - 3, r * S + S); }
       g.stroke();
-      g.globalAlpha = 1;
     }
+  }
+  // 닳은 부분 지우기
+  g.globalCompositeOperation = 'destination-out';
+  g.globalAlpha = 1;
+  let s = 7;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 2600; i++) {
+    g.globalAlpha = 0.3 + rnd() * 0.7;
+    g.fillRect(rnd() * c.width, rnd() * c.height, 4 + rnd() * 18, 3 + rnd() * 8);
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(map.width, map.depth),
-    new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }),
+    new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1 }),
   );
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = 0.01;
+  mesh.receiveShadow = true;
   return mesh;
 }
 
+// 벽에 등을 달고 점광원 배치
+function addLamps(group, map) {
+  const out = [];
+  const housingMat = new THREE.MeshStandardMaterial({ color: '#1d1f22', roughness: 0.6, metalness: 0.6 });
+  for (const lamp of LAMPS) {
+    const st = LAMP_STYLE[lamp.kind];
+    // 가장 가까운 벽 방향 찾기
+    let dir = null;
+    for (let d = 1; d <= 3 && !dir; d++) {
+      for (const [dc, dr] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+        if (map.heightAt(lamp.c + dc * d, lamp.r + dr * d) >= 4) {
+          dir = { dc, dr, d };
+          break;
+        }
+      }
+    }
+    if (!dir) dir = { dc: 0, dr: -1, d: 1 };
+    const cx = map.cellX(lamp.c), cz = map.cellZ(lamp.r);
+    // 벽면 위치 = 셀 중심에서 벽 쪽으로 (d-0.5)칸
+    const wx = cx + dir.dc * (dir.d - 0.5) * CELL, wz = cz + dir.dr * (dir.d - 0.5) * CELL;
+    const y = 3.7;
+    const fixture = new THREE.Group();
+    fixture.position.set(wx - dir.dc * 0.12, y, wz - dir.dr * 0.12);
+    fixture.rotation.y = Math.atan2(-dir.dc, -dir.dr);
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.3 : 0.5, 0.22, 0.24), housingMat);
+    const lens = new THREE.Mesh(
+      new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.2 : 0.38, 0.06, 0.18),
+      new THREE.MeshStandardMaterial({ color: st.lens, emissive: st.lens, emissiveIntensity: 2.6 }),
+    );
+    lens.position.set(0, -0.12, 0.02);
+    fixture.add(housing, lens);
+    group.add(fixture);
+    const light = new THREE.PointLight(st.color, st.intensity, 20, 2);
+    light.position.set(wx - dir.dc * 0.7, y - 0.3, wz - dir.dr * 0.7);
+    group.add(light);
+    out.push(light);
+  }
+  return out;
+}
+
 const ICONS = {
-  gravity(g, x, y, color) {
-    g.fillStyle = '#2b3550';
+  gravity(g, x, y) {
+    g.strokeStyle = '#23262a';
+    g.fillStyle = '#23262a';
+    g.lineWidth = 6;
     g.beginPath();
-    g.arc(x, y + 40, 70, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = color;
-    g.lineWidth = 12;
+    g.arc(x, y + 60, 70, Math.PI, 0);
+    g.stroke();
     g.beginPath();
     g.moveTo(x, y - 110);
-    g.lineTo(x, y - 20);
+    g.lineTo(x, y - 10);
     g.stroke();
-    g.fillStyle = color;
     g.beginPath();
-    g.moveTo(x - 26, y - 34);
-    g.lineTo(x + 26, y - 34);
+    g.moveTo(x - 22, y - 30);
+    g.lineTo(x + 22, y - 30);
     g.lineTo(x, y);
     g.fill();
+    g.font = `600 26px "IBM Plex Sans KR", sans-serif`;
+    g.fillText('W = mg', x + 40, y - 60);
   },
-  elastic(g, x, y, color) {
-    g.strokeStyle = color;
-    g.lineWidth = 10;
+  elastic(g, x, y) {
+    g.strokeStyle = '#23262a';
+    g.lineWidth = 6;
     g.beginPath();
-    for (let i = 0; i <= 60; i++) {
-      const t = i / 60;
-      const px = x + Math.sin(t * Math.PI * 10) * 50;
-      const py = y + 90 - t * 170;
+    for (let i = 0; i <= 80; i++) {
+      const t = i / 80;
+      const px = x - 120 + t * 200;
+      const py = y + Math.sin(t * Math.PI * 12) * 34;
       if (i === 0) g.moveTo(px, py);
       else g.lineTo(px, py);
     }
     g.stroke();
-    g.fillStyle = '#dfe8f5';
-    g.fillRect(x - 70, y + 92, 140, 16);
+    g.fillStyle = '#23262a';
+    g.fillRect(x - 160, y - 60, 30, 120);
+    g.fillRect(x + 80, y - 26, 60, 52);
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(x + 150, y);
+    g.lineTo(x + 200, y);
+    g.stroke();
   },
-  resultant(g, x, y, color) {
-    const arrow = (x0, y0, len, col, w) => {
-      g.strokeStyle = col;
-      g.fillStyle = col;
+  resultant(g, x, y) {
+    const arrow = (x0, y0, len, w) => {
       g.lineWidth = w;
+      g.strokeStyle = '#23262a';
+      g.fillStyle = '#23262a';
       g.beginPath();
       g.moveTo(x0, y0);
-      g.lineTo(x0 + len - 24, y0);
+      g.lineTo(x0 + len - 22, y0);
       g.stroke();
       g.beginPath();
       g.moveTo(x0 + len, y0);
-      g.lineTo(x0 + len - 30, y0 - 20);
-      g.lineTo(x0 + len - 30, y0 + 20);
+      g.lineTo(x0 + len - 28, y0 - 16);
+      g.lineTo(x0 + len - 28, y0 + 16);
       g.fill();
     };
-    arrow(x - 150, y - 60, 150, '#8fb8ff', 12);
-    arrow(x, y - 60, 100, '#8fb8ff', 12);
-    arrow(x - 150, y + 50, 250, color, 18);
+    arrow(x - 170, y - 50, 160, 6);
+    arrow(x, y - 50, 110, 6);
+    arrow(x - 170, y + 50, 280, 10);
   },
-  friction(g, x, y, color) {
-    g.fillStyle = '#dfe8f5';
+  friction(g, x, y) {
+    g.fillStyle = '#23262a';
     g.fillRect(x - 60, y - 40, 120, 80);
-    g.strokeStyle = color;
-    g.lineWidth = 10;
+    g.fillRect(x - 180, y + 42, 360, 8);
+    g.lineWidth = 6;
+    g.strokeStyle = '#23262a';
     g.beginPath();
-    g.moveTo(x - 150, y + 48);
-    g.lineTo(x + 150, y + 48);
+    g.moveTo(x + 70, y);
+    g.lineTo(x + 170, y);
     g.stroke();
-    g.strokeStyle = '#ff7a7a';
     g.beginPath();
     g.moveTo(x - 70, y + 20);
     g.lineTo(x - 150, y + 20);
     g.stroke();
-    g.fillStyle = '#ff7a7a';
-    g.beginPath();
-    g.moveTo(x - 170, y + 20);
-    g.lineTo(x - 140, y);
-    g.lineTo(x - 140, y + 40);
-    g.fill();
   },
 };
 
 function addDecor(group, map) {
   const posters = [
-    { title: '중력', color: '#8a9dff', icon: ICONS.gravity, lines: ['지구가 물체를 당기는 힘', '방향: 지구 중심 쪽', '크기 = 무게 (단위 N)'] },
-    { title: '탄성력', color: '#8dff5a', icon: ICONS.elastic, lines: ['원래 모양으로', '되돌아가려는 힘', '많이 변형될수록 커요'] },
-    { title: '합력', color: '#ffa13d', icon: ICONS.resultant, lines: ['같은 방향: 더하기', '반대 방향: 빼기', '방향은 큰 힘 쪽'] },
-    { title: '마찰력', color: '#7fe9ff', icon: ICONS.friction, lines: ['운동을 방해하는 힘', '운동 방향과 반대', '거칠수록 · 무거울수록 ↑'] },
+    { no: 1, title: '중력', icon: ICONS.gravity, lines: ['지구 중심 방향으로 당기는 힘', '크기 = 무게 (단위 N)', '1 kg의 무게 ≈ 9.8 N'] },
+    { no: 2, title: '탄성력', icon: ICONS.elastic, lines: ['원래 형태로 복원하려는 힘', '변형시킨 힘의 반대 방향', '변형이 클수록 커짐'] },
+    { no: 3, title: '합력', icon: ICONS.resultant, lines: ['같은 방향: 크기를 더함', '반대 방향: 큰 힘 − 작은 힘', '방향은 큰 힘 쪽'] },
+    { no: 4, title: '마찰력', icon: ICONS.friction, lines: ['운동을 방해하는 힘', '운동 방향의 반대', '거칠수록·무거울수록 커짐'] },
   ];
-  // 해체팀 시작 홀의 북쪽 벽(31번째 줄 남쪽 면)에 포스터
-  const wallRow = 31;
-  const faceZ = map.originZ + (wallRow + 1) * CELL + 0.03;
+  // 해체팀 시작 홀의 북쪽 벽(31번째 줄 남쪽 면)에 교범
+  const faceZ = map.originZ + 32 * CELL + 0.03;
   const posterCols = [9, 12.5, 22.5, 26];
   posters.forEach((p, i) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 2.34), new THREE.MeshBasicMaterial({ map: posterTexture(p) }));
-    m.position.set(map.originX + posterCols[i] * CELL, 2.2, faceZ);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
+    m.position.set(map.originX + posterCols[i] * CELL, 1.9, faceZ);
+    m.receiveShadow = true;
     group.add(m);
   });
-  // 길 안내 표지판 { 위치(칸 단위), 바라보는 방향 }
+  // 스프레이 표시 { 위치(칸 단위), 바라보는 방향 }
   const signs = [
-    // 해체팀 시작 홀 북쪽 벽 (남쪽을 바라봄)
-    { text: 'A', color: '#ffc24a', sub: '← A 구역', x: 7.7, z: 32, rotY: 0 },
-    { text: 'B', color: '#b98cff', sub: 'B 구역 →', x: 28.3, z: 32, rotY: 0 },
-    // 중앙 통로 양쪽 벽
-    { text: 'A', color: '#ffc24a', sub: 'A 구역', x: 15, z: 15.3, rotY: Math.PI / 2 },
-    { text: 'B', color: '#b98cff', sub: 'B 구역', x: 21, z: 15.3, rotY: -Math.PI / 2 },
-    // 포스팀 진영 (4번째 줄 벽의 북쪽 면)
-    { text: 'A', color: '#ffc24a', sub: 'A 구역 →', x: 8.5, z: 4, rotY: Math.PI },
-    { text: 'B', color: '#b98cff', sub: '← B 구역', x: 27.5, z: 4, rotY: Math.PI },
+    { text: 'A', sub: '← A', x: 7.8, z: 32, rotY: 0 },
+    { text: 'B', sub: 'B →', x: 28.2, z: 32, rotY: 0 },
+    { text: 'A', sub: '', x: 15, z: 15.3, rotY: Math.PI / 2 },
+    { text: 'B', sub: '', x: 21, z: 15.3, rotY: -Math.PI / 2 },
+    { text: 'A', sub: 'A →', x: 8.5, z: 4, rotY: Math.PI },
+    { text: 'B', sub: '← B', x: 27.5, z: 4, rotY: Math.PI },
+    { text: 'MID', sub: '', x: 17.9, z: 32, rotY: 0 },
   ];
   for (const s of signs) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ map: signTexture(s.text, s.color, s.sub) }));
-    const off = 0.03;
-    m.position.set(
-      map.originX + s.x * CELL + Math.sin(s.rotY) * off,
-      3.2,
-      map.originZ + s.z * CELL + Math.cos(s.rotY) * off,
+    if (s.text === 'MID') continue;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.2, 1.1),
+      new THREE.MeshStandardMaterial({ map: sprayTexture(s.text, s.sub), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
     );
+    const off = 0.03;
+    m.position.set(map.originX + s.x * CELL + Math.sin(s.rotY) * off, 2.4, map.originZ + s.z * CELL + Math.cos(s.rotY) * off);
     m.rotation.y = s.rotY;
+    m.receiveShadow = true;
     group.add(m);
   }
 }
 
+// 맵 밖: 어두운 공장 건물 실루엣
 function buildSkyline(map) {
   const g = new THREE.Group();
   const geo = new THREE.BoxGeometry(1, 1, 1);
@@ -314,11 +366,13 @@ function buildSkyline(map) {
   const wg = winCanvas.getContext('2d');
   wg.fillStyle = '#000';
   wg.fillRect(0, 0, 64, 128);
-  for (let y = 4; y < 128; y += 10) {
-    for (let x = 4; x < 64; x += 10) {
-      if (Math.random() < 0.35) {
-        wg.fillStyle = Math.random() < 0.7 ? '#ffd9a0' : '#9fdcff';
-        wg.fillRect(x, y, 5, 5);
+  let s = 3;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let y = 4; y < 128; y += 12) {
+    for (let x = 4; x < 64; x += 12) {
+      if (rnd() < 0.08) {
+        wg.fillStyle = rnd() < 0.8 ? '#ffb35c' : '#cfe0ff';
+        wg.fillRect(x, y, 5, 4);
       }
     }
   }
@@ -326,21 +380,20 @@ function buildSkyline(map) {
   winTex.colorSpace = THREE.SRGBColorSpace;
   winTex.wrapS = winTex.wrapT = THREE.RepeatWrapping;
   winTex.repeat.set(2, 3);
-  const mat = new THREE.MeshStandardMaterial({ color: '#1a2030', roughness: 0.9, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 0.9 });
-  const count = 46;
+  const mat = new THREE.MeshStandardMaterial({ color: '#111418', roughness: 0.95, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 0.6 });
+  const count = 40;
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   const m = new THREE.Matrix4();
   const R = Math.max(map.width, map.depth) * 0.75;
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + Math.sin(i * 12.9) * 0.05;
-    const r = R + 15 + ((i * 37) % 50);
-    const w = 8 + ((i * 13) % 14), d = 8 + ((i * 7) % 12), h = 14 + ((i * 29) % 46);
+    const r = R + 18 + ((i * 37) % 50);
+    const w = 14 + ((i * 13) % 20), d = 10 + ((i * 7) % 14), h = 10 + ((i * 29) % 30);
     m.compose(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a), new THREE.Vector3(w, h, d));
     mesh.setMatrixAt(i, m);
   }
   g.add(mesh);
-  // 바깥 땅
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 48), new THREE.MeshStandardMaterial({ color: '#1f2530', roughness: 1 }));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 48), new THREE.MeshStandardMaterial({ color: '#16181b', roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   g.add(ground);

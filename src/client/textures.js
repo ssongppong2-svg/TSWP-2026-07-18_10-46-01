@@ -1,13 +1,18 @@
 import * as THREE from 'three';
 
-// 이미지 파일 없이 캔버스로 그린 텍스처. 한 파일 빌드(오프라인 실행)를 위해 전부 코드로 만듭니다.
+// 이미지 파일 없이 캔버스로 그린 텍스처. 한 파일 빌드(오프라인 실행)를 위해 전부 코드로 만든다.
 
-function canvasTexture(w, h, draw, { srgb = true, repeat = null } = {}) {
+const FONT = '"IBM Plex Sans KR", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+const STENCIL = '"Rajdhani", "IBM Plex Sans KR", "Malgun Gothic", sans-serif';
+
+function makeCanvas(w, h) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  const g = c.getContext('2d');
-  draw(g, w, h);
+  return c;
+}
+
+function toTexture(c, { srgb = true, repeat = null } = {}) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   if (repeat) t.repeat.set(repeat[0], repeat[1]);
@@ -16,13 +21,98 @@ function canvasTexture(w, h, draw, { srgb = true, repeat = null } = {}) {
   return t;
 }
 
-function noise(g, w, h, amount, alpha = 0.08, seed = 1) {
-  let s = seed;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < amount; i++) {
-    const v = Math.floor(rnd() * 255);
-    g.fillStyle = `rgba(${v},${v},${v},${alpha * rnd()})`;
-    g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+// 시드 난수
+function rng(seed) {
+  let s = seed >>> 0 || 1;
+  return () => ((s = (s * 16807) % 2147483647) / 2147483647);
+}
+
+// 이어 붙여도 티 안 나는 값 노이즈 (여러 옥타브)
+function valueNoise(w, h, { seed = 1, cells = 8, octaves = 4, persistence = 0.5 } = {}) {
+  const out = new Float32Array(w * h);
+  const r = rng(seed);
+  let amp = 1, total = 0;
+  for (let o = 0; o < octaves; o++) {
+    const n = cells << o;
+    const grid = new Float32Array(n * n);
+    for (let i = 0; i < grid.length; i++) grid[i] = r();
+    for (let y = 0; y < h; y++) {
+      const gy = (y / h) * n;
+      const y0 = Math.floor(gy), fy = gy - y0, sy = fy * fy * (3 - 2 * fy);
+      const r0 = (y0 % n) * n, r1 = ((y0 + 1) % n) * n;
+      for (let x = 0; x < w; x++) {
+        const gx = (x / w) * n;
+        const x0 = Math.floor(gx), fx = gx - x0, sx = fx * fx * (3 - 2 * fx);
+        const c0 = x0 % n, c1 = (x0 + 1) % n;
+        const a = grid[r0 + c0] + (grid[r0 + c1] - grid[r0 + c0]) * sx;
+        const b = grid[r1 + c0] + (grid[r1 + c1] - grid[r1 + c0]) * sx;
+        out[y * w + x] += (a + (b - a) * sy) * amp;
+      }
+    }
+    total += amp;
+    amp *= persistence;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= total;
+  return out;
+}
+
+// 노이즈로 바탕색 칠하기 (+ 높이맵용 회색 캔버스)
+function paintNoise(g, w, h, base, variance, opts = {}) {
+  const n = valueNoise(w, h, opts);
+  const img = g.createImageData(w, h);
+  const r2 = rng((opts.seed ?? 1) + 99);
+  for (let i = 0; i < n.length; i++) {
+    const v = (n[i] - 0.5) * 2 * variance + (r2() - 0.5) * variance * 0.5;
+    img.data[i * 4] = Math.max(0, Math.min(255, base[0] + v));
+    img.data[i * 4 + 1] = Math.max(0, Math.min(255, base[1] + v));
+    img.data[i * 4 + 2] = Math.max(0, Math.min(255, base[2] + v));
+    img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return n;
+}
+
+function heightFromNoise(n, w, h) {
+  const c = makeCanvas(w, h);
+  const g = c.getContext('2d');
+  const img = g.createImageData(w, h);
+  for (let i = 0; i < n.length; i++) {
+    const v = n[i] * 255;
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+function blotches(g, w, h, count, color, rMin, rMax, seed) {
+  const r = rng(seed);
+  for (let i = 0; i < count; i++) {
+    const x = r() * w, y = r() * h, rad = rMin + r() * (rMax - rMin);
+    const grd = g.createRadialGradient(x, y, 0, x, y, rad);
+    grd.addColorStop(0, color);
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grd;
+    g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+}
+
+function cracks(g, w, h, count, seed, color = 'rgba(15,15,16,0.7)') {
+  const r = rng(seed);
+  g.strokeStyle = color;
+  for (let i = 0; i < count; i++) {
+    let x = r() * w, y = r() * h, a = r() * Math.PI * 2;
+    g.lineWidth = 0.8 + r() * 1.4;
+    g.beginPath();
+    g.moveTo(x, y);
+    const steps = 10 + Math.floor(r() * 30);
+    for (let k = 0; k < steps; k++) {
+      a += (r() - 0.5) * 0.9;
+      x += Math.cos(a) * (3 + r() * 6);
+      y += Math.sin(a) * (3 + r() * 6);
+      g.lineTo(x, y);
+    }
+    g.stroke();
   }
 }
 
@@ -36,346 +126,394 @@ function roundRect(g, x, y, w, h, r) {
   g.closePath();
 }
 
-const FONT = '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
-
 export function createTextures() {
-  // 바닥: 4m × 4m 한 장에 2m 타일 2×2
-  const floor = canvasTexture(512, 512, (g, w, h) => {
-    g.fillStyle = '#2b323e';
-    g.fillRect(0, 0, w, h);
-    noise(g, w, h, 9000, 0.1, 3);
-    const t = w / 2;
-    for (let i = 0; i < 2; i++) {
-      for (let j = 0; j < 2; j++) {
-        const x = i * t, y = j * t;
-        const grd = g.createLinearGradient(x, y, x + t, y + t);
-        grd.addColorStop(0, 'rgba(255,255,255,0.035)');
-        grd.addColorStop(1, 'rgba(0,0,0,0.06)');
-        g.fillStyle = grd;
-        g.fillRect(x + 3, y + 3, t - 6, t - 6);
-        g.strokeStyle = '#1c222b';
-        g.lineWidth = 6;
-        g.strokeRect(x + 3, y + 3, t - 6, t - 6);
-        g.strokeStyle = 'rgba(120,140,170,0.18)';
-        g.lineWidth = 1.5;
-        g.strokeRect(x + 7, y + 7, t - 14, t - 14);
-        g.fillStyle = 'rgba(160,180,210,0.25)';
-        for (const [bx, by] of [[14, 14], [t - 14, 14], [14, t - 14], [t - 14, t - 14]]) {
-          g.beginPath();
-          g.arc(x + bx, y + by, 3, 0, Math.PI * 2);
-          g.fill();
-        }
-      }
+  // ── 콘크리트 벽: 가로 4m × 세로 4.8m 한 장
+  const wallC = makeCanvas(512, 614);
+  const wg = wallC.getContext('2d');
+  const wn = paintNoise(wg, 512, 614, [104, 106, 108], 22, { seed: 7, cells: 6, octaves: 5 });
+  blotches(wg, 512, 614, 18, 'rgba(40,38,34,0.22)', 40, 120, 3);
+  // 빗물 자국 (위에서 아래로)
+  const sr = rng(11);
+  for (let i = 0; i < 26; i++) {
+    const x = sr() * 512, len = 120 + sr() * 380, wdt = 2 + sr() * 9;
+    const grd = wg.createLinearGradient(0, 0, 0, len);
+    grd.addColorStop(0, 'rgba(25,24,22,0.35)');
+    grd.addColorStop(1, 'rgba(25,24,22,0)');
+    wg.fillStyle = grd;
+    wg.fillRect(x, 0, wdt, len);
+  }
+  // 패널 이음새와 거푸집 구멍
+  wg.fillStyle = 'rgba(20,20,20,0.55)';
+  wg.fillRect(0, 0, 3, 614);
+  wg.fillRect(255, 0, 3, 614);
+  for (const yM of [0.9, 2.1, 3.3, 4.4]) {
+    for (const xM of [0.5, 1.5, 2.5, 3.5]) {
+      const x = xM * 128, y = 614 - yM * 128;
+      wg.fillStyle = 'rgba(30,30,30,0.8)';
+      wg.beginPath();
+      wg.arc(x, y, 4.5, 0, Math.PI * 2);
+      wg.fill();
+      wg.fillStyle = 'rgba(160,160,160,0.25)';
+      wg.beginPath();
+      wg.arc(x + 1, y + 1, 4.5, 0, Math.PI);
+      wg.fill();
     }
-  });
+  }
+  // 바닥 쪽 때
+  const grime = wg.createLinearGradient(0, 614, 0, 520);
+  grime.addColorStop(0, 'rgba(30,26,20,0.75)');
+  grime.addColorStop(1, 'rgba(30,26,20,0)');
+  wg.fillStyle = grime;
+  wg.fillRect(0, 520, 512, 94);
+  // 낡은 경고 띠
+  wg.save();
+  wg.globalAlpha = 0.55;
+  wg.beginPath();
+  wg.rect(0, 570, 512, 22);
+  wg.clip();
+  wg.fillStyle = '#b8902c';
+  wg.fillRect(0, 570, 512, 22);
+  wg.fillStyle = '#191919';
+  for (let x = -30; x < 540; x += 32) {
+    wg.beginPath();
+    wg.moveTo(x, 592);
+    wg.lineTo(x + 16, 592);
+    wg.lineTo(x + 38, 570);
+    wg.lineTo(x + 22, 570);
+    wg.fill();
+  }
+  wg.restore();
+  cracks(wg, 512, 614, 10, 21, 'rgba(20,20,20,0.5)');
+  const wall = toTexture(wallC);
+  const wallBump = toTexture(heightFromNoise(wn, 512, 614), { srgb: false });
 
-  // 벽: 가로 4m, 세로는 벽 높이(4.8m) 전체
-  const wallDraw = (emissive) => (g, w, h) => {
-    if (emissive) {
-      g.fillStyle = '#000';
-      g.fillRect(0, 0, w, h);
-    } else {
-      const grd = g.createLinearGradient(0, 0, 0, h);
-      grd.addColorStop(0, '#9aa5b5');
-      grd.addColorStop(0.5, '#b8c1cd');
-      grd.addColorStop(1, '#8e98a8');
-      g.fillStyle = grd;
-      g.fillRect(0, 0, w, h);
-      noise(g, w, h, 14000, 0.09, 7);
-    }
-    const pw = w / 2;
-    const stripeY = h * (1 - 1.15 / 4.8);
-    const skirtY = h * (1 - 0.35 / 4.8);
-    for (let i = 0; i < 2; i++) {
-      const x = i * pw;
-      if (!emissive) {
-        g.strokeStyle = 'rgba(40,48,60,0.55)';
-        g.lineWidth = 4;
-        g.strokeRect(x + 2, 2, pw - 4, h - 4);
-        g.strokeStyle = 'rgba(255,255,255,0.18)';
-        g.lineWidth = 1.5;
-        g.strokeRect(x + 8, 10, pw - 16, stripeY - 24);
-        // 환풍구
-        g.fillStyle = 'rgba(30,36,46,0.5)';
-        for (let k = 0; k < 6; k++) g.fillRect(x + pw * 0.3, h * 0.12 + k * 9, pw * 0.4, 4);
-        g.fillStyle = 'rgba(30,36,46,0.75)';
-        g.fillRect(x, skirtY, pw, h - skirtY);
-        g.fillStyle = 'rgba(255,255,255,0.12)';
-        for (const [bx, by] of [[10, 10], [pw - 10, 10], [10, skirtY - 10], [pw - 10, skirtY - 10]]) {
-          g.beginPath();
-          g.arc(x + bx, by, 3, 0, Math.PI * 2);
-          g.fill();
-        }
-      }
-      // 빛나는 띠
-      g.fillStyle = emissive ? '#5fd6ff' : '#3c4a5c';
-      g.fillRect(x, stripeY - 5, pw, 10);
-      if (!emissive) {
-        g.fillStyle = '#9fe9ff';
-        g.fillRect(x, stripeY - 2, pw, 4);
-      }
-    }
-  };
-  const wall = canvasTexture(512, 614, wallDraw(false));
-  const wallEmissive = canvasTexture(512, 614, wallDraw(true));
+  // ── 바닥: 4m × 4m 한 장 (줄눈은 2m 간격)
+  const floorC = makeCanvas(512, 512);
+  const fg = floorC.getContext('2d');
+  const fn = paintNoise(fg, 512, 512, [62, 63, 64], 16, { seed: 3, cells: 8, octaves: 5 });
+  blotches(fg, 512, 512, 10, 'rgba(10,10,10,0.35)', 20, 70, 5); // 기름 얼룩
+  blotches(fg, 512, 512, 14, 'rgba(120,118,110,0.08)', 30, 90, 8);
+  cracks(fg, 512, 512, 14, 9);
+  fg.fillStyle = 'rgba(15,15,15,0.7)';
+  fg.fillRect(0, 0, 512, 3);
+  fg.fillRect(0, 254, 512, 3);
+  fg.fillRect(0, 0, 3, 512);
+  fg.fillRect(254, 0, 3, 512);
+  const floor = toTexture(floorC);
+  const floorBump = toTexture(heightFromNoise(fn, 512, 512), { srgb: false });
 
-  const wallTop = canvasTexture(256, 256, (g, w, h) => {
-    g.fillStyle = '#2f3540';
-    g.fillRect(0, 0, w, h);
-    noise(g, w, h, 4000, 0.12, 11);
-    g.strokeStyle = '#ffcc33';
-    g.lineWidth = 10;
-    g.setLineDash([18, 18]);
-    g.strokeRect(5, 5, w - 10, h - 10);
-  });
+  // ── 벽 윗면: 철제 덮개
+  const topC = makeCanvas(256, 256);
+  const tg = topC.getContext('2d');
+  paintNoise(tg, 256, 256, [46, 48, 50], 14, { seed: 13, cells: 6, octaves: 4 });
+  blotches(tg, 256, 256, 8, 'rgba(110,60,30,0.25)', 10, 40, 4);
+  const wallTop = toTexture(topC);
 
-  // 작은 상자: 주황 안전 상자
-  const crate = canvasTexture(512, 256, (g, w, h) => {
-    g.fillStyle = '#e39a2f';
-    g.fillRect(0, 0, w, h);
-    noise(g, w, h, 6000, 0.12, 5);
-    g.save();
-    g.beginPath();
-    g.rect(0, 0, w, 26);
-    g.rect(0, h - 26, w, 26);
-    g.clip();
-    g.fillStyle = '#1e1e22';
-    for (let x = -h; x < w + h; x += 36) {
-      g.beginPath();
-      g.moveTo(x, 0);
-      g.lineTo(x + 18, 0);
-      g.lineTo(x + 18 + h, h);
-      g.lineTo(x + h, h);
-      g.fill();
-    }
-    g.restore();
-    g.strokeStyle = 'rgba(60,35,10,0.6)';
-    g.lineWidth = 6;
-    g.strokeRect(3, 3, w - 6, h - 6);
-    roundRect(g, w * 0.32, h * 0.3, w * 0.36, h * 0.4, 10);
-    g.fillStyle = 'rgba(30,24,20,0.85)';
-    g.fill();
-    g.fillStyle = '#ffd27a';
-    g.font = `900 ${h * 0.24}px ${FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText('10 N', w / 2, h / 2 + 2);
-  });
+  // ── 작은 상자: 올리브색 보급 상자
+  const crateC = makeCanvas(512, 256);
+  const cg = crateC.getContext('2d');
+  paintNoise(cg, 512, 256, [78, 82, 56], 14, { seed: 17, cells: 8, octaves: 4 });
+  for (let y = 0; y < 256; y += 42) {
+    cg.fillStyle = 'rgba(20,22,12,0.5)';
+    cg.fillRect(0, y, 512, 3);
+    cg.fillStyle = 'rgba(255,255,230,0.06)';
+    cg.fillRect(0, y + 3, 512, 2);
+  }
+  cg.fillStyle = 'rgba(30,30,30,0.85)';
+  for (const x of [0, 488]) cg.fillRect(x, 0, 24, 256);
+  cg.fillStyle = 'rgba(220,214,190,0.85)';
+  cg.font = `700 54px ${STENCIL}`;
+  cg.textAlign = 'center';
+  cg.fillText('F-LAB 07', 256, 112);
+  cg.font = `500 22px ${FONT}`;
+  cg.fillText('질량 25 kg · 무게 245 N', 256, 156);
+  cg.font = `600 16px ${STENCIL}`;
+  cg.fillText('HANDLE WITH CARE   ▲ THIS SIDE UP', 256, 196);
+  blotches(cg, 512, 256, 12, 'rgba(200,190,160,0.12)', 6, 26, 2);
+  const crate = toTexture(crateC);
 
-  // 큰 상자: 컨테이너
-  const container = canvasTexture(512, 512, (g, w, h) => {
-    g.fillStyle = '#2f6f7c';
-    g.fillRect(0, 0, w, h);
-    noise(g, w, h, 9000, 0.12, 9);
-    for (let x = 0; x < w; x += 32) {
-      const grd = g.createLinearGradient(x, 0, x + 32, 0);
-      grd.addColorStop(0, 'rgba(0,0,0,0.25)');
-      grd.addColorStop(0.5, 'rgba(255,255,255,0.12)');
-      grd.addColorStop(1, 'rgba(0,0,0,0.25)');
-      g.fillStyle = grd;
-      g.fillRect(x, 0, 32, h);
-    }
-    g.fillStyle = 'rgba(15,30,36,0.8)';
-    g.fillRect(0, 0, w, 18);
-    g.fillRect(0, h - 18, w, 18);
-    g.fillStyle = 'rgba(255,255,255,0.85)';
-    g.font = `900 46px ${FONT}`;
-    g.textAlign = 'center';
-    g.fillText('FORCE LAB', w / 2, h * 0.45);
-    g.font = `700 26px ${FONT}`;
-    g.fillStyle = 'rgba(255,220,120,0.9)';
-    g.fillText('질량 2000 kg · 무게 약 20000 N', w / 2, h * 0.56);
-  });
+  // ── 큰 상자: 녹슨 컨테이너
+  const contC = makeCanvas(512, 512);
+  const kg = contC.getContext('2d');
+  paintNoise(kg, 512, 512, [52, 66, 72], 12, { seed: 23, cells: 8, octaves: 4 });
+  for (let x = 0; x < 512; x += 28) {
+    const grd = kg.createLinearGradient(x, 0, x + 28, 0);
+    grd.addColorStop(0, 'rgba(0,0,0,0.35)');
+    grd.addColorStop(0.45, 'rgba(255,255,255,0.08)');
+    grd.addColorStop(1, 'rgba(0,0,0,0.35)');
+    kg.fillStyle = grd;
+    kg.fillRect(x, 0, 28, 512);
+  }
+  const rr = rng(31);
+  for (let i = 0; i < 30; i++) {
+    const x = rr() * 512, len = 40 + rr() * 260;
+    const grd = kg.createLinearGradient(0, 0, 0, len);
+    grd.addColorStop(0, 'rgba(120,62,28,0.55)');
+    grd.addColorStop(1, 'rgba(120,62,28,0)');
+    kg.fillStyle = grd;
+    kg.fillRect(x, rr() * 80, 3 + rr() * 6, len);
+  }
+  kg.fillStyle = 'rgba(16,20,22,0.85)';
+  kg.fillRect(0, 0, 512, 22);
+  kg.fillRect(0, 490, 512, 22);
+  kg.fillStyle = 'rgba(215,215,205,0.8)';
+  kg.font = `700 44px ${STENCIL}`;
+  kg.textAlign = 'center';
+  kg.fillText('FORCE BOUND LOGISTICS', 256, 200);
+  kg.font = `500 24px ${FONT}`;
+  kg.fillText('총질량 2,000 kg · 무게 19,600 N', 256, 246);
+  kg.font = `600 20px ${STENCIL}`;
+  kg.fillText('FBLU 220713 · MAX GROSS 30,480 KG', 256, 290);
+  const container = toTexture(contC);
 
-  const barrier = canvasTexture(512, 256, (g, w, h) => {
-    g.fillStyle = '#8d939c';
-    g.fillRect(0, 0, w, h);
-    noise(g, w, h, 8000, 0.14, 13);
-    g.fillStyle = '#20232a';
-    g.fillRect(0, 0, w, 34);
-    g.save();
-    g.beginPath();
-    g.rect(0, 0, w, 34);
-    g.clip();
-    g.fillStyle = '#f2c230';
-    for (let x = -40; x < w + 40; x += 40) {
-      g.beginPath();
-      g.moveTo(x, 34);
-      g.lineTo(x + 20, 34);
-      g.lineTo(x + 40, 0);
-      g.lineTo(x + 20, 0);
-      g.fill();
-    }
-    g.restore();
-    g.strokeStyle = 'rgba(40,44,50,0.5)';
-    g.lineWidth = 4;
-    g.strokeRect(2, 2, w - 2, h - 4);
-  });
+  // ── 낮은 방벽: 콘크리트 방호벽
+  const barC = makeCanvas(512, 256);
+  const bg = barC.getContext('2d');
+  paintNoise(bg, 512, 256, [128, 128, 124], 20, { seed: 29, cells: 8, octaves: 4 });
+  blotches(bg, 512, 256, 10, 'rgba(40,36,30,0.25)', 20, 60, 6);
+  bg.save();
+  bg.globalAlpha = 0.6;
+  bg.beginPath();
+  bg.rect(0, 26, 512, 28);
+  bg.clip();
+  bg.fillStyle = '#c9c6bd';
+  bg.fillRect(0, 26, 512, 28);
+  bg.fillStyle = '#9b2f2a';
+  for (let x = -40; x < 560; x += 64) {
+    bg.beginPath();
+    bg.moveTo(x, 54);
+    bg.lineTo(x + 32, 54);
+    bg.lineTo(x + 60, 26);
+    bg.lineTo(x + 28, 26);
+    bg.fill();
+  }
+  bg.restore();
+  const grime2 = bg.createLinearGradient(0, 256, 0, 180);
+  grime2.addColorStop(0, 'rgba(30,26,20,0.7)');
+  grime2.addColorStop(1, 'rgba(30,26,20,0)');
+  bg.fillStyle = grime2;
+  bg.fillRect(0, 180, 512, 76);
+  const barrier = toTexture(barC);
 
-  return { floor, wall, wallEmissive, wallTop, crate, container, barrier };
+  return { floor, floorBump, wall, wallBump, wallTop, crate, container, barrier };
 }
 
-// 바닥에 그리는 구역 표시 (A, B)
+// 위장 무늬 천 (팀별)
+export function camoTexture(team) {
+  const c = makeCanvas(256, 256);
+  const g = c.getContext('2d');
+  const pal = team === 'defuse'
+    ? { base: [60, 66, 74], blobs: ['#525a65', '#3a4049', '#6b737d', '#2a2f35'] }
+    : { base: [112, 98, 74], blobs: ['#8d7a5a', '#5f523d', '#a8936c', '#4a4232'] };
+  paintNoise(g, 256, 256, pal.base, 10, { seed: team === 'defuse' ? 41 : 43, cells: 4, octaves: 3 });
+  const r = rng(team === 'defuse' ? 5 : 9);
+  for (const col of pal.blobs) {
+    g.fillStyle = col;
+    for (let i = 0; i < 26; i++) {
+      // 디지털 무늬: 작은 사각형 묶음
+      const x = Math.floor((r() * 256) / 8) * 8, y = Math.floor((r() * 256) / 8) * 8;
+      const n = 3 + Math.floor(r() * 7);
+      for (let k = 0; k < n; k++) {
+        const dx = Math.floor((r() - 0.5) * 5) * 8, dy = Math.floor((r() - 0.5) * 5) * 8;
+        g.fillRect((x + dx + 256) % 256, (y + dy + 256) % 256, 8, 8);
+      }
+    }
+  }
+  return toTexture(c, { repeat: [1, 1] });
+}
+
+// 바닥에 페인트로 칠한 구역 글자
 export function siteDecal(letter, color) {
-  return canvasTexture(512, 512, (g, w, h) => {
-    g.clearRect(0, 0, w, h);
-    g.strokeStyle = color;
-    g.globalAlpha = 0.9;
-    g.lineWidth = 18;
-    g.beginPath();
-    g.arc(w / 2, h / 2, w * 0.42, 0, Math.PI * 2);
-    g.stroke();
-    g.lineWidth = 6;
-    g.setLineDash([24, 18]);
-    g.beginPath();
-    g.arc(w / 2, h / 2, w * 0.33, 0, Math.PI * 2);
-    g.stroke();
-    g.setLineDash([]);
-    g.globalAlpha = 0.85;
-    g.fillStyle = color;
-    g.font = `900 ${h * 0.42}px ${FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(letter, w / 2, h / 2 + h * 0.03);
-  });
-}
-
-// 벽에 붙이는 과학 포스터
-export function posterTexture({ title, lines, color, icon }) {
-  return canvasTexture(512, 704, (g, w, h) => {
-    const grd = g.createLinearGradient(0, 0, 0, h);
-    grd.addColorStop(0, '#141a26');
-    grd.addColorStop(1, '#0b0f17');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, w, h);
-    g.strokeStyle = color;
-    g.lineWidth = 10;
-    g.strokeRect(5, 5, w - 10, h - 10);
-    g.fillStyle = color;
-    g.fillRect(5, 5, w - 10, 96);
-    g.fillStyle = '#0b0f17';
-    g.font = `900 64px ${FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(title, w / 2, 56);
-    if (icon) icon(g, w / 2, 250, color);
-    g.fillStyle = '#e8eef8';
-    g.font = `700 30px ${FONT}`;
-    lines.forEach((l, i) => g.fillText(l, w / 2, 450 + i * 50));
-    g.fillStyle = 'rgba(255,255,255,0.35)';
-    g.font = `600 22px ${FONT}`;
-    g.fillText('FORCE BOUND · 과학 연구소', w / 2, h - 34);
-  });
-}
-
-// 큰 글자 표지판
-export function signTexture(text, color, sub = '') {
-  return canvasTexture(512, 256, (g, w, h) => {
-    g.fillStyle = 'rgba(10,14,22,0.92)';
-    g.fillRect(0, 0, w, h);
-    g.strokeStyle = color;
-    g.lineWidth = 8;
-    g.strokeRect(4, 4, w - 8, h - 8);
-    g.fillStyle = color;
-    g.font = `900 ${sub ? 120 : 150}px ${FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(text, w / 2, sub ? h * 0.42 : h / 2);
-    if (sub) {
-      g.font = `700 36px ${FONT}`;
-      g.fillStyle = '#dfe8f5';
-      g.fillText(sub, w / 2, h * 0.8);
+  const c = makeCanvas(512, 512);
+  const g = c.getContext('2d');
+  g.fillStyle = color;
+  g.globalAlpha = 0.85;
+  g.font = `700 ${300}px ${STENCIL}`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(letter, 256, 270);
+  g.lineWidth = 14;
+  g.strokeStyle = color;
+  g.strokeRect(40, 40, 432, 432);
+  // 닳은 페인트: 군데군데 지우기
+  g.globalCompositeOperation = 'destination-out';
+  const n = valueNoise(128, 128, { seed: letter.charCodeAt(0), cells: 8, octaves: 3 });
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const v = n[y * 128 + x];
+      if (v < 0.42) {
+        g.globalAlpha = Math.min(1, (0.42 - v) * 6);
+        g.fillRect(x * 4, y * 4, 4, 4);
+      }
     }
-  });
+  }
+  return toTexture(c);
 }
 
-// 이름표·라벨용 스프라이트 텍스처
-export function labelTexture(text, color = '#ffffff', { bg = 'rgba(8,12,20,0.7)', size = 44, width = 320 } = {}) {
-  return canvasTexture(width, 96, (g, w, h) => {
-    g.clearRect(0, 0, w, h);
-    g.font = `800 ${size}px ${FONT}`;
-    const tw = Math.min(w - 8, g.measureText(text).width + 40);
-    if (bg) {
-      roundRect(g, (w - tw) / 2, 14, tw, h - 28, 18);
-      g.fillStyle = bg;
-      g.fill();
-    }
-    g.fillStyle = color;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(text, w / 2, h / 2 + 2);
-  });
+// 벽에 스프레이로 쓴 표시 (투명 배경)
+export function sprayTexture(text, sub = '', color = '#e8e2d0') {
+  const c = makeCanvas(512, 256);
+  const g = c.getContext('2d');
+  g.fillStyle = color;
+  g.shadowColor = color;
+  g.shadowBlur = 6;
+  g.font = `700 ${sub ? 128 : 150}px ${STENCIL}`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 256, sub ? 104 : 128);
+  if (sub) {
+    g.shadowBlur = 3;
+    g.font = `600 40px ${FONT}`;
+    g.fillText(sub, 256, 200);
+  }
+  // 흘러내린 페인트
+  const r = rng(text.charCodeAt(0) + 3);
+  g.shadowBlur = 0;
+  for (let i = 0; i < 7; i++) {
+    const x = 160 + r() * 200, y = 150 + r() * 20, len = 10 + r() * 50;
+    g.fillRect(x, y, 3, len);
+  }
+  return toTexture(c);
 }
 
-// 부드러운 빛 점 (파티클·총구 화염)
+// 벽에 붙인 교범(코팅된 작전 문서)
+export function posterTexture({ title, no, lines, icon }) {
+  const c = makeCanvas(512, 704);
+  const g = c.getContext('2d');
+  paintNoise(g, 512, 704, [214, 209, 194], 8, { seed: no * 7 + 1, cells: 4, octaves: 3 });
+  g.fillStyle = '#1d2024';
+  g.fillRect(0, 0, 512, 110);
+  g.fillStyle = '#c9c3b2';
+  g.font = `600 22px ${STENCIL}`;
+  g.textAlign = 'left';
+  g.fillText(`FIELD MANUAL · FM-${String(no).padStart(2, '0')}`, 28, 40);
+  g.font = `700 52px ${FONT}`;
+  g.fillStyle = '#f0ece2';
+  g.fillText(title, 28, 92);
+  if (icon) icon(g, 256, 270);
+  g.fillStyle = '#23262a';
+  g.font = `600 28px ${FONT}`;
+  lines.forEach((l, i) => g.fillText(l, 28, 460 + i * 48));
+  g.strokeStyle = 'rgba(30,30,30,0.5)';
+  g.lineWidth = 2;
+  g.strokeRect(14, 124, 484, 290);
+  g.fillStyle = 'rgba(30,30,30,0.6)';
+  g.font = `500 18px ${STENCIL}`;
+  g.fillText('FORCE BOUND RESEARCH FACILITY  ·  DISTRIBUTION: ALL UNITS', 28, 676);
+  return toTexture(c);
+}
+
+// 이름표용 스프라이트 텍스처
+export function labelTexture(text, color = '#ffffff') {
+  const c = makeCanvas(320, 72);
+  const g = c.getContext('2d');
+  g.font = `600 34px ${FONT}`;
+  const tw = Math.min(300, g.measureText(text).width + 26);
+  g.fillStyle = 'rgba(8,10,12,0.72)';
+  g.fillRect((320 - tw) / 2, 12, tw, 48);
+  g.fillStyle = color;
+  g.fillRect((320 - tw) / 2, 12, 4, 48);
+  g.fillStyle = '#e8eaec';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 162, 37);
+  return toTexture(c);
+}
+
+// 부드러운 빛 점 (파티클)
 export function glowTexture() {
-  return canvasTexture(128, 128, (g, w, h) => {
-    const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
-    grd.addColorStop(0, 'rgba(255,255,255,1)');
-    grd.addColorStop(0.25, 'rgba(255,255,255,0.75)');
-    grd.addColorStop(0.6, 'rgba(255,255,255,0.15)');
-    grd.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, w, h);
-  }, { srgb: false });
+  const c = makeCanvas(128, 128);
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.25, 'rgba(255,255,255,0.7)');
+  grd.addColorStop(0.6, 'rgba(255,255,255,0.12)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  return toTexture(c, { srgb: false });
 }
 
-export function flashTexture() {
-  return canvasTexture(256, 256, (g, w, h) => {
-    g.translate(w / 2, h / 2);
-    for (let i = 0; i < 7; i++) {
-      g.rotate((Math.PI * 2) / 7);
-      const grd = g.createLinearGradient(0, 0, w * 0.48, 0);
-      grd.addColorStop(0, 'rgba(255,240,200,1)');
-      grd.addColorStop(1, 'rgba(255,160,60,0)');
-      g.fillStyle = grd;
-      g.beginPath();
-      g.moveTo(0, -10);
-      g.lineTo(w * 0.48, 0);
-      g.lineTo(0, 10);
-      g.fill();
+// 연기 덩어리
+export function smokeTexture() {
+  const c = makeCanvas(128, 128);
+  const g = c.getContext('2d');
+  const n = valueNoise(128, 128, { seed: 77, cells: 4, octaves: 4 });
+  const img = g.createImageData(128, 128);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const d = Math.hypot(x - 64, y - 64) / 64;
+      const a = Math.max(0, 1 - d) ** 1.5 * (0.4 + n[y * 128 + x] * 0.8);
+      const i = (y * 128 + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = Math.min(255, a * 255);
     }
-    const grd = g.createRadialGradient(0, 0, 0, 0, 0, w * 0.3);
-    grd.addColorStop(0, 'rgba(255,255,240,1)');
-    grd.addColorStop(1, 'rgba(255,190,90,0)');
+  }
+  g.putImageData(img, 0, 0);
+  return toTexture(c, { srgb: false });
+}
+
+// 총구 화염 (별 모양 + 중심 섬광)
+export function flashTexture() {
+  const c = makeCanvas(256, 256);
+  const g = c.getContext('2d');
+  g.translate(128, 128);
+  const r = rng(5);
+  for (let i = 0; i < 9; i++) {
+    g.rotate((Math.PI * 2) / 9 + (r() - 0.5) * 0.3);
+    const len = 70 + r() * 55;
+    const grd = g.createLinearGradient(0, 0, len, 0);
+    grd.addColorStop(0, 'rgba(255,244,214,1)');
+    grd.addColorStop(0.5, 'rgba(255,186,90,0.7)');
+    grd.addColorStop(1, 'rgba(255,120,40,0)');
     g.fillStyle = grd;
-    g.fillRect(-w / 2, -h / 2, w, h);
-  }, { srgb: false });
+    g.beginPath();
+    g.moveTo(0, -9);
+    g.lineTo(len, 0);
+    g.lineTo(0, 9);
+    g.fill();
+  }
+  const grd = g.createRadialGradient(0, 0, 0, 0, 0, 60);
+  grd.addColorStop(0, 'rgba(255,255,245,1)');
+  grd.addColorStop(0.5, 'rgba(255,210,140,0.55)');
+  grd.addColorStop(1, 'rgba(255,160,60,0)');
+  g.fillStyle = grd;
+  g.fillRect(-128, -128, 256, 256);
+  return toTexture(c, { srgb: false });
 }
 
 export function holeTexture() {
-  return canvasTexture(64, 64, (g, w, h) => {
-    const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
-    grd.addColorStop(0, 'rgba(10,10,12,0.95)');
-    grd.addColorStop(0.35, 'rgba(20,20,24,0.8)');
-    grd.addColorStop(0.6, 'rgba(40,40,46,0.3)');
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, w, h);
-  });
+  const c = makeCanvas(64, 64);
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(8,8,8,0.95)');
+  grd.addColorStop(0.3, 'rgba(18,18,18,0.85)');
+  grd.addColorStop(0.55, 'rgba(60,58,54,0.35)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  return toTexture(c);
 }
 
-// 폭탄 화면 (남은 시간 표시). 매초 다시 그림.
+// 폭탄 화면 (남은 시간). 값이 바뀔 때만 다시 그림.
 export function createBombScreen() {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 128;
+  const c = makeCanvas(256, 128);
   const g = c.getContext('2d');
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const draw = (text, color, sub) => {
-    g.fillStyle = '#05070a';
+    g.fillStyle = '#050605';
     g.fillRect(0, 0, 256, 128);
-    g.strokeStyle = color;
-    g.lineWidth = 6;
-    g.strokeRect(3, 3, 250, 122);
     g.fillStyle = color;
-    g.font = `900 64px ${FONT}`;
+    g.globalAlpha = 0.08;
+    for (let y = 0; y < 128; y += 3) g.fillRect(0, y, 256, 1);
+    g.globalAlpha = 1;
+    g.font = `700 70px ${STENCIL}`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(text, 128, 56);
-    g.font = `700 22px ${FONT}`;
-    g.fillText(sub, 128, 104);
+    g.font = `500 20px ${FONT}`;
+    g.fillText(sub, 128, 106);
     tex.needsUpdate = true;
   };
   return { texture: tex, draw };

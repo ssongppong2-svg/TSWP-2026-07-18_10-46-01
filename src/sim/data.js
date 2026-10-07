@@ -1,4 +1,4 @@
-// 총기와 포스 패치 정의. 과학 개념 설명은 중1 과학 「힘」 단원 내용을 기준으로 썼습니다.
+// 총기와 포스 패치 정의. 과학 개념 설명은 중학교 과학 「힘」 단원 내용을 기준으로 작성.
 
 export const WEAPONS = {
   rifle: {
@@ -12,17 +12,25 @@ export const WEAPONS = {
     headMult: 2,
     magSize: 25,
     reserve: 75,
-    reload: 2.2,
+    reload: 2.4,
+    draw: 0.6,
     speed: 160, // 투사체 속력(m/s)
     spreadBase: 0.004,
-    spreadMove: 0.035,
-    spreadAir: 0.08,
-    bloomPerShot: 0.006,
-    bloomMax: 0.04,
+    spreadMove: 0.045,
+    spreadAir: 0.09,
+    bloomPerShot: 0.005,
+    bloomMax: 0.035,
     bloomRecover: 0.15,
-    recoilKick: 0.012,
-    recoilMax: 0.09,
-    recoilRecover: 0.25,
+    // 연사 반동 패턴 (발사 순서별 상하·좌우 반동, 라디안)
+    recoilPitch: [0.006, 0.009, 0.012, 0.014, 0.015, 0.015, 0.014, 0.012, 0.01, 0.008, 0.007],
+    recoilYaw: [0, 0, 0, 0, 0.002, 0.004, 0.006, 0.005, -0.003, -0.007, -0.009, -0.007, 0.003, 0.007, 0.009, 0.006, -0.004],
+    recoilMax: 0.12,
+    recoilYawMax: 0.05,
+    recoilRecover: 0.32,
+    adsSpread: 0.35,
+    adsRecoil: 0.75,
+    adsZoom: 1.35,
+    crouchSpread: 0.75,
   },
   pistol: {
     id: 'pistol',
@@ -35,29 +43,56 @@ export const WEAPONS = {
     headMult: 2,
     magSize: 12,
     reserve: 36,
-    reload: 1.5,
+    reload: 1.6,
+    draw: 0.4,
     speed: 120,
     spreadBase: 0.005,
-    spreadMove: 0.02,
-    spreadAir: 0.06,
-    bloomPerShot: 0.015,
+    spreadMove: 0.025,
+    spreadAir: 0.07,
+    bloomPerShot: 0.014,
     bloomMax: 0.035,
     bloomRecover: 0.12,
-    recoilKick: 0.02,
-    recoilMax: 0.06,
-    recoilRecover: 0.3,
+    recoilPitch: [0.022],
+    recoilYaw: [0.004, -0.004, 0.003, -0.005],
+    recoilMax: 0.07,
+    recoilYawMax: 0.02,
+    recoilRecover: 0.36,
+    adsSpread: 0.6,
+    adsRecoil: 0.8,
+    adsZoom: 1.15,
+    crouchSpread: 0.8,
+  },
+  knife: {
+    id: 'knife',
+    slot: 3,
+    name: '전술 나이프',
+    kind: '근접',
+    melee: true,
+    draw: 0.3,
+    light: { damage: 50, rate: 0.55, range: 2.1 },
+    heavy: { damage: 80, rate: 1.0, range: 1.9 },
+    backstabMult: 1.5,
   },
 };
 
-export const WEAPON_ORDER = ['rifle', 'pistol'];
+export const WEAPON_ORDER = ['rifle', 'pistol', 'knife'];
 
 export const PATCH_TIERS = {
-  normal: { name: '일반', color: '#8fb8ff' },
-  special: { name: '특수', color: '#c48cff' },
-  ultimate: { name: '필살', color: '#ffcf4a' },
+  normal: { name: '일반', color: '#9db4cf' },
+  special: { name: '특수', color: '#b59adf' },
+  ultimate: { name: '필살', color: '#e3c26a' },
 };
 
+// 개인 장착 슬롯: C·Q = 일반, E = 특수, X = 필살
+export const LOADOUT_SLOTS = [
+  { key: 'C', tier: 'normal' },
+  { key: 'Q', tier: 'normal' },
+  { key: 'E', tier: 'special' },
+  { key: 'X', tier: 'ultimate' },
+];
+
 export const PATCHES = {
+  // ── 일반 ──
   gravityVeil: {
     id: 'gravityVeil',
     name: '중력 강화장막',
@@ -65,24 +100,22 @@ export const PATCHES = {
     cooldown: 18,
     duration: 3,
     radius: 5,
-    short: '3초 동안 주변 투사체 정지',
-    desc: '3초 동안 내 주변(반경 5m)의 모든 투사체를 서서히 멈추게 해요. 장막이 사라지면 멈춘 투사체는 바닥으로 떨어져요. 장막 안에서는 내 총알도 멈춰요.',
+    short: '반경 5m 투사체 정지 · 3초',
+    desc: '3초간 반경 5m 내 모든 투사체를 감속·정지시킨다. 종료 시 정지한 투사체는 낙하한다. 장막 내부에서는 아군 사격도 정지된다.',
     concept: '중력',
-    conceptText:
-      '중력은 지구가 물체를 당기는 힘이에요. 방향은 항상 지구 중심 쪽(아래)이고, 크기는 무게(N)로 나타내요. 장막이 끝나면 멈춰 있던 투사체가 아래로 떨어지는 것도 중력 때문이에요.',
+    conceptText: '지구가 물체를 지구 중심 방향으로 당기는 힘. 크기는 무게(단위 N)로 나타낸다. 장막 종료 후 투사체가 낙하하는 것은 중력 때문이다.',
   },
   elasticPad: {
     id: 'elasticPad',
     name: '탄성판',
     tier: 'normal',
-    cooldown: 9,
-    launchSpeed: 12,
-    launchUp: 10.5,
-    short: '탄성력으로 빠르게 도약',
-    desc: '발밑에 탄성판을 펼쳐 바라보는 방향으로 빠르게 튀어 올라요. 높은 상자 위로도 올라갈 수 있어요.',
+    cooldown: 10,
+    launchSpeed: 11,
+    launchUp: 10,
+    short: '조준 방향 고속 도약',
+    desc: '발밑에 탄성판을 전개해 조준 방향으로 도약한다. 대형 컨테이너 상단 진입 가능.',
     concept: '탄성력',
-    conceptText:
-      '탄성력은 모양이 변한 물체가 원래 모양으로 되돌아가려는 힘이에요. 탄성체를 누른 방향과 반대 방향으로 작용하고, 많이 변형될수록 커져요. 눌렸던 탄성판이 펴지면서 몸을 위로 밀어 올려요.',
+    conceptText: '변형된 물체가 원래 형태로 복원하려는 힘. 변형시킨 힘의 반대 방향으로 작용하며, 변형이 클수록 커진다.',
   },
   resultantAmp: {
     id: 'resultantAmp',
@@ -91,12 +124,37 @@ export const PATCHES = {
     cooldown: 18,
     duration: 5,
     bonus: 3,
-    short: '5초 동안 소총 공격력 +3',
-    desc: '5초 동안 소총 공격력이 3 올라가요(24 → 27). 몸통 5발이 필요하던 적을 4발로 쓰러뜨릴 수 있어요.',
+    short: '소총 공격력 +3 · 5초',
+    desc: '5초간 소총 공격력 +3 (24 → 27). 몸통 기준 제압 탄수 5발 → 4발.',
     concept: '합력',
-    conceptText:
-      '여러 힘이 함께 작용할 때 같은 효과를 내는 하나의 힘을 합력이라고 해요. 같은 방향으로 작용하는 두 힘의 합력은 두 힘의 크기를 더한 값이에요. 24 N과 3 N이 같은 방향이면 합력은 27 N!',
+    conceptText: '두 힘이 같은 방향으로 작용하면 합력의 크기는 두 힘의 합이고, 방향은 두 힘의 방향과 같다. 24 N + 3 N = 27 N.',
   },
+  reactionRounds: {
+    id: 'reactionRounds',
+    name: '작용·반작용 도탄',
+    tier: 'normal',
+    cooldown: 20,
+    duration: 6,
+    short: '탄 1회 반사 · 6초',
+    desc: '6초간 발사한 탄이 벽·바닥에 맞으면 1회 반사된다(반사 후 위력 85%). 엄폐물 뒤 목표 공략용.',
+    concept: '작용·반작용',
+    conceptText: 'A가 B에 힘을 가하면 B도 A에 크기가 같고 방향이 반대인 힘을 가한다. 탄이 벽을 밀면 벽도 같은 크기의 힘으로 탄을 밀어낸다.',
+  },
+  buoyShield: {
+    id: 'buoyShield',
+    name: '부력 방패',
+    tier: 'normal',
+    cooldown: 24,
+    duration: 10,
+    hp: 220,
+    width: 2.2,
+    height: 2.0,
+    short: '부유 방탄판 전개 · 10초',
+    desc: '전방 2m에 떠 있는 방탄판을 전개한다. 내구도 220, 10초 유지. 양 팀의 탄을 모두 막는다.',
+    concept: '부력',
+    conceptText: '액체나 기체가 그 속의 물체를 위쪽으로 밀어 올리는 힘. 기체 속에서도 작용한다(풍선). 방탄판은 부력 장치로 공중에 떠 있다.',
+  },
+  // ── 특수 ──
   frictionZero: {
     id: 'frictionZero',
     name: '마찰 제로 필드',
@@ -105,12 +163,39 @@ export const PATCHES = {
     duration: 6,
     radius: 5,
     range: 25,
-    short: '6초 동안 적을 미끄러지게 함',
-    desc: '조준한 바닥(최대 25m)에 6초 동안 마찰력이 0인 구역을 만들어요. 구역 안의 적은 미끄러져서 마음대로 멈추거나 방향을 바꾸지 못해요.',
+    short: '마찰력 0 구역 · 6초',
+    desc: '지정 지점(최대 25m)에 반경 5m 마찰력 0 구역을 6초간 생성한다. 구역 내 적은 정지·방향 전환 불가.',
     concept: '마찰력',
-    conceptText:
-      '마찰력은 맞닿은 두 면 사이에서 물체의 운동을 방해하는 힘이에요. 운동 방향과 반대로 작용하고, 면이 거칠수록·무게가 클수록 커요. 마찰력이 0이면 움직이던 물체는 멈추지 못하고 계속 미끄러져요.',
+    conceptText: '접촉면에서 물체의 운동을 방해하는 힘. 운동 방향의 반대로 작용하며, 면이 거칠수록·무게가 클수록 커진다. 마찰력이 0이면 운동 상태가 유지된다.',
   },
+  elasticNet: {
+    id: 'elasticNet',
+    name: '탄성 그물',
+    tier: 'special',
+    cooldown: 30,
+    radius: 3.5,
+    range: 20,
+    holdTime: 1.2,
+    throwSpeed: 9,
+    throwUp: 6,
+    short: '적 구속 후 튕겨냄',
+    desc: '지정 지점(최대 20m)에 그물을 투척한다. 반경 3.5m 내 적을 1.2초간 구속한 뒤 바깥쪽으로 튕겨낸다.',
+    concept: '탄성력',
+    conceptText: '늘어난 그물은 원래 형태로 돌아가려 하며 붙잡은 물체를 밀어낸다. 많이 늘어날수록 미는 힘이 크다.',
+  },
+  weightScanner: {
+    id: 'weightScanner',
+    name: '무게 감지기',
+    tier: 'special',
+    cooldown: 30,
+    radius: 28,
+    duration: 4,
+    short: '반경 28m 적 탐지 · 4초',
+    desc: '바닥에 가해지는 힘(무게)을 감지해 반경 28m 내 적 위치를 4초간 아군에게 표시한다. 벽 너머도 탐지.',
+    concept: '무게',
+    conceptText: '무게는 물체에 작용하는 중력의 크기이며 단위는 N이다. 질량 1 kg인 물체의 무게는 약 9.8 N이다.',
+  },
+  // ── 필살 ──
   gravityCollapse: {
     id: 'gravityCollapse',
     name: '중력 붕괴',
@@ -119,19 +204,46 @@ export const PATCHES = {
     range: 35,
     pullTime: 0.8,
     holdTime: 3,
-    short: '적을 끌어당겨 3초 묶기',
-    desc: '조준한 지점(최대 35m)에 아주 강한 중력을 만들어 반경 8m 안의 적을 끌어당기고 3초 동안 묶어둬요. 처치·피해·해체로 게이지를 100% 채워야 쓸 수 있어요.',
+    short: '적 견인·구속 3초',
+    desc: '지정 지점(최대 35m)에 고중력 지점을 생성한다. 반경 8m 내 적을 끌어당겨 3초간 구속한다.',
     concept: '중력',
-    conceptText:
-      '질량이 있는 물체는 서로 끌어당겨요. 지구처럼 질량이 아주 큰 물체일수록 더 세게 당기죠. 중력 붕괴는 한 점에 엄청나게 큰 중력을 만들어 주변의 적을 끌어당겨요.',
+    conceptText: '질량을 가진 물체는 서로 끌어당긴다. 질량이 클수록 당기는 힘이 크다.',
+  },
+  resultantSurge: {
+    id: 'resultantSurge',
+    name: '합력 폭주',
+    tier: 'ultimate',
+    duration: 8,
+    short: '분대 전원 소총 +3 · 8초',
+    desc: '생존한 아군 전원의 소총 공격력을 8초간 +3 강화한다.',
+    concept: '합력',
+    conceptText: '여러 힘이 같은 방향으로 작용하면 합력은 각 힘의 합이 된다. 분대 전원의 화력을 한 방향으로 집중한다.',
+  },
+  frictionStorm: {
+    id: 'frictionStorm',
+    name: '마찰 폭풍',
+    tier: 'ultimate',
+    radius: 9,
+    range: 40,
+    duration: 7,
+    short: '광역 이동 둔화 · 7초',
+    desc: '지정 지점(최대 40m) 반경 9m를 7초간 고마찰 구역으로 만든다. 구역 내 적 이동 속도 70% 감소, 점프 불가.',
+    concept: '마찰력',
+    conceptText: '접촉면이 거칠수록 마찰력이 커져 운동을 크게 방해한다. 마찰력은 운동 방향의 반대로 작용한다.',
   },
 };
 
-export const PATCH_ORDER = ['gravityVeil', 'elasticPad', 'resultantAmp', 'frictionZero', 'gravityCollapse'];
+export const PATCH_ORDER = [
+  'gravityVeil', 'elasticPad', 'resultantAmp', 'reactionRounds', 'buoyShield',
+  'frictionZero', 'elasticNet', 'weightScanner',
+  'gravityCollapse', 'resultantSurge', 'frictionStorm',
+];
 
-// 합력 락픽 설명 (결과 화면/락픽 화면에서 사용)
+export const patchesOfTier = (tier) => PATCH_ORDER.filter((id) => PATCHES[id].tier === tier);
+
+// 합력 락픽 설명 (결과 화면·락픽 화면)
 export const LOCKPICK_CONCEPT = {
   concept: '힘의 합성',
   conceptText:
-    '같은 방향으로 작용하는 두 힘은 크기를 더하고, 반대 방향으로 작용하는 두 힘은 큰 힘에서 작은 힘을 빼요. 이때 합력의 방향은 큰 힘의 방향이에요.',
+    '같은 방향의 두 힘: 크기를 더한다. 반대 방향의 두 힘: 큰 힘에서 작은 힘을 뺀다. 합력의 방향은 큰 힘의 방향이다.',
 };

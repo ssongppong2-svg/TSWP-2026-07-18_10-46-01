@@ -21,6 +21,8 @@ export class Input {
       keydown: (e) => {
         if (!this.enabled) return;
         if (['Tab', 'Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+        // 앉기(Ctrl)를 누른 채 다른 키를 눌러도 브라우저 단축키(저장·북마크 등)가 실행되지 않게
+        if (e.ctrlKey && (this.locked || this.fallback)) e.preventDefault();
         if (!this.down.has(e.code)) this.pressed.push(e.code);
         this.down.add(e.code);
       },
@@ -149,7 +151,7 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false], interact: false, reload: false, switchTo: null, cards: [] };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [] };
     this.lastDx = 0;
     this.lastDy = 0;
   }
@@ -164,7 +166,8 @@ export class PlayerController {
     const { dx, dy } = this.input.takeMouse();
     this.lastDx = dx;
     this.lastDy = dy;
-    const sens = 0.0022 * (this.settings.sensitivity ?? 1);
+    const zoom = 1 + ((agent?.adsT ?? 0) * ((this.zoomOf?.(agent) ?? 1) - 1));
+    const sens = (0.0022 * (this.settings.sensitivity ?? 1)) / zoom;
     this.yaw -= dx * sens;
     this.pitch -= dy * sens * (this.settings.invertY ? -1 : 1);
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
@@ -175,15 +178,19 @@ export class PlayerController {
         this.queue.cards.push(digit - 1);
         continue;
       }
-      if (code === 'KeyQ') this.queue.patch[0] = true;
-      else if (code === 'KeyE') this.queue.patch[1] = true;
+      const slot = { KeyC: 0, KeyQ: 1, KeyE: 2, KeyX: 3 }[code];
+      if (slot !== undefined) this.queue.patch[slot] = true;
       else if (code === 'KeyF') this.queue.interact = true;
       else if (code === 'KeyR') this.queue.reload = true;
       else if (digit === 1) this.queue.switchTo = 'rifle';
       else if (digit === 2) this.queue.switchTo = 'pistol';
+      else if (digit === 3) this.queue.switchTo = 'knife';
     }
     const w = this.input.takeWheel();
-    if (w && agent && !agent.lockpick) this.queue.switchTo = agent.weapon === 'rifle' ? 'pistol' : 'rifle';
+    if (w && agent && !agent.lockpick) {
+      const order = ['rifle', 'pistol', 'knife'];
+      this.queue.switchTo = order[(order.indexOf(agent.weapon) + (w > 0 ? 1 : 2)) % 3];
+    }
   }
 
   getIntent(match, agent) {
@@ -197,7 +204,10 @@ export class PlayerController {
       i.moveX = (inp.isDown('KeyD') ? 1 : 0) - (inp.isDown('KeyA') ? 1 : 0);
       i.walk = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
       i.jump = inp.isDown('Space');
+      i.crouch = inp.isDown('ControlLeft') || inp.isDown('ControlRight');
+      i.lean = (inp.isDown('KeyV') ? 1 : 0) - (inp.isDown('KeyZ') ? 1 : 0);
       i.fire = (inp.buttons & 1) !== 0;
+      i.ads = (inp.buttons & 4) !== 0;
     }
     const q = this.queue;
     i.patch = q.patch;
@@ -205,7 +215,7 @@ export class PlayerController {
     i.reload = q.reload;
     i.switchTo = q.switchTo;
     i.card = q.cards.length ? q.cards.shift() : -1;
-    this.queue = { patch: [false, false], interact: false, reload: false, switchTo: null, cards: q.cards };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards };
     return i;
   }
 }

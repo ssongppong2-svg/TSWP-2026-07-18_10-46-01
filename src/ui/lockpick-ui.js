@@ -15,7 +15,7 @@ function arrow(x1, x2, y, color, width, label, dashed = false) {
     ${label ? `<text x="${(x1 + x2) / 2}" y="${y - width - 8}" fill="${color}" text-anchor="middle">${label}</text>` : ''}`;
 }
 
-// 합력 락픽 창: 힘 카드를 골라 합력을 목표와 똑같이 맞추면 해체!
+// 합력 락픽 창: 힘 카드를 골라 합력을 목표와 일치시키면 해체 진행
 export class LockpickUI {
   constructor(root) {
     this.root = document.createElement('div');
@@ -56,16 +56,16 @@ export class LockpickUI {
     this.root.innerHTML = `
       <div class="lp-panel">
         <header>
-          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 합력 자물쇠</div>
-          <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 카드 선택 · <kbd>F</kbd> 그만두기 · 맞으면 처음부터!</div>
+          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · 합력 잠금 해제</div>
+          <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 힘 카드 · <kbd>F</kbd> 중단 · 피격 시 초기화</div>
         </header>
-        <div class="lp-target">목표 합력 <b>${describeForce(lp.puzzle.target)}</b></div>
+        <div class="lp-target"><small>요구 합력</small><b>${describeForce(lp.puzzle.target)}</b></div>
         <div class="lp-svg"></div>
         <div class="lp-formula"></div>
         <div class="lp-cards"></div>
         <div class="lp-hint"></div>
         <div class="lp-turn"><i></i></div>
-        <footer><b>${LOCKPICK_CONCEPT.concept}</b> ${LOCKPICK_CONCEPT.conceptText}</footer>
+        <footer><b>교범 · ${LOCKPICK_CONCEPT.concept}</b> ${LOCKPICK_CONCEPT.conceptText}</footer>
       </div>`;
     const $ = (sel) => this.root.querySelector(sel);
     this.els = { panel: $('.lp-panel'), svg: $('.lp-svg'), formula: $('.lp-formula'), cards: $('.lp-cards'), hint: $('.lp-hint') };
@@ -80,7 +80,7 @@ export class LockpickUI {
     let ticks = '';
     for (let n = -20; n <= 20; n += 1) {
       const major = n % 5 === 0;
-      ticks += `<line x1="${xOf(n)}" y1="${AXIS - (major ? 8 : 4)}" x2="${xOf(n)}" y2="${AXIS + (major ? 8 : 4)}" stroke="rgba(255,255,255,${major ? 0.5 : 0.22})" stroke-width="${major ? 2 : 1}"/>`;
+      ticks += `<line x1="${xOf(n)}" y1="${AXIS - (major ? 8 : 4)}" x2="${xOf(n)}" y2="${AXIS + (major ? 8 : 4)}" stroke="rgba(220,226,232,${major ? 0.5 : 0.2})" stroke-width="${major ? 2 : 1}"/>`;
       if (major) ticks += `<text x="${xOf(n)}" y="${AXIS + 26}" text-anchor="middle" class="tick">${n === 0 ? '0' : signed(n)}</text>`;
     }
     // 고른 힘을 꼬리-머리로 이어 그리기 (힘의 합성)
@@ -90,22 +90,22 @@ export class LockpickUI {
     puzzle.cards.forEach((c, i) => {
       if (!selected[i]) return;
       const v = c.dir * c.mag;
-      chain += arrow(xOf(at), xOf(at + v), 78 + lane * 28, c.dir > 0 ? '#6fd3ff' : '#ff8fb1', 4, `${i + 1}번 ${signed(v)}`);
+      chain += arrow(xOf(at), xOf(at + v), 78 + lane * 28, c.dir > 0 ? '#7fb8c9' : '#d08a6a', 3, `#${i + 1} ${signed(v)}`);
       at += v;
       lane = (lane + 1) % 3;
     });
-    const resultColor = solved ? '#4dff9a' : '#ffd23a';
+    const resultColor = solved ? '#6fcf8e' : '#e3b341';
     this.els.svg.innerHTML = `
       <svg viewBox="0 0 ${W} 232" class="numberline">
-        <text x="${xOf(-20)}" y="22" class="dir">← 왼쪽 (−)</text>
-        <text x="${xOf(20)}" y="22" class="dir" text-anchor="end">오른쪽 (+) →</text>
-        <text x="${xOf(target)}" y="34" text-anchor="middle" class="goal">목표 ${signed(target)} N</text>
-        <line x1="${xOf(target)}" y1="42" x2="${xOf(target)}" y2="${AXIS}" stroke="#ffffff" stroke-opacity=".55" stroke-width="2" stroke-dasharray="4 5"/>
+        <text x="${xOf(-20)}" y="22" class="dir">← 좌 (−)</text>
+        <text x="${xOf(20)}" y="22" class="dir" text-anchor="end">우 (+) →</text>
+        <text x="${xOf(target)}" y="34" text-anchor="middle" class="goal">요구 ${signed(target)} N</text>
+        <line x1="${xOf(target)}" y1="42" x2="${xOf(target)}" y2="${AXIS}" stroke="#dfe4e8" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 5"/>
         ${chain}
-        <line x1="${xOf(-20)}" y1="${AXIS}" x2="${xOf(20)}" y2="${AXIS}" stroke="rgba(255,255,255,.35)" stroke-width="2"/>
+        <line x1="${xOf(-20)}" y1="${AXIS}" x2="${xOf(20)}" y2="${AXIS}" stroke="rgba(220,226,232,.35)" stroke-width="2"/>
         ${ticks}
-        ${arrow(xOf(0), xOf(net), AXIS - 22, resultColor, 7, net ? `합력 ${signed(net)} N` : '')}
-        <circle cx="${xOf(0)}" cy="${AXIS}" r="4" fill="#fff"/>
+        ${arrow(xOf(0), xOf(net), AXIS - 22, resultColor, 6, net ? `합력 ${signed(net)} N` : '')}
+        <rect x="${xOf(0) - 3}" y="${AXIS - 3}" width="6" height="6" fill="#dfe4e8"/>
       </svg>`;
 
     this.els.cards.innerHTML = puzzle.cards
@@ -121,9 +121,9 @@ export class LockpickUI {
       .join('');
 
     let hint;
-    if (solved) hint = '합력이 목표와 같아요! 자물쇠가 돌아가는 중…';
-    else if (!selected.some(Boolean)) hint = '숫자 키(1~6)로 힘 카드를 골라 보세요.';
-    else hint = `목표까지 ${describeForce(target - net)} 만큼 더 필요해요.`;
+    if (solved) hint = '합력 일치. 잠금 해제 진행 중 — 위치 유지.';
+    else if (!selected.some(Boolean)) hint = '숫자 키 1~6으로 힘 카드 선택.';
+    else hint = `편차 ${describeForce(target - net)}. 보정 필요.`;
     this.els.formula.textContent = formula(puzzle, selected);
     this.els.hint.textContent = hint;
     this.els.panel.classList.toggle('solved', solved);

@@ -1,12 +1,12 @@
 import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
-import { emptyIntent, eyePos } from '../sim/agent.js';
-import { PLAYER, TEAMS } from '../sim/constants.js';
+import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
+import { TEAMS } from '../sim/constants.js';
 import { PATCHES, WEAPONS } from '../sim/data.js';
 
 export const DIFFICULTY = {
-  easy: { name: '쉬움', reaction: 0.6, aimError: 0.075, turnSpeed: 4.5, headChance: 0.1, burst: [2, 4], lead: 0.3, recoilComp: 0.3, patchSkill: 0.45, holdFireVeil: false },
-  normal: { name: '보통', reaction: 0.4, aimError: 0.045, turnSpeed: 7, headChance: 0.22, burst: [3, 5], lead: 0.6, recoilComp: 0.6, patchSkill: 0.75, holdFireVeil: true },
-  hard: { name: '어려움', reaction: 0.25, aimError: 0.025, turnSpeed: 11, headChance: 0.4, burst: [4, 7], lead: 0.9, recoilComp: 0.85, patchSkill: 1, holdFireVeil: true },
+  easy: { name: '신병', reaction: 0.6, aimError: 0.075, turnSpeed: 4.5, headChance: 0.1, burst: [2, 4], lead: 0.3, recoilComp: 0.3, patchSkill: 0.45, holdFireVeil: false },
+  normal: { name: '정규', reaction: 0.4, aimError: 0.045, turnSpeed: 7, headChance: 0.22, burst: [3, 5], lead: 0.6, recoilComp: 0.6, patchSkill: 0.75, holdFireVeil: true },
+  hard: { name: '정예', reaction: 0.25, aimError: 0.025, turnSpeed: 11, headChance: 0.4, burst: [4, 7], lead: 0.9, recoilComp: 0.85, patchSkill: 1, holdFireVeil: true },
 };
 
 const anglesTo = (from, to) => anglesFromDir({ x: to.x - from.x, y: to.y - from.y, z: to.z - from.z });
@@ -47,6 +47,7 @@ export class BotBrain {
     this.scanT = 0;
     this.scanOffset = 0;
     this.wantLockpick = false;
+    this.crouchShooter = this.rng.chance(0.45);
     this.assignRoles(agent, match);
   }
 
@@ -98,11 +99,12 @@ export class BotBrain {
       const tp = visible ? target.pos : this.lastSeen;
       const d = Math.hypot(tp.x - eye.x, tp.z - eye.z);
       const lead = visible ? (d / w.speed) * this.d.lead : 0;
-      const aimY = this.aimHead ? PLAYER.headY : 1.15;
+      // 머리·가슴 높이는 상대가 앉았는지·기울였는지 반영
+      const aimAt = visible ? (this.aimHead ? eyePos(target) : chestPos(target)) : { x: tp.x, y: tp.y + 1.15, z: tp.z };
       desired = anglesTo(eye, {
-        x: tp.x + (visible ? target.vel.x * lead : 0),
-        y: tp.y + aimY,
-        z: tp.z + (visible ? target.vel.z * lead : 0),
+        x: aimAt.x + (visible ? target.vel.x * lead : 0),
+        y: aimAt.y,
+        z: aimAt.z + (visible ? target.vel.z * lead : 0),
       });
     }
     if (!desired && a.lockpick) {
@@ -137,11 +139,12 @@ export class BotBrain {
 
     this.turnToward(desired, dt);
     this.updateError(dt);
-    intent.yaw = this.aimYaw + this.err.y;
-    intent.pitch = clamp(this.aimPitch + this.err.p - a.recoil * this.d.recoilComp, -1.4, 1.4);
+    // 반동·피격 반동을 실력만큼 상쇄
+    intent.yaw = this.aimYaw + this.err.y - a.recoilYaw * this.d.recoilComp;
+    intent.pitch = clamp(this.aimPitch + this.err.p - (a.recoil + a.punch) * this.d.recoilComp, -1.4, 1.4);
 
     // ── 전투
-    const veilActive = a.patches.some((p) => p.id === 'gravityVeil' && p.activeT > 0);
+    const veilActive = a.patches.some((p) => p?.id === 'gravityVeil' && p.activeT > 0);
     let engaging = false;
     if (live && visible && target && !a.lockpick) {
       engaging = true;
@@ -152,6 +155,9 @@ export class BotBrain {
       const tol = Math.max(0.03, 0.55 / Math.max(d, 1));
       if (!holdFire && this.reactLeft <= 0 && aimDiff < tol) this.shoot(a, intent, dt);
       else this.burstLeft = 0;
+      // 먼 거리는 정조준, 연사할 때는 가끔 앉아서 쏨
+      intent.ads = a.weapon === 'rifle' && d > 16;
+      if (intent.fire && d > 10 && this.crouchShooter) intent.crouch = true;
       // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 움직임
       if (!intent.fire || a.weapon === 'pistol') {
         this.strafeT -= dt;
@@ -171,9 +177,10 @@ export class BotBrain {
 
     // ── 무기 관리
     const rifle = a.weapons.rifle;
-    if (a.weapon === 'rifle' && rifle.mag + rifle.reserve === 0) intent.switchTo = 'pistol';
+    if (a.weapon === 'knife') intent.switchTo = rifle.mag + rifle.reserve > 0 ? 'rifle' : 'pistol';
+    else if (a.weapon === 'rifle' && rifle.mag + rifle.reserve === 0) intent.switchTo = 'pistol';
     else if (a.weapon === 'pistol' && rifle.mag + rifle.reserve > 0 && !engaging) intent.switchTo = 'rifle';
-    if (!engaging && a.weapons[a.weapon].mag < WEAPONS[a.weapon].magSize * 0.4) intent.reload = true;
+    if (!engaging && !WEAPONS[a.weapon].melee && a.weapons[a.weapon].mag < WEAPONS[a.weapon].magSize * 0.4) intent.reload = true;
 
     // ── 락픽
     if (live && a.team === TEAMS.DEFUSE) {
@@ -308,6 +315,13 @@ export class BotBrain {
         }
       }
     }
+    // 무게 감지기 정보: 탐지된 적이 가까우면 그쪽을 미리 겨눔
+    if (!visible && !(this.alertLook?.until > match.time)) {
+      const known = match.agents
+        .filter((e) => e.alive && e.team !== a.team && e.revealedUntil > match.time && dist2(e.pos, a.pos) < 30)
+        .sort((p, q) => dist2(p.pos, a.pos) - dist2(q.pos, a.pos))[0];
+      if (known) this.alertLook = { point: { x: known.pos.x, y: known.pos.y + 1.2, z: known.pos.z }, until: match.time + 0.6 };
+    }
     if (a.team === TEAMS.DEFUSE) this.thinkDefuser(match, a, visible);
     else this.thinkForce(match, a, visible);
     if (!a.lockpick && !a.held && !this.pending && this.rng.next() < this.d.patchSkill) this.considerPatches(match, a, target, visible);
@@ -373,18 +387,44 @@ export class BotBrain {
 
   considerPatches(match, a, target, visible) {
     const eye = eyePos(a);
+    const td = target ? dist2(target.pos, a.pos) : Infinity;
+    const seen = (a.visibleEnemies ?? []).map((id) => match.agentById(id)).filter((e) => e?.alive);
+    // 적이 뭉쳐 있거나 락픽 중인 곳 찾기
+    const bestGroup = (range, groupR) => {
+      let best = null, bestScore = 0;
+      for (const e of seen) {
+        if (dist2(e.pos, a.pos) > range - 2) continue;
+        let score = seen.filter((o) => dist2(o.pos, e.pos) < groupR).length;
+        if (e.lockpick) score += 2;
+        if (a.hp < 50) score += 1;
+        if (score > bestScore) {
+          bestScore = score;
+          best = e;
+        }
+      }
+      return { best, bestScore };
+    };
     a.patches.forEach((p, slot) => {
-      if (this.pending || this.nowPatch != null) return;
+      if (!p || this.pending || this.nowPatch != null) return;
       const def = PATCHES[p.id];
       const ready = def.tier === 'ultimate' ? a.ult >= 100 : p.cd <= 0;
       if (!ready) return;
-      const td = target ? dist2(target.pos, a.pos) : Infinity;
       switch (p.id) {
         case 'gravityVeil':
           if (match.time - a.lastHurtT < 0.5 && a.hp < 80) this.nowPatch = slot;
           break;
         case 'resultantAmp':
+        case 'reactionRounds':
           if (visible && a.weapon === 'rifle' && this.reactLeft <= 0.1 && td < 45) this.nowPatch = slot;
+          break;
+        case 'buoyShield':
+          // 맞고 있거나 락픽을 시작하기 직전이면 위협 방향으로 방패 전개
+          if (match.time - a.lastHurtT < 0.6 && a.lastHurtBy) {
+            const src = match.agentById(a.lastHurtBy);
+            if (src) this.pending = { slot, point: { x: src.pos.x, y: eye.y, z: src.pos.z }, t: 0.6, yawOnly: true };
+          } else if (this.wantLockpick && this.goal?.look) {
+            this.pending = { slot, point: { x: this.goal.look.x, y: eye.y, z: this.goal.look.z }, t: 0.6, yawOnly: true };
+          }
           break;
         case 'elasticPad': {
           if (visible || !this.path || this.pathIdx >= this.path.length) break;
@@ -396,28 +436,23 @@ export class BotBrain {
           break;
         }
         case 'frictionZero':
+        case 'elasticNet':
           if (visible && td > 5 && td < def.range - 2) {
             this.pending = { slot, point: { x: target.pos.x, y: target.pos.y + 0.05, z: target.pos.z }, t: 0.9 };
           }
           break;
-        case 'gravityCollapse': {
+        case 'weightScanner':
+          // 정보가 없을 때 주기적으로 탐지
+          if (!visible && match.time > 6 && this.rng.chance(0.25)) this.nowPatch = slot;
+          break;
+        case 'resultantSurge':
+          if (visible && match.alive(a.team).length >= 2 && td < 40) this.nowPatch = slot;
+          break;
+        case 'gravityCollapse':
+        case 'frictionStorm': {
           if (!visible) break;
-          const seen = (a.visibleEnemies ?? []).map((id) => match.agentById(id)).filter((e) => e?.alive);
-          let best = null, bestScore = 0;
-          for (const e of seen) {
-            if (dist2(e.pos, a.pos) > def.range - 2) continue;
-            const group = seen.filter((o) => dist2(o.pos, e.pos) < 6);
-            let score = group.length;
-            if (e.lockpick) score += 2;
-            if (a.hp < 50) score += 1;
-            if (score > bestScore) {
-              bestScore = score;
-              best = e;
-            }
-          }
-          if (best && bestScore >= 2) {
-            this.pending = { slot, point: { x: best.pos.x, y: best.pos.y + 0.05, z: best.pos.z }, t: 1 };
-          }
+          const { best, bestScore } = bestGroup(def.range, def.id === 'frictionStorm' ? 8 : 6);
+          if (best && bestScore >= 2) this.pending = { slot, point: { x: best.pos.x, y: best.pos.y + 0.05, z: best.pos.z }, t: 1 };
           break;
         }
         default:
