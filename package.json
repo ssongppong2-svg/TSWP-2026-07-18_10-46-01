@@ -1,0 +1,21 @@
+{
+  "name": "force-bound",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "포스 바운드 — 중1 과학 「힘」 단원으로 만든 5:5 FPS",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.3",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
