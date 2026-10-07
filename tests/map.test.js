@@ -54,3 +54,20 @@ test('길찾기: 양 팀 시작 위치에서 두 폭탄까지 길이 있음', ()
     }
   }
 });
+
+test('맵: 두 팀 진영 사이에 눈높이 직선 시야가 없음 (시작하자마자 저격 방지)', () => {
+  const area = (r0, r1) => {
+    const out = [];
+    for (let r = r0; r <= r1; r++) {
+      for (let c = 0; c < map.cols; c++) {
+        if (!map.walkable(c, r)) continue;
+        for (const [ox, oz] of [[0.25, 0.25], [0.75, 0.75]]) out.push({ x: map.originX + (c + ox) * 2, y: 1.6, z: map.originZ + (r + oz) * 2 });
+      }
+    }
+    return out;
+  };
+  const north = area(1, 4), south = area(32, 38);
+  let lines = 0;
+  for (const a of north) for (const b of south) if (map.lineOfSight(a, b)) lines++;
+  assert.equal(lines, 0);
+});

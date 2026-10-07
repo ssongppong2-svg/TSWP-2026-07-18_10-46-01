@@ -8,7 +8,7 @@ export class ViewModel {
   constructor(teamColor) {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(58, 1, 0.01, 10);
-    this.scene.add(new THREE.HemisphereLight('#cfe0ff', '#3a3026', 1.6));
+    this.scene.add(new THREE.HemisphereLight('#cfe0ff', '#3a3026', 1.2));
     const key = new THREE.DirectionalLight('#fff1dc', 2.4);
     key.position.set(-1, 2, 1.5);
     this.scene.add(key);
@@ -20,15 +20,18 @@ export class ViewModel {
     this.scene.add(this.root);
     this.teamColor = teamColor;
     this.mats = {
-      metal: new THREE.MeshStandardMaterial({ color: '#2a2f37', roughness: 0.35, metalness: 0.85 }),
-      dark: new THREE.MeshStandardMaterial({ color: '#16191e', roughness: 0.6, metalness: 0.5 }),
-      polymer: new THREE.MeshStandardMaterial({ color: '#3b4250', roughness: 0.7, metalness: 0.1 }),
+      metal: new THREE.MeshStandardMaterial({ color: '#59616e', roughness: 0.32, metalness: 0.75 }),
+      dark: new THREE.MeshStandardMaterial({ color: '#23272e', roughness: 0.55, metalness: 0.45 }),
+      polymer: new THREE.MeshStandardMaterial({ color: '#4a5263', roughness: 0.65, metalness: 0.1 }),
       glove: new THREE.MeshStandardMaterial({ color: '#222831', roughness: 0.9 }),
-      sleeve: new THREE.MeshStandardMaterial({ color: teamColor === '#ff7a2f' ? '#30343b' : '#d9e1ea', roughness: 0.7 }),
-      glow: new THREE.MeshStandardMaterial({ color: teamColor, emissive: teamColor, emissiveIntensity: 2.5 }),
+      sleeve: new THREE.MeshStandardMaterial({ color: teamColor === '#ff7a2f' ? '#2b2724' : '#1f2a3a', roughness: 0.8 }),
+      glow: new THREE.MeshStandardMaterial({ color: teamColor, emissive: teamColor, emissiveIntensity: 1.1 }),
       core: new THREE.MeshStandardMaterial({ color: teamColor, emissive: teamColor, emissiveIntensity: 1.8, transparent: true, opacity: 0.9 }),
     };
     this.guns = { rifle: this.buildRifle(), pistol: this.buildPistol() };
+    // 총 크기는 손잡이 기준으로 줄임 (카메라 기준으로 줄이면 원근 때문에 크기가 그대로 보임)
+    this.guns.rifle.group.scale.setScalar(0.54);
+    this.guns.pistol.group.scale.setScalar(0.6);
     for (const g of Object.values(this.guns)) this.root.add(g.group);
 
     this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), color: '#ffd9a0', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
@@ -45,61 +48,82 @@ export class ViewModel {
     this.time = 0;
   }
 
-  part(group, geo, mat, x, y, z, rx = 0) {
+  part(group, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x, y, z);
-    m.rotation.x = rx;
+    m.rotation.set(rx, ry, rz);
     group.add(m);
     return m;
   }
 
-  hands(group, gripZ, foreZ, foreY = -0.02) {
+  // 손과 팔: 손잡이에서 화면 아래쪽 바깥으로 뻗음
+  arm(group, hand, elbow, glove = true) {
     const M = this.mats;
-    this.part(group, new THREE.BoxGeometry(0.06, 0.07, 0.09), M.glove, 0.0, -0.06, gripZ);
-    this.part(group, new THREE.BoxGeometry(0.075, 0.08, 0.3), M.sleeve, 0.02, -0.1, gripZ + 0.18, 0.25);
-    if (foreZ !== null) {
-      this.part(group, new THREE.BoxGeometry(0.07, 0.06, 0.09), M.glove, -0.01, foreY - 0.035, foreZ);
-      this.part(group, new THREE.BoxGeometry(0.075, 0.08, 0.32), M.sleeve, -0.09, foreY - 0.09, foreZ + 0.17, 0.35).rotation.y = -0.45;
-    }
+    const a = new THREE.Vector3(...hand), b = new THREE.Vector3(...elbow);
+    const len = a.distanceTo(b);
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const fore = new THREE.Mesh(new THREE.BoxGeometry(0.078, 0.078, len), M.sleeve);
+    fore.position.copy(mid);
+    fore.lookAt(group.localToWorld(b.clone()));
+    group.add(fore);
+    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.084, 0.084, 0.03), M.glow);
+    cuff.position.copy(a.clone().lerp(b, 0.22));
+    cuff.quaternion.copy(fore.quaternion);
+    group.add(cuff);
+    if (glove) this.part(group, new THREE.BoxGeometry(0.07, 0.075, 0.1), M.glove, ...hand);
   }
 
   buildRifle() {
     const g = new THREE.Group();
     const M = this.mats;
-    this.part(g, new THREE.BoxGeometry(0.07, 0.1, 0.38), M.metal, 0, 0, -0.05);
-    this.part(g, new THREE.BoxGeometry(0.075, 0.08, 0.26), M.polymer, 0, -0.005, -0.34);
-    this.part(g, new THREE.BoxGeometry(0.078, 0.012, 0.22), M.glow, 0, 0.032, -0.34);
-    const barrel = this.part(g, new THREE.CylinderGeometry(0.014, 0.014, 0.22, 10), M.dark, 0, 0.01, -0.56);
-    barrel.rotation.x = Math.PI / 2;
-    this.part(g, new THREE.BoxGeometry(0.05, 0.16, 0.08), M.dark, 0, -0.12, -0.08, 0.18);
-    this.part(g, new THREE.BoxGeometry(0.055, 0.11, 0.06), M.polymer, 0, -0.09, 0.08, -0.35);
-    this.part(g, new THREE.BoxGeometry(0.06, 0.09, 0.22), M.polymer, 0, -0.01, 0.24);
-    this.part(g, new THREE.BoxGeometry(0.03, 0.05, 0.12), M.dark, 0, 0.075, -0.06);
-    this.part(g, new THREE.BoxGeometry(0.012, 0.012, 0.012), M.glow, 0, 0.105, -0.06);
-    const core = this.part(g, new THREE.CylinderGeometry(0.022, 0.022, 0.14, 12), M.core, 0.042, 0.0, -0.08);
-    core.rotation.x = Math.PI / 2;
-    this.hands(g, 0.08, -0.33);
+    // 몸체
+    this.part(g, new THREE.BoxGeometry(0.064, 0.074, 0.34), M.metal, 0, 0.012, -0.04);
+    this.part(g, new THREE.BoxGeometry(0.058, 0.05, 0.3), M.polymer, 0, -0.042, -0.02);
+    this.part(g, new THREE.BoxGeometry(0.066, 0.012, 0.3), M.dark, 0, 0.055, -0.06);
+    // 총열 덮개 + 빛나는 홈
+    this.part(g, new THREE.BoxGeometry(0.06, 0.066, 0.26), M.polymer, 0, 0.004, -0.33);
+    for (let i = 0; i < 4; i++) this.part(g, new THREE.BoxGeometry(0.062, 0.008, 0.035), M.glow, 0, 0.018, -0.25 - i * 0.05);
+    this.part(g, new THREE.CylinderGeometry(0.013, 0.013, 0.2, 12), M.dark, 0, 0.008, -0.55, Math.PI / 2);
+    this.part(g, new THREE.CylinderGeometry(0.02, 0.02, 0.06, 12), M.metal, 0, 0.008, -0.64, Math.PI / 2);
+    // 탄창 · 손잡이 · 개머리판
+    this.part(g, new THREE.BoxGeometry(0.044, 0.15, 0.07), M.dark, 0, -0.12, -0.1, 0.22);
+    this.part(g, new THREE.BoxGeometry(0.046, 0.1, 0.055), M.polymer, 0, -0.1, 0.07, -0.3);
+    this.part(g, new THREE.BoxGeometry(0.05, 0.08, 0.2), M.polymer, 0, -0.012, 0.22);
+    this.part(g, new THREE.BoxGeometry(0.052, 0.03, 0.12), M.metal, 0, 0.04, 0.2);
+    // 조준경 (홀로그램)
+    this.part(g, new THREE.BoxGeometry(0.05, 0.012, 0.1), M.dark, 0, 0.068, -0.05);
+    this.part(g, new THREE.TorusGeometry(0.019, 0.004, 6, 20), M.dark, 0, 0.094, -0.09);
+    this.part(g, new THREE.BoxGeometry(0.008, 0.02, 0.05), M.dark, 0, 0.078, -0.07);
+    this.part(g, new THREE.BoxGeometry(0.004, 0.004, 0.004), M.glow, 0, 0.094, -0.09);
+    // 힘 코어 (합력 강화 때 주황색으로 빛남)
+    const core = this.part(g, new THREE.CylinderGeometry(0.02, 0.02, 0.15, 14), M.core, 0.036, -0.006, -0.06, Math.PI / 2);
+    // 팔
+    this.arm(g, [0.0, -0.09, 0.07], [0.1, -0.32, 0.36]);
+    this.arm(g, [-0.012, -0.045, -0.32], [-0.2, -0.3, -0.02]);
     const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0.01, -0.68);
+    muzzle.position.set(0, 0.008, -0.69);
     g.add(muzzle);
-    return { group: g, muzzle, base: new THREE.Vector3(0.19, -0.2, -0.38), core };
+    return { group: g, muzzle, base: new THREE.Vector3(0.15, -0.145, -0.31), rotY: 0.05, core };
   }
 
   buildPistol() {
     const g = new THREE.Group();
     const M = this.mats;
-    this.part(g, new THREE.BoxGeometry(0.048, 0.055, 0.22), M.metal, 0, 0.02, -0.06);
-    this.part(g, new THREE.BoxGeometry(0.05, 0.01, 0.2), M.glow, 0, 0.05, -0.06);
-    this.part(g, new THREE.BoxGeometry(0.044, 0.04, 0.17), M.polymer, 0, -0.02, -0.05);
-    this.part(g, new THREE.BoxGeometry(0.042, 0.12, 0.06), M.polymer, 0, -0.08, 0.03, -0.25);
-    const barrel = this.part(g, new THREE.CylinderGeometry(0.01, 0.01, 0.04, 8), M.dark, 0, 0.02, -0.18);
-    barrel.rotation.x = Math.PI / 2;
-    const core = this.part(g, new THREE.BoxGeometry(0.02, 0.02, 0.06), M.core, 0.026, -0.02, -0.04);
-    this.hands(g, 0.03, -0.02, -0.06);
+    this.part(g, new THREE.BoxGeometry(0.044, 0.05, 0.21), M.metal, 0, 0.022, -0.06);
+    this.part(g, new THREE.BoxGeometry(0.003, 0.008, 0.16), M.glow, 0.0225, 0.03, -0.06);
+    this.part(g, new THREE.BoxGeometry(0.003, 0.008, 0.16), M.glow, -0.0225, 0.03, -0.06);
+    for (let i = 0; i < 4; i++) this.part(g, new THREE.BoxGeometry(0.046, 0.03, 0.006), M.dark, 0, 0.022, 0.0 + i * 0.012);
+    this.part(g, new THREE.BoxGeometry(0.04, 0.034, 0.17), M.polymer, 0, -0.016, -0.055);
+    this.part(g, new THREE.BoxGeometry(0.038, 0.11, 0.052), M.polymer, 0, -0.075, 0.03, -0.24);
+    this.part(g, new THREE.CylinderGeometry(0.009, 0.009, 0.03, 10), M.dark, 0, 0.022, -0.175, Math.PI / 2);
+    this.part(g, new THREE.BoxGeometry(0.008, 0.012, 0.008), M.glow, 0, 0.054, -0.15);
+    const core = this.part(g, new THREE.BoxGeometry(0.012, 0.018, 0.07), M.core, 0.022, -0.014, -0.06);
+    this.arm(g, [0, -0.085, 0.04], [0.09, -0.3, 0.33]);
+    this.arm(g, [-0.03, -0.09, 0.03], [-0.17, -0.3, 0.26]);
     const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0.02, -0.21);
+    muzzle.position.set(0, 0.022, -0.2);
     g.add(muzzle);
-    return { group: g, muzzle, base: new THREE.Vector3(0.15, -0.17, -0.34), core };
+    return { group: g, muzzle, base: new THREE.Vector3(0.12, -0.125, -0.29), rotY: 0.06, core };
   }
 
   setAspect(aspect) {
@@ -160,7 +184,7 @@ export class ViewModel {
     g.position.x += Math.sin(this.bob) * 0.012 * bobAmp + this.sway.x;
     g.position.y += Math.abs(Math.cos(this.bob)) * 0.012 * bobAmp + this.sway.y - swap * 0.28 - rl * 0.1 - this.lower * 0.4 - this.land * 0.03;
     g.position.z += this.kick * (s.weapon === 'rifle' ? 0.05 : 0.06);
-    g.rotation.set(this.kick * 0.09 - rl * 0.35 + this.sway.y * 1.5, this.sway.x * 1.5, rl * 0.6);
+    g.rotation.set(this.kick * 0.09 - rl * 0.35 + this.sway.y * 1.5, gun.rotY + this.sway.x * 1.5, rl * 0.6);
 
     // 합력 강화 중에는 코어가 주황색으로 맥동
     const amp = s.amp;

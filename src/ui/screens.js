@@ -254,7 +254,8 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
   const tick = (now) => {
     if (done) return;
     raf = requestAnimationFrame(tick);
-    const dt = Math.min(0.1, (now - last) / 1000);
+    // 선착순이 공정하도록 실제 흐른 시간으로 계산 (느린 컴퓨터에서도 15초는 15초)
+    const dt = Math.min(1, (now - last) / 1000);
     last = now;
     elapsed += dt;
     const left = Math.max(0, DRAFT_TIME - elapsed);

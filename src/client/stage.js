@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GameMap } from '../sim/map.js';
 import { createTextures } from './textures.js';
 import { buildWorld } from './world-view.js';
@@ -90,7 +91,7 @@ export class Stage {
     this.world = buildWorld(this.map, this.textures);
     this.scene.add(this.world);
 
-    this.overlay = null; // 1인칭 총 (ViewModel)
+    this._overlay = null; // 1인칭 총 (ViewModel)
     this.shake = 0;
     this.applyQuality(settings.quality);
     this.onResize = () => this.resize();
@@ -113,6 +114,14 @@ export class Stage {
       r.domElement.tabIndex = 0;
       this.container.prepend(r.domElement);
       this.renderer = r;
+      // 금속 표면이 비칠 환경 (없으면 금속이 새까맣게 보임)
+      const pmrem = new THREE.PMREMGenerator(r);
+      this.envMap?.dispose();
+      this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmrem.dispose();
+      this.scene.environment = this.envMap;
+      this.scene.environmentIntensity = 0.18;
+      if (this._overlay) this._overlay.scene.environment = this.envMap;
       this.onCanvas?.(r.domElement);
     }
     const r = this.renderer;
@@ -147,6 +156,18 @@ export class Stage {
 
   get canvas() {
     return this.renderer.domElement;
+  }
+
+  get overlay() {
+    return this._overlay;
+  }
+
+  set overlay(vm) {
+    this._overlay = vm;
+    if (vm) {
+      vm.scene.environment = this.envMap;
+      vm.scene.environmentIntensity = 0.7;
+    }
   }
 
   setFov(horizontalDeg) {

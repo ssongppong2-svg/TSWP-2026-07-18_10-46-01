@@ -42,6 +42,7 @@ export class Hud {
       <div class="hitmarker"><i></i><i></i><i></i><i></i></div>
       <div class="dmg-layer"></div>
       <div class="center-prompt"></div>
+      <div class="countdown"><small>전투 시작까지</small><b></b></div>
       <div class="banner"><div class="banner-title"></div><div class="banner-sub"></div></div>
       <div class="vitals">
         <div class="hp-num">100</div>
@@ -75,6 +76,8 @@ export class Hud {
       hitmarker: $('.hitmarker'),
       dmg: $('.dmg-layer'),
       prompt: $('.center-prompt'),
+      countdown: $('.countdown'),
+      countNum: $('.countdown b'),
       banner: $('.banner'),
       bannerTitle: $('.banner-title'),
       bannerSub: $('.banner-sub'),
@@ -178,14 +181,18 @@ export class Hud {
     this.toastT = 7;
   }
 
-  update(dt, { viewAgent, spectating, controllerYaw }) {
+  update(dt, { viewAgent, spectating }) {
     const m = this.match;
     const me = m.agentById(this.localId);
     const a = viewAgent ?? me;
     const E = this.els;
 
     // 시간과 폭탄
-    this.set('time', fmtTime(m.phase === 'prestart' ? m.timeLeft : m.timeLeft), (v) => (E.time.textContent = v));
+    this.set('time', fmtTime(m.timeLeft), (v) => (E.time.textContent = v));
+    this.set('count', m.phase === 'prestart' ? Math.ceil(m.phaseT) : 0, (v) => {
+      E.countNum.textContent = v;
+      E.countdown.classList.toggle('show', v > 0);
+    });
     this.set('urgent', m.phase === 'live' && m.timeLeft <= 30, (v) => E.clock.classList.toggle('urgent', v));
     for (const b of m.bombs) {
       const state = b.state === 'armed' && b.picker ? 'picking' : b.state;
@@ -287,7 +294,7 @@ export class Hud {
     this.toastT -= dt;
     if (this.toastT <= 0) E.toast.classList.remove('show');
 
-    this.minimap.update(dt, a, controllerYaw);
+    this.minimap.update(dt, a);
   }
 
   dispose() {

@@ -12,6 +12,7 @@ export class Input {
     this.wheel = 0;
     this.locked = false;
     this.everLocked = false;
+    this.lockedAt = 0;
     this.fallback = false; // 마우스 잠금이 막힌 환경에서 쓰는 모드
     this.enabled = false;
     this.onLockChange = null;
@@ -26,8 +27,12 @@ export class Input {
       keyup: (e) => this.down.delete(e.code),
       mousemove: (e) => {
         if (!this.enabled || (!this.locked && !this.fallback)) return;
-        this.mouseDx += e.movementX || 0;
-        this.mouseDy += e.movementY || 0;
+        // 잠금 직후나 브라우저 버그로 생기는 비정상적으로 큰 이동값은 버림 (시점이 갑자기 튀는 것 방지)
+        if (performance.now() - this.lockedAt < 120) return;
+        const dx = e.movementX || 0, dy = e.movementY || 0;
+        if (Math.abs(dx) > 400 || Math.abs(dy) > 400) return;
+        this.mouseDx += dx;
+        this.mouseDy += dy;
       },
       mousedown: (e) => {
         if (!this.enabled) return;
@@ -46,7 +51,11 @@ export class Input {
       },
       lockchange: () => {
         this.locked = document.pointerLockElement === this.target;
-        if (this.locked) this.everLocked = true;
+        if (this.locked) {
+          this.everLocked = true;
+          this.lockedAt = performance.now();
+          this.mouseDx = this.mouseDy = 0;
+        }
         if (!this.locked) {
           this.down.clear();
           this.buttons = 0;

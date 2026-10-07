@@ -202,7 +202,7 @@ class BombView {
     this.group = g;
     const metal = new THREE.MeshStandardMaterial({ color: '#2a2e36', roughness: 0.45, metalness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: '#15181d', roughness: 0.7, metalness: 0.4 });
-    this.liquid = new THREE.MeshStandardMaterial({ color: '#ff3b3b', emissive: '#ff3b3b', emissiveIntensity: 2.2 });
+    this.liquid = new THREE.MeshStandardMaterial({ color: '#ff3b3b', emissive: '#ff3b3b', emissiveIntensity: 1.1 });
     const glass = new THREE.MeshStandardMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.25, roughness: 0.05, metalness: 0.2 });
     const add = (geo, mat, x, y, z) => {
       const m = new THREE.Mesh(geo, mat);
