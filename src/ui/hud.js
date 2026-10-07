@@ -253,8 +253,8 @@ export class Hud {
     if (m.phase === 'live' && a.alive && !spectating && !a.lockpick) {
       const near = m.bombs.find((b) => b.state === 'armed' && Math.hypot(a.pos.x - b.x, a.pos.z - b.z) <= BOMB.interactRange);
       if (near) {
-        if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `동료가 폭탄 ${near.id}을 해체하는 중이에요` : `<kbd>F</kbd> 폭탄 ${near.id} 락픽 시작`;
-        else prompt = `폭탄 ${near.id}을 지키세요!`;
+        if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `동료가 폭탄 ${near.id}를 해체하는 중이에요` : `<kbd>F</kbd> 폭탄 ${near.id} 락픽 시작`;
+        else prompt = `폭탄 ${near.id}를 지키세요!`;
       }
       if (a.held) prompt = '중력 붕괴에 붙잡혔어요!';
       else if (a.slippery) prompt = '마찰력 0 — 미끄러져요!';

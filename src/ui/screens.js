@@ -312,7 +312,8 @@ export function clickToStart({ team, loadout, onClick }) {
         <p>마우스가 화면에 고정돼요. <kbd>Esc</kbd>를 누르면 일시정지</p>
       </div>
     </section>`);
-  el.querySelector('button').addEventListener('click', onClick);
+  // 버튼뿐 아니라 화면 어디를 눌러도 시작
+  el.addEventListener('click', onClick);
   return el;
 }
 

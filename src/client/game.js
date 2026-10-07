@@ -111,6 +111,7 @@ export class GameClient {
   pause() {
     if (this.ended) return;
     this.paused = true;
+    this.input.enabled = false; // 메뉴에서 누른 키가 다시 시작할 때 패치로 나가지 않게
     this.input.exitLock();
     this.hooks.onPause?.();
   }
@@ -232,6 +233,7 @@ export class GameClient {
       A.play(e.winner === this.team ? 'win' : 'lose');
       this.lockpickUI.update(null);
       setTimeout(() => {
+        if (this.disposed) return;
         this.input.exitLock();
         this.hooks.onEnd?.(this.result());
       }, 3200);
