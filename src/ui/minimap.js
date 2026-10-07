@@ -44,7 +44,8 @@ export class TacticalMap {
     b.textAlign = 'center';
     b.textBaseline = 'middle';
     for (const k of map.callouts) {
-      const cx = ((k.c0 + k.c1 + 1) / 2) * S, cy = ((k.r0 + k.r1 + 1) / 2) * S;
+      // 구역 위쪽 가장자리에 표시 (가운데의 폭탄 표시와 겹치지 않게)
+      const cx = ((k.c0 + k.c1 + 1) / 2) * S, cy = (k.r1 - k.r0 >= 4 ? k.r0 + 1.2 : (k.r0 + k.r1 + 1) / 2) * S;
       b.fillStyle = 'rgba(0,0,0,0.6)';
       const w = b.measureText(k.name).width + 8;
       b.fillRect(cx - w / 2, cy - S * 0.7, w, S * 1.4);

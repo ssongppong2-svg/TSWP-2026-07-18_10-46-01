@@ -42,8 +42,8 @@ export function buildWorld(map, tex) {
     const puddles = new THREE.Mesh(
       new THREE.PlaneGeometry(map.width, map.depth),
       new THREE.MeshStandardMaterial({
-        color: '#07090c',
-        roughness: 0.2,
+        color: '#0c0e11',
+        roughness: 0.32,
         metalness: 0.0,
         envMapIntensity: 0.25,
         alphaMap: pt,

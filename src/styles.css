@@ -126,6 +126,8 @@ button {
   background: var(--accent);
   border-color: var(--accent);
   color: #121212;
+  /* 비활성 → 활성 전환이 즉시 보이도록 색 전환 효과는 쓰지 않음 */
+  transition: transform 0.08s;
   font-weight: 700;
 }
 
