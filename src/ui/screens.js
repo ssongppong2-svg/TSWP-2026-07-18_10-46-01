@@ -3,6 +3,7 @@ import { DRAFT_TIME, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { LOADOUT_SLOTS, LOCKPICK_CONCEPT, PATCHES, PATCH_TIERS, WEAPONS, patchesOfTier } from '../sim/data.js';
 import { COPIES_PER_TEAM, SLOTS_PER_PLAYER, TIER_SLOTS, TeamDraft } from '../sim/draft.js';
 import { makeRoster } from '../sim/match.js';
+import { MAP_ORDER, getMapDef } from '../sim/maps/index.js';
 import { DIFFICULTY } from '../ai/bot.js';
 import { QUALITY } from '../client/stage.js';
 import { PATCH_ICONS, UI_ICONS, WEAPON_ICONS } from './icons.js';
@@ -23,9 +24,9 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
     <section class="screen title-screen">
       <div class="title-center">
         <div class="logo-kicker"><i></i>중1 과학 「힘」 · 5 대 5 전술 작전</div>
-        <h1 class="logo">FORCE<span>BOUND</span></h1>
-        <div class="logo-ko">포스 바운드</div>
-        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>포스 패치 4종을 장착하고, 합력으로 기폭 장치를 해제하라.</p>
+        <h1 class="logo">FORCE</h1>
+        <div class="logo-ko">포스</div>
+        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>정보는 없다. 소리를 듣고, 분대를 지휘하고, 합력으로 기폭 장치를 해제하라.</p>
         <div class="menu">
           <button class="btn primary big" data-act="start">작전 개시</button>
           <div class="menu-row">
@@ -36,7 +37,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
         </div>
       </div>
       <footer class="title-foot">
-        <span>작전 지역 · 포스 바운드</span><span>해체팀 vs 포스팀</span><span>폭탄 2기 · 제한 시간 2:00</span>
+        <span>작전 지역 ${MAP_ORDER.length}곳</span><span>해체팀 vs 포스팀</span><span>폭탄 2기 · 제한 시간 2:00</span>
       </footer>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -50,9 +51,15 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
 }
 
 // ───────────────────────── 작전 브리핑 (팀 선택) ─────────────────────────
-export function teamScreen({ settings, onNext, onBack }) {
+export function teamScreen({ settings, onNext, onBack, onMap }) {
   let team = settings.lastTeam ?? null;
   let difficulty = settings.difficulty ?? 'normal';
+  let mapId = MAP_ORDER.includes(settings.mapId) ? settings.mapId : MAP_ORDER[0];
+  const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음' };
+  const mapCard = (id) => {
+    const d = getMapDef(id);
+    return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-en">${d.nameEn ?? ''}</span><span class="mc-desc">${d.desc ?? ''}</span><span class="mc-wx">${WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
+  };
   const card = (t, icon, lines) => `
     <button class="team-card t-${t}" data-team="${t}">
       <div class="tc-head"><div class="tc-icon">${icon}</div><div><small>${TEAM_INFO[t].code}</small><div class="tc-name">${TEAM_INFO[t].name}</div></div></div>
@@ -61,10 +68,13 @@ export function teamScreen({ settings, onNext, onBack }) {
     </button>`;
   const el = h(`
     <section class="screen team-screen">
-      <header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>작전 브리핑 · 소속 선택</h2><span></span></header>
+      <header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>작전 브리핑</h2><span></span></header>
+      <h3 class="brief-label">작전 지역</h3>
+      <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
+      <h3 class="brief-label">소속</h3>
       <div class="team-cards">
-        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['폭탄 A·B 2기 사전 설치 확인', '폭탄 앞 <kbd>F</kbd> → <b>합력 잠금 해제</b>로 해체', '해체 중 피격 시 처음부터 재시도'])}
-        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['해체팀 <b>전원 제압</b> 시 작전 성공', '<b>2분</b> 경과 시 폭탄 폭발 → 작전 성공', '해체 시도 감지 시 경보 수신'])}
+        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['폭탄 A·B 2기 사전 설치 확인', '폭탄 앞 <kbd>F</kbd> → <b>합력 잠금 해제</b>로 해체', '해체 중 피격 시 처음부터 재시도', '적 위치 정보 없음 — <b>소리</b>로만 파악'])}
+        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['해체팀 <b>전원 제압</b> 시 작전 성공', '<b>2분</b> 경과 시 폭탄 폭발 → 작전 성공', '해체 시도 감지 시 경보 수신', '적 위치 정보 없음 — <b>소리</b>로만 파악'])}
       </div>
       <div class="team-options">
         <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '나')}"></label>
@@ -76,6 +86,7 @@ export function teamScreen({ settings, onNext, onBack }) {
     </section>`);
   const next = el.querySelector('[data-act="next"]');
   const refresh = () => {
+    el.querySelectorAll('.map-card[data-map]').forEach((c) => c.classList.toggle('on', c.dataset.map === mapId));
     el.querySelectorAll('.team-card').forEach((c) => c.classList.toggle('on', c.dataset.team === team));
     el.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === difficulty));
     next.disabled = !team;
@@ -86,17 +97,22 @@ export function teamScreen({ settings, onNext, onBack }) {
     if (t) team = t.dataset.team;
     const d = e.target.closest('[data-diff]');
     if (d) difficulty = d.dataset.diff;
+    const mp = e.target.closest('.map-card[data-map]');
+    if (mp && mp.dataset.map !== mapId) {
+      mapId = mp.dataset.map;
+      onMap?.(mapId);
+    }
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'back') onBack();
     if (act === 'next' && team) {
       const name = el.querySelector('.name-input').value.trim() || '나';
-      onNext({ team, difficulty, name });
+      onNext({ team, difficulty, name, mapId });
     }
     refresh();
   });
   el.addEventListener('dblclick', (e) => {
     const t = e.target.closest('[data-team]');
-    if (t) onNext({ team: t.dataset.team, difficulty, name: el.querySelector('.name-input').value.trim() || '나' });
+    if (t) onNext({ team: t.dataset.team, difficulty, name: el.querySelector('.name-input').value.trim() || '나', mapId });
   });
   return el;
 }
@@ -155,8 +171,8 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
           <div class="patch-detail"></div>
           <div class="side-block weapons">
             <h3>기본 화기</h3>
-            <div class="wpn">${WEAPON_ICONS.rifle}<div><b>${WEAPONS.rifle.name}</b><small>소총 · ${WEAPONS.rifle.damage} · 연사 ${WEAPONS.rifle.rpm}RPM</small></div></div>
-            <div class="wpn">${WEAPON_ICONS.pistol}<div><b>${WEAPONS.pistol.name}</b><small>권총 · ${WEAPONS.pistol.damage} · 반자동</small></div></div>
+            <div class="wpn">${WEAPON_ICONS.rifle}<div><b>${WEAPONS.rifle.name}</b><small>소총 · 몸통 ${WEAPONS.rifle.damage} · 머리 즉사 · ${WEAPONS.rifle.rpm}RPM</small></div></div>
+            <div class="wpn">${WEAPON_ICONS.pistol}<div><b>${WEAPONS.pistol.name}</b><small>권총 · 몸통 ${WEAPONS.pistol.damage} · 머리 즉사 · 반자동</small></div></div>
             <div class="wpn">${WEAPON_ICONS.knife}<div><b>${WEAPONS.knife.name}</b><small>근접 · ${WEAPONS.knife.light.damage}/${WEAPONS.knife.heavy.damage} · 후방 ×${WEAPONS.knife.backstabMult}</small></div></div>
           </div>
         </div>
@@ -354,12 +370,18 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
 }
 
 // ───────────────────────── 출격 대기 / 일시 중지 ─────────────────────────
-export function clickToStart({ team, loadout, onClick }) {
+export function clickToStart({ team, loadout, mapId, onClick }) {
+  const map = getMapDef(mapId);
   const el = h(`
     <section class="overlay start-overlay t-${team}">
       <div class="start-card">
-        <div class="sc-team"><small>${TEAM_INFO[team].code}</small>${TEAM_INFO[team].name}</div>
+        <div class="sc-team"><small>${TEAM_INFO[team].code}</small>${TEAM_INFO[team].name} · ${map.name}</div>
         <h2>${TEAM_INFO[team].goal}</h2>
+        <ul class="sc-rules">
+          <li><b>정보 0</b> — 적 위치·처치 표시 없음. 발소리·총성·무전으로만 파악</li>
+          <li><b>한 발</b> — 머리 1발, 몸통 4발. 반동이 강하니 짧게 끊어 쏠 것</li>
+          <li><kbd>G</kbd> 분대 지휘 · <kbd>T</kbd> 탄창·상태 확인 · <kbd>M</kbd> 작전 지도 · <kbd>Shift</kbd> 보행(무음)</li>
+        </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
           const id = loadout[i];
           return `<div class="${id ? '' : 'empty'}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${s.key}</kbd>${id ? `${PATCH_ICONS[id]}<b>${PATCHES[id].name}</b>` : '<b>미장착</b>'}</div>`;
@@ -398,8 +420,8 @@ export function pauseMenu({ onResume, onSettings, onControls, onQuit }) {
 export function controlsModal({ onClose }) {
   const groups = [
     ['기동', [
-      ['W A S D', '이동'],
-      ['Shift', '보행 (발소리 차단)'],
+      ['W A S D', '이동 (달리면 발소리가 남)'],
+      ['Shift', '보행 (발소리 거의 없음)'],
       ['Ctrl', '앉기 (정확도↑ · 피탄 면적↓)'],
       ['Z / V', '좌 / 우 기울이기'],
       ['Space', '도약'],
@@ -415,10 +437,15 @@ export function controlsModal({ onClose }) {
       ['E', '특수 패치'],
       ['X', '필살 패치 (게이지 100%)'],
     ]],
+    ['지휘 · 정보', [
+      ['G (누른 채 마우스)', '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
+      ['T (누른 채)', '탄창 확인 · 몸 상태 확인'],
+      ['M (누른 채)', '작전 지도 (지형 · 아군 · 무전 보고)'],
+      ['Tab', '아군 현황'],
+    ]],
     ['임무', [
       ['F', '폭탄 해체 개시 · 중단'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
-      ['Tab', '전황판'],
       ['Esc', '일시 중지'],
     ]],
   ];
@@ -428,6 +455,7 @@ export function controlsModal({ onClose }) {
         <header><h2>조작 교범</h2><button class="btn ghost small" data-act="close">닫기</button></header>
         <div class="key-groups">${groups.map(([title, rows]) => `<div class="key-group"><h4>${title}</h4>${rows.map(([k, v]) => `<div class="key-row"><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>`).join('')}</div>
         <div class="tip"><b>합력 잠금 해제</b> 요구 합력과 일치하도록 힘 카드를 선택. 우(→) +, 좌(←) − 로 계산. 해체 중 피격 시 초기화.</div>
+        <div class="tip"><b>정보 0</b> 적 위치·명중·처치 표시 없음. 달리는 발소리·사격·착지는 적에게 들리고, 분대원이 들은 소리는 무전으로 보고됨.</div>
         <div class="tip"><b>참고</b> 브라우저 특성상 <kbd>Ctrl</kbd>+<kbd>W</kbd>는 탭 닫기로 처리될 수 있음. 전체 화면에서 플레이 권장.</div>
       </div>
     </section>`);
@@ -447,7 +475,8 @@ export function settingsModal({ settings, onChange, onClose }) {
         <label class="slider"><span>음량</span><input type="range" min="0" max="1" step="0.05" data-key="volume"><output></output></label>
         <label class="slider"><span>화면 흔들림</span><input type="range" min="0" max="1.5" step="0.05" data-key="shake"><output></output></label>
         <div class="field"><span>그래픽 품질</span><div class="seg">${Object.entries(QUALITY).map(([k, q]) => `<button data-quality="${k}">${q.name}</button>`).join('')}</div></div>
-        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · 비네팅)</span></label>
+        <div class="field"><span>조준점</span><div class="seg"><button data-cross="dot">작은 점</button><button data-cross="off">없음</button></div></div>
+        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · 빗방울 · 비네팅)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
       </div>
     </section>`);
@@ -470,9 +499,18 @@ export function settingsModal({ settings, onChange, onClose }) {
       onChange(k);
     });
   });
-  const segs = () => el.querySelectorAll('[data-quality]').forEach((b) => b.classList.toggle('on', b.dataset.quality === settings.quality));
+  const segs = () => {
+    el.querySelectorAll('[data-quality]').forEach((b) => b.classList.toggle('on', b.dataset.quality === settings.quality));
+    el.querySelectorAll('[data-cross]').forEach((b) => b.classList.toggle('on', b.dataset.cross === (settings.crosshair ?? 'dot')));
+  };
   segs();
   el.addEventListener('click', (e) => {
+    const cr = e.target.closest('[data-cross]');
+    if (cr) {
+      settings.crosshair = cr.dataset.cross;
+      segs();
+      onChange('crosshair');
+    }
     const q = e.target.closest('[data-quality]');
     if (q) {
       settings.quality = q.dataset.quality;
@@ -485,7 +523,7 @@ export function settingsModal({ settings, onChange, onClose }) {
 }
 
 // ───────────────────────── 전황판 (Tab) ─────────────────────────
-export function scoreboard(match) {
+export function scoreboard(match, { onlyTeam = null } = {}) {
   const table = (team) => `
     <div class="sb-team t-${team}">
       <h3><small>${TEAM_INFO[team].code}</small>${TEAM_INFO[team].name}</h3>
@@ -499,6 +537,7 @@ export function scoreboard(match) {
           .join('')}
       </table>
     </div>`;
+  if (onlyTeam) return h(`<section class="scoreboard single">${table(onlyTeam)}<p class="sb-note">경기 중에는 아군 현황만 표시 · 적 정보 없음</p></section>`);
   return h(`<section class="scoreboard">${table(TEAMS.DEFUSE)}${table(TEAMS.FORCE)}</section>`);
 }
 

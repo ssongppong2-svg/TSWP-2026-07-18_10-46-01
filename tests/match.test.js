@@ -6,6 +6,7 @@ import { TeamDraft } from '../src/sim/draft.js';
 import { attachBots } from '../src/ai/bot.js';
 import { DT, TEAMS } from '../src/sim/constants.js';
 import { emptyIntent } from '../src/sim/agent.js';
+import { PATCHES, WEAPONS } from '../src/sim/data.js';
 
 function draftAll(seed, playerTeam = null) {
   const rng = createRng(seed);
@@ -53,17 +54,26 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
   assert.ok(patchUses > 0, '봇이 포스 패치를 써야 함');
 });
 
-test('합력 강화장치: 소총 24 → 27, 몸통 4발에 쓰러짐', () => {
+test('합력 강화장치: 소총 31 → 34, 몸통 4발 → 3발', () => {
   const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const p = match.player;
   const victim = match.agents.find((a) => a.team === TEAMS.FORCE);
+  assert.equal(WEAPONS.rifle.damage * 3 < 100, true, '평소에는 3발로 쓰러지지 않음');
   assert.ok(match.usePatch(p, 0));
   assert.equal(p.ampT, 5);
-  for (let i = 0; i < 3; i++) match.applyDamage(victim, 27, p);
+  const amped = WEAPONS.rifle.damage + PATCHES.resultantAmp.bonus;
+  for (let i = 0; i < 2; i++) match.applyDamage(victim, amped, p);
   assert.ok(victim.alive);
-  match.applyDamage(victim, 27, p);
+  match.applyDamage(victim, amped, p);
   assert.ok(!victim.alive);
+});
+
+test('한 발의 위력: 머리는 1발, 몸통은 소총·권총 모두 4발', () => {
+  for (const w of [WEAPONS.rifle, WEAPONS.pistol]) {
+    assert.ok(w.damage * w.headMult >= 100, `${w.id} 머리 1발`);
+    assert.ok(w.damage * 3 < 100 && w.damage * 4 >= 100, `${w.id} 몸통 4발`);
+  }
 });
 
 test('중력 강화장막: 날아오던 투사체가 서서히 멈추고 피해를 주지 않음, 끝나면 떨어짐', () => {

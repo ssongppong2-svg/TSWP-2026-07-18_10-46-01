@@ -40,7 +40,7 @@ test('작용·반작용 도탄: 벽에 맞은 탄이 반사되고 위력이 85%�
   assert.ok(ricochet, '도탄 이벤트');
   assert.ok(match.projectiles.includes(p), '반사 후에도 날아감');
   assert.ok(p.vel.z > 0, '반대 방향으로 튕김');
-  assert.ok(Math.abs(p.damage - 24 * 0.85) < 1e-9);
+  assert.ok(Math.abs(p.damage - WEAPONS.rifle.damage * 0.85) < 1e-9);
   assert.equal(p.bounces, 0);
 });
 
@@ -52,7 +52,7 @@ test('부력 방패: 적 탄을 막고 내구도가 닳으면 부서짐', () => 
   enemy.pitch = -0.02;
   const shoot = (n) => {
     for (let k = 0; k < n; k++) {
-      enemy.weapons.rifle.mag = 25;
+      enemy.weapons.rifle.mag = 30;
       enemy.recoil = enemy.recoilYaw = enemy.bloom = 0;
       match.fire(enemy, w, enemy.weapons.rifle);
       for (let i = 0; i < 12; i++) {
@@ -61,14 +61,14 @@ test('부력 방패: 적 탄을 막고 내구도가 닳으면 부서짐', () => 
       }
     }
   };
-  shoot(9); // 24 × 9 = 216 < 220
+  shoot(7); // 31 × 7 = 217 < 220
   assert.equal(me.hp, 100, '방패 뒤에서는 맞지 않음');
   assert.equal(match.shields.length, 1);
-  shoot(1); // 240 ≥ 220
+  shoot(1); // 248 ≥ 220
   assert.equal(match.shields.length, 0, '내구도 220을 넘으면 부서짐');
   assert.equal(me.hp, 100, '부서지는 탄까지는 방패가 막음');
   shoot(1);
-  assert.equal(me.hp, 76, '방패가 없어지면 맞음');
+  assert.equal(me.hp, 100 - WEAPONS.rifle.damage, '방패가 없어지면 맞음');
 });
 
 test('탄성 그물: 적을 붙잡았다가 바깥쪽으로 튕겨냄', () => {
@@ -83,16 +83,39 @@ test('탄성 그물: 적을 붙잡았다가 바깥쪽으로 튕겨냄', () => {
   assert.ok(enemy.pos.y > 0 || Math.hypot(enemy.vel.x, enemy.vel.z) > 0.5, '튕겨 나감');
 });
 
-test('무게 감지기: 반경 안의 적만 벽 너머로도 표시', () => {
+test('무게 감지기: 반경 안에서 발걸음·총성을 낸 적만 표시', () => {
   const { match, me, enemy } = duel(['gravityVeil', 'elasticPad', 'weightScanner', 'gravityCollapse']);
   const far = match.agents.find((a) => a.team === TEAMS.FORCE && a !== enemy);
   far.alive = true; // 포스팀 진영(멀리)
+  match.makeNoise(enemy, 'step');
+  match.makeNoise(far, 'step');
   assert.ok(match.usePatch(me, 2));
-  assert.ok(enemy.revealedUntil > match.time);
+  assert.ok(enemy.revealedUntil > match.time, '직전에 달린 적은 탐지');
   assert.ok(far.revealedUntil < match.time, '28m 밖은 탐지 안 됨');
-  match.visT = 0;
-  match.updateVisibility(DT);
-  assert.ok(match.time - enemy.spottedT < 0.01);
+  enemy.revealedUntil = -99;
+  step(match, 90); // 가만히 있는 적
+  assert.ok(enemy.revealedUntil < match.time, '소리를 내지 않으면 탐지 안 됨');
+  match.makeNoise(enemy, 'reload');
+  assert.ok(enemy.revealedUntil < match.time, '작은 소리(재장전)는 탐지 안 됨');
+  match.makeNoise(enemy, 'rifle');
+  assert.ok(enemy.revealedUntil > match.time, '사격하면 탐지');
+  step(match, 200);
+  enemy.revealedUntil = -99;
+  match.makeNoise(enemy, 'step');
+  assert.ok(enemy.revealedUntil < match.time, '4초가 지나면 탐지 종료');
+});
+
+test('발소리: 달리면 적이 들을 수 있는 소리가 나고, 걸으면 나지 않음', () => {
+  const { match, me } = duel();
+  const run = { getIntent: (m, a) => ({ ...emptyIntent(a), moveZ: 1 }) };
+  match.setController(me.id, run);
+  step(match, 150);
+  assert.ok(match.noises.some((n) => n.agentId === me.id && n.kind === 'step'), '달리기 발소리');
+  match.noises = [];
+  me.vel = { x: 0, y: 0, z: 0 };
+  match.setController(me.id, { getIntent: (m, a) => ({ ...emptyIntent(a), moveZ: 1, walk: true }) });
+  step(match, 150);
+  assert.ok(!match.noises.some((n) => n.agentId === me.id && n.kind === 'step'), '보행은 조용함');
 });
 
 test('합력 폭주: 살아 있는 아군 전원 소총 +3, 8초', () => {

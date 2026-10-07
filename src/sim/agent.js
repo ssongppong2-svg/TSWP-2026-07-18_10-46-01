@@ -77,6 +77,7 @@ export function emptyIntent(agent) {
     patch: [false, false, false, false],
     interact: false,
     card: -1,
+    command: null, // 지휘 명령 { type } (분대장만)
   };
 }
 

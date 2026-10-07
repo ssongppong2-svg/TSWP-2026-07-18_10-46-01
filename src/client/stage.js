@@ -6,13 +6,21 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GameMap } from '../sim/map.js';
+import { DEFAULT_MAP_ID } from '../sim/maps/index.js';
 import { createTextures } from './textures.js';
+import { RainSystem } from './weather.js';
 import { buildWorld } from './world-view.js';
 
 export const QUALITY = {
-  low: { name: '낮음', shadows: false, shadowSize: 0, bloom: false, pixelRatio: 0.85, lamps: 6 },
-  medium: { name: '보통', shadows: true, shadowSize: 1024, bloom: true, pixelRatio: 1, lamps: 11 },
-  high: { name: '높음', shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1.5, lamps: 99 },
+  low: { name: '낮음', shadows: false, shadowSize: 0, bloom: false, pixelRatio: 0.85, lamps: 6, rain: 2500 },
+  medium: { name: '보통', shadows: true, shadowSize: 1024, bloom: true, pixelRatio: 1, lamps: 11, rain: 5000 },
+  high: { name: '높음', shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1.5, lamps: 99, rain: 8000 },
+};
+
+// 날씨별 하늘·안개·달빛
+const WEATHER = {
+  clear: { fog: ['#0b0e13', 16, 92], top: '#05070a', horizon: '#1a1d22', glow: '#3d2b1c', overcast: 0, moon: 0.6, hemi: 0.55 },
+  rain: { fog: ['#0a0c0f', 9, 64], top: '#07080a', horizon: '#15181c', glow: '#2a241e', overcast: 1, moon: 0.32, hemi: 0.5 },
 };
 
 const SKY_VERT = /* glsl */ `
@@ -24,13 +32,18 @@ const SKY_VERT = /* glsl */ `
 `;
 const SKY_FRAG = /* glsl */ `
   uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform vec3 moonDir;
+  uniform float overcast; uniform float bolt;
   varying vec3 vDir;
   void main() {
     float h = vDir.y;
     vec3 col = mix(horizon, top, smoothstep(-0.02, 0.5, h));
     col += glow * pow(1.0 - clamp(abs(h) * 4.0, 0.0, 1.0), 3.0) * 0.6;
     float m = max(dot(normalize(vDir), normalize(moonDir)), 0.0);
-    col += vec3(0.75, 0.8, 0.9) * (smoothstep(0.9993, 0.9997, m) * 0.9 + pow(m, 80.0) * 0.08);
+    col += vec3(0.75, 0.8, 0.9) * (smoothstep(0.9993, 0.9997, m) * 0.9 + pow(m, 80.0) * 0.08) * (1.0 - overcast);
+    // 비구름: 낮게 깔린 구름 결 + 번개 때 구름이 밝아짐
+    float cloud = sin(vDir.x * 7.0 + vDir.z * 3.0) * sin(vDir.z * 5.0 - vDir.x * 2.0) * 0.5 + 0.5;
+    col += vec3(0.05, 0.055, 0.06) * cloud * overcast * smoothstep(0.0, 0.4, h);
+    col += vec3(0.55, 0.6, 0.75) * bolt * (0.4 + cloud * 0.6) * smoothstep(-0.05, 0.3, h);
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -49,6 +62,7 @@ export const BodycamShader = {
     pulse: { value: 0 },
     flash: { value: 0 },
     blur: { value: 0 },
+    rain: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -56,7 +70,7 @@ export const BodycamShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur;
+    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain;
     varying vec2 vUv;
     float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
     vec2 lens(vec2 uv) {
@@ -74,8 +88,29 @@ export const BodycamShader = {
         texture2D(tDiffuse, uv - d * ca).b
       );
     }
+    // 렌즈에 맺힌 빗방울: 칸마다 하나씩 생겼다 사라지며 뒤쪽 화면을 굴절시킴
+    vec2 raindrops(vec2 uv, out float rim) {
+      rim = 0.0;
+      vec2 p = uv * vec2(aspect, 1.0) * 7.0;
+      vec2 id = floor(p);
+      vec2 f = fract(p) - 0.5;
+      float h = rand(id);
+      float life = fract(time * (0.05 + h * 0.07) + h * 7.0);
+      float alive = smoothstep(0.0, 0.06, life) * smoothstep(1.0, 0.75, life) * step(0.6, rand(id + 3.1));
+      vec2 c = (vec2(rand(id + 1.7), rand(id + 5.3)) - 0.5) * 0.55;
+      c.y += life * 0.3 * step(0.75, h);
+      float r = 0.07 + 0.13 * rand(id + 9.1);
+      vec2 dd = f - c;
+      dd.y *= 1.15;
+      float dist = length(dd);
+      float m = smoothstep(r, r * 0.7, dist) * alive;
+      rim = smoothstep(r * 0.55, r, dist) * m;
+      return -dd / (7.0 * vec2(aspect, 1.0)) * m * 0.9;
+    }
     void main() {
       vec2 uv = lens(vUv);
+      float rim = 0.0;
+      if (rain > 0.001) uv += raindrops(vUv, rim) * rain;
       vec2 d = uv - 0.5;
       float edge = dot(d, d);
       float ca = chroma * (0.4 + edge * 6.0) * (1.0 + damage * 3.0);
@@ -85,6 +120,7 @@ export const BodycamShader = {
         vec2 px = vec2(blur * 0.004);
         col = (col + sampleCA(uv + vec2(px.x, 0.0), ca) + sampleCA(uv - vec2(px.x, 0.0), ca) + sampleCA(uv + vec2(0.0, px.y), ca) + sampleCA(uv - vec2(0.0, px.y), ca)) / 5.0;
       }
+      col *= 1.0 - rim * 0.35 * rain;
       // 체력이 낮을수록 색이 빠지고 붉게 어두워짐
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(col, vec3(lum), damage * 0.8);
@@ -107,7 +143,7 @@ export class Stage {
   constructor(container, settings) {
     this.container = container;
     this.settings = settings;
-    this.map = new GameMap();
+    this.map = null;
     this.qualityKey = null;
 
     this.scene = new THREE.Scene();
@@ -125,6 +161,8 @@ export class Stage {
           horizon: { value: new THREE.Color('#1a1d22') },
           glow: { value: new THREE.Color('#3d2b1c') },
           moonDir: { value: moonDir },
+          overcast: { value: 0 },
+          bolt: { value: 0 },
         },
         vertexShader: SKY_VERT,
         fragmentShader: SKY_FRAG,
@@ -138,7 +176,8 @@ export class Stage {
     this.sky = sky;
     this.scene.add(sky);
 
-    this.scene.add(new THREE.HemisphereLight('#2c3647', '#0d0b09', 0.55));
+    this.hemi = new THREE.HemisphereLight('#2c3647', '#0d0b09', 0.55);
+    this.scene.add(this.hemi);
     const moon = new THREE.DirectionalLight('#8fa6c8', 0.6);
     moon.position.copy(moonDir).multiplyScalar(80);
     moon.target.position.set(0, 0, 0);
@@ -150,15 +189,64 @@ export class Stage {
     this.scene.add(moon, moon.target);
 
     this.textures = createTextures();
-    this.world = buildWorld(this.map, this.textures);
-    this.scene.add(this.world);
-    this.lamps = this.world.userData.lamps;
+    this.rain = null;
+    this.bolt = 0;
+    this.onThunder = null;
+    this.setMap(DEFAULT_MAP_ID);
 
     this._overlay = null; // 1인칭 총 (ViewModel)
     this.time = 0;
     this.applyQuality(settings.quality);
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
+  }
+
+  // 맵 교체 (맵마다 지형·조명·날씨가 다름)
+  setMap(id) {
+    if (this.map?.id === id && this.world) return;
+    if (this.world) {
+      this.scene.remove(this.world);
+      this.world.traverse((o) => {
+        o.geometry?.dispose();
+        for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+          if (m.map && !Object.values(this.textures).includes(m.map)) m.map.dispose();
+          m.dispose();
+        }
+      });
+    }
+    this.map = new GameMap(id);
+    this.world = buildWorld(this.map, this.textures);
+    this.scene.add(this.world);
+    this.lamps = this.world.userData.lamps;
+    this.applyWeather();
+    if (this.renderer) this.applyQuality(this.qualityKey);
+  }
+
+  applyWeather() {
+    const w = WEATHER[this.map.weather] ?? WEATHER.clear;
+    this.weather = w;
+    this.scene.fog.color.set(w.fog[0]);
+    this.scene.fog.near = w.fog[1];
+    this.scene.fog.far = w.fog[2];
+    this.scene.background.set(w.fog[0]);
+    const u = this.sky.material.uniforms;
+    u.top.value.set(w.top);
+    u.horizon.value.set(w.horizon);
+    u.glow.value.set(w.glow);
+    u.overcast.value = w.overcast;
+    this.moon.intensity = w.moon;
+    this.hemi.intensity = w.hemi;
+    if (this.rain) {
+      this.scene.remove(this.rain.group);
+      this.rain.dispose();
+      this.rain = null;
+    }
+    if (this.map.weather === 'rain') {
+      const q = QUALITY[this.qualityKey] ?? QUALITY.high;
+      this.rain = new RainSystem({ count: q.rain, splashes: Math.round(q.rain / 7) });
+      this.rain.onThunder = (delay, vol) => this.onThunder?.(delay, vol);
+      this.scene.add(this.rain.group);
+    }
   }
 
   applyQuality(key) {
@@ -191,6 +279,7 @@ export class Stage {
       this.moon.shadow.map = null;
     }
     this.lamps.forEach((l, i) => (l.visible = i < q.lamps));
+    if (this.rain && this.rain.count !== q.rain) this.applyWeather();
     this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
     });
@@ -259,6 +348,11 @@ export class Stage {
     const v = 2 * Math.atan(Math.tan(hfov / 2) / aspect);
     this.camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(v / 2) / (this.zoom ?? 1)));
     this.camera.updateProjectionMatrix();
+    // 물방울 크기 계산용: 1m 거리의 1m가 화면에서 차지하는 픽셀 수
+    if (this.renderer) {
+      const h = this.renderer.domElement.height;
+      this.rain?.setPixelScale(h / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)));
+    }
   }
 
   resize() {
@@ -271,6 +365,7 @@ export class Stage {
     this.updateFov();
     this.bodycam.uniforms.aspect.value = aspect;
     this._overlay?.setAspect(aspect);
+
   }
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
@@ -285,12 +380,21 @@ export class Stage {
     u.pulse.value = pulse;
     u.flash.value = flash;
     u.blur.value = blur;
+    u.rain.value = on && this.map?.weather === 'rain' ? 1 : 0;
   }
 
   render(dt = 0.016) {
     this.time += dt;
     this.bodycam.uniforms.time.value = this.time;
     this.sky.position.copy(this.camera.position);
+    // 비와 번개: 번개가 치면 하늘과 주변이 잠깐 밝아짐
+    const w = this.weather ?? WEATHER.clear;
+    if (this.rain) {
+      this.bolt = this.rain.update(dt, this.camera);
+      this.sky.material.uniforms.bolt.value = this.bolt;
+      this.hemi.intensity = w.hemi + this.bolt * 2.2;
+      this.moon.intensity = w.moon + this.bolt * 1.6;
+    }
     this.composer.render(dt);
   }
 

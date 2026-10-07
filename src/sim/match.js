@@ -3,7 +3,7 @@ import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
 import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, TEAM_SIZE, TEAMS, ULT,
+  BOMB, BOT_NAMES, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, TEAM_SIZE, TEAMS, ULT,
 } from './constants.js';
 import { PATCHES, WEAPONS } from './data.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
@@ -57,8 +57,8 @@ export function segmentShield(a, b, sh) {
 }
 
 export class Match {
-  constructor({ map = null, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now() } = {}) {
-    this.map = map ?? new GameMap();
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now() } = {}) {
+    this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
     this.events = new Emitter();
@@ -69,9 +69,13 @@ export class Match {
     this.veils = [];
     this.zones = [];
     this.shields = [];
-    this.noises = [];
+    this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
+    this.scans = []; // 작동 중인 무게 감지기
+    this.orders = { defuse: null, force: null }; // 팀 지휘 명령
+    this.intel = { defuse: [], force: [] }; // 무전으로 공유된 소리 정보
     this.nextId = 1;
     this.time = 0;
+    this.liveAt = PRE_ROUND_TIME;
     this.phase = 'prestart';
     this.phaseT = PRE_ROUND_TIME;
     this.timeLeft = ROUND_TIME;
@@ -141,6 +145,7 @@ export class Match {
       this.phaseT -= dt;
       if (this.phaseT <= 0) {
         this.phase = 'live';
+        this.liveAt = this.time;
         this.emit('roundStart', {});
       }
     }
@@ -162,7 +167,9 @@ export class Match {
     this.updateShields(dt);
     this.updateProjectiles(dt);
     this.updateVisibility(dt);
-    this.noises = this.noises.filter((n) => this.time - n.t < 1.2);
+    this.noises = this.noises.filter((n) => this.time - n.t < NOISE.memory);
+    this.scans = this.scans.filter((s) => s.until > this.time);
+    for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) this.intel[team] = this.intel[team].filter((i) => this.time - i.t < 8);
 
     if (live) {
       this.timeLeft -= dt;
@@ -191,6 +198,7 @@ export class Match {
     if (live) a.ult = Math.min(ULT.max, a.ult + ULT.perSecond * dt);
 
     const canAct = live && !a.held;
+    if (intent.command && live) this.issueCommand(a, intent.command);
     if (live) {
       if (a.lockpick) this.stepLockpick(a, intent, dt);
       else if (intent.interact && canAct) this.tryStartLockpick(a);
@@ -210,7 +218,64 @@ export class Match {
     const vy = a.vel.y;
     stepMovement(a, intent, this.map, dt, live && !a.lockpick);
     if (wasGround && !a.onGround && a.vel.y > 1) this.emit('jump', { agent: a });
-    if (!wasGround && a.onGround && vy < -4) this.emit('land', { agent: a, speed: -vy });
+    if (!wasGround && a.onGround && vy < -4) {
+      this.emit('land', { agent: a, speed: -vy });
+      if (live) this.makeNoise(a, 'land');
+    }
+    // 발걸음: 달리면 적에게 들리고, 걷거나 앉아 움직이면 거의 들리지 않음
+    const speed = Math.hypot(a.vel.x, a.vel.z);
+    if (a.onGround && speed > 0.5) {
+      a.stepAcc = (a.stepAcc ?? 0) + speed * dt;
+      if (a.stepAcc >= PLAYER.stride) {
+        a.stepAcc = 0;
+        const loud = speed >= PLAYER.quietSpeed && !a.slippery;
+        this.emit('footstep', { agent: a, loud });
+        if (loud && live) this.makeNoise(a, 'step');
+      }
+    } else {
+      a.stepAcc = PLAYER.stride * 0.6;
+    }
+  }
+
+  // ───────────────────────── 소리 ─────────────────────────
+  // 소리를 남김: 적 봇은 들을 수 있는 거리 안이면 듣고, 무게 감지기는 발걸음·총성을 탐지
+  makeNoise(a, kind, at = null) {
+    const loudKinds = kind === 'rifle' || kind === 'pistol';
+    const radius = (NOISE[kind] ?? 10) * (this.map.weather === 'rain' && !loudKinds ? NOISE.rainMult : 1);
+    const p = at ?? a.pos;
+    const n = { id: this.nextId++, kind, x: p.x, y: p.y ?? 0, z: p.z, team: a.team, agentId: a.id, radius, t: this.time };
+    this.noises.push(n);
+    // 무게 감지기: 바닥에 큰 힘을 가하는 소리(달리기·착지·사격)만 탐지
+    if (kind === 'step' || kind === 'land' || loudKinds) {
+      for (const s of this.scans) {
+        if (s.team === a.team || Math.hypot(p.x - s.x, p.z - s.z) > s.radius) continue;
+        a.revealedUntil = Math.max(a.revealedUntil, this.time + 1.2);
+        this.emit('scanPing', { scan: s, agent: a, kind, pos: { x: p.x, y: p.y ?? 0, z: p.z } });
+      }
+    }
+    return n;
+  }
+
+  // ───────────────────────── 지휘 · 무전 ─────────────────────────
+  // 분대장(플레이어)의 명령: regroup 집결 / hold 위치 사수 / move 지정 지점 / A·B 목표 / free 자율
+  issueCommand(a, cmd) {
+    if (!cmd?.type) return;
+    let point = null;
+    if (cmd.type === 'move') point = this.aimPoint(a, 45);
+    else if (cmd.type === 'regroup' || cmd.type === 'hold') point = { x: a.pos.x, y: a.pos.y, z: a.pos.z };
+    const order = cmd.type === 'free' ? null : { id: this.nextId++, type: cmd.type, point, issuerId: a.id, t: this.time, yaw: a.yaw };
+    this.orders[a.team] = order;
+    this.emit('command', { agent: a, team: a.team, type: cmd.type, order });
+  }
+
+  // 무전: 같은 팀에게만 전달되는 짧은 보고
+  radio(a, text, extra = {}) {
+    this.emit('radio', { agent: a, team: a.team, text, t: this.time, ...extra });
+  }
+
+  // 소리로 들은 적 위치를 팀에 공유 (무전 보고)
+  shareIntel(a, info) {
+    this.intel[a.team].push({ ...info, reporterId: a.id, t: this.time });
   }
 
   separateAgents() {
@@ -298,6 +363,7 @@ export class Match {
     }
     const startReload = () => {
       a.reloadT = w.reload;
+      this.makeNoise(a, 'reload');
       this.emit('reload', { agent: a, weapon: w.id });
     };
     if ((intent.reload && ws.mag < w.magSize && ws.reserve > 0) || (ws.mag === 0 && ws.reserve > 0 && a.fireCd <= 0)) {
@@ -349,9 +415,10 @@ export class Match {
     const i = a.sprayIndex++;
     const rm = (1 + (w.adsRecoil - 1) * a.adsT) * (a.crouch > 0.5 ? 0.85 : 1);
     a.recoil = Math.min(w.recoilMax, a.recoil + w.recoilPitch[Math.min(i, w.recoilPitch.length - 1)] * rm);
-    a.recoilYaw = clamp(a.recoilYaw + w.recoilYaw[i % w.recoilYaw.length] * rm, -w.recoilYawMax, w.recoilYawMax);
+    const yawKick = w.recoilYaw[i % w.recoilYaw.length] + (this.rng.next() * 2 - 1) * (w.recoilYawRand ?? 0);
+    a.recoilYaw = clamp(a.recoilYaw + yawKick * rm, -w.recoilYawMax, w.recoilYawMax);
     a.bloom = Math.min(w.bloomMax, a.bloom + w.bloomPerShot);
-    this.noises.push({ x: a.pos.x, z: a.pos.z, team: a.team, agentId: a.id, t: this.time });
+    this.makeNoise(a, w.id);
     this.emit('shot', { agent: a, weapon: w.id, origin, dir, amp, projectile: p });
   }
 
@@ -359,6 +426,7 @@ export class Match {
     const w = WEAPONS.knife;
     const m = heavy ? w.heavy : w.light;
     a.meleeCd = m.rate;
+    this.makeNoise(a, 'knife');
     const eye = eyePos(a);
     const d = dirFromAngles(a.yaw, a.pitch);
     let best = null, bestD = Infinity;
@@ -505,7 +573,7 @@ export class Match {
     t.lastHurtBy = attacker?.id ?? null;
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
     t.tagT = PLAYER.tagTime;
-    t.punch = Math.min(0.09, t.punch + (headshot ? 0.045 : 0.022));
+    t.punch = Math.min(0.12, t.punch + (headshot ? 0.06 : 0.035));
     if (t.lockpick) this.cancelLockpick(t, 'hit');
     if (attacker) {
       attacker.stats.damage += dealt;
@@ -639,14 +707,20 @@ export class Match {
         break;
       }
       case 'weightScanner': {
+        // 작동 순간 직전 1초 안에 큰 소리를 낸 적 + 이후 4초간 소리를 내는 적만 표시
+        const scan = { id: this.nextId++, team: a.team, ownerId: a.id, x: a.pos.x, z: a.pos.z, radius: def.radius, until: this.time + def.duration };
+        this.scans.push(scan);
         const revealed = [];
-        for (const e of this.agents) {
-          if (!e.alive || e.team === a.team) continue;
-          if (dist(e.pos, a.pos) > def.radius) continue;
-          e.revealedUntil = this.time + def.duration;
+        for (const n of this.noises) {
+          if (n.team === a.team || this.time - n.t > 1 || !['step', 'land', 'rifle', 'pistol'].includes(n.kind)) continue;
+          if (Math.hypot(n.x - scan.x, n.z - scan.z) > def.radius) continue;
+          const e = this.agentById(n.agentId);
+          if (!e?.alive || revealed.includes(e.id)) continue;
+          e.revealedUntil = Math.max(e.revealedUntil, this.time + 1.2);
           revealed.push(e.id);
         }
         payload.revealed = revealed;
+        payload.scan = scan;
         payload.radius = def.radius;
         payload.pos = copy(a.pos);
         break;
@@ -696,6 +770,7 @@ export class Match {
     if (def.tier === 'ultimate') a.ult = 0;
     else p.cd = def.cooldown;
     a.stats.patchUses++;
+    this.makeNoise(a, 'patch');
     this.emit('patch', payload);
     return true;
   }
@@ -869,6 +944,7 @@ export class Match {
       : { bombId: bomb.id, kind: 'timed', t: 0, need: this.rng.range(BOMB.botTimeMin, BOMB.botTimeMax) };
     a.vel.x = 0;
     a.vel.z = 0;
+    this.makeNoise(a, 'lockpick', bomb);
     this.emit('lockpickStart', { agent: a, bomb });
     return true;
   }
@@ -929,19 +1005,14 @@ export class Match {
     this.emit('bombDefused', { agent: a, bomb });
   }
 
-  // ───────────────────────── 시야 (미니맵·봇 공용) ─────────────────────────
+  // ───────────────────────── 시야 (봇 판단용) ─────────────────────────
+  // 각자 자기 눈으로 본 적만 안다 (팀 공유 없음). 비 오는 밤에는 멀리 못 봄.
   updateVisibility(dt) {
     this.visT -= dt;
     if (this.visT > 0) return;
     this.visT = 0.15;
-    for (const a of this.agents) {
-      a.visibleEnemies = [];
-      // 무게 감지기에 탐지된 적은 위치가 계속 갱신됨
-      if (a.alive && a.revealedUntil > this.time) {
-        a.spottedT = this.time;
-        a.spottedPos = copy(a.pos);
-      }
-    }
+    const maxSight = this.map.weather === 'rain' ? 36 : 60;
+    for (const a of this.agents) a.visibleEnemies = [];
     for (const a of this.agents) {
       if (!a.alive) continue;
       const eye = eyePos(a);
@@ -951,12 +1022,13 @@ export class Match {
         const ch = chestPos(e);
         const dx = ch.x - eye.x, dz = ch.z - eye.z;
         const d = Math.hypot(dx, dz);
-        if (d > 80) continue;
-        if (d > 3 && (dx * fx + dz * fz) / d < 0.3) continue;
+        // 멀리서 앉아 멈춰 있는 적은 어둠 속에서 잘 안 보임
+        const still = Math.hypot(e.vel.x, e.vel.z) < 0.5 && e.crouch > 0.5;
+        if (d > (still ? maxSight * 0.55 : maxSight)) continue;
+        if (d > 3 && (dx * fx + dz * fz) / d < 0.4) continue;
         if (!this.clearLine(eye, eyePos(e)) && !this.clearLine(eye, ch)) continue;
         a.visibleEnemies.push(e.id);
         e.spottedT = this.time;
-        e.spottedPos = copy(e.pos);
       }
     }
   }

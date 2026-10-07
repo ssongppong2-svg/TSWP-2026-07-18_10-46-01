@@ -40,6 +40,11 @@ export class AudioEngine {
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.pendingRain != null) {
+      const r = this.pendingRain;
+      this.pendingRain = null;
+      this.setRain(r);
+    }
   }
 
   makeImpulse(seconds) {
@@ -64,6 +69,50 @@ export class AudioEngine {
   setVolume(v) {
     this.volume = v;
     if (this.master) this.master.gain.value = v;
+  }
+
+  // 빗소리 (계속 재생). intensity 0이면 멈춤.
+  setRain(intensity) {
+    this.wet = intensity > 0;
+    if (!this.ctx) {
+      this.pendingRain = intensity;
+      return;
+    }
+    const ctx = this.ctx;
+    if (!this.rain && intensity > 0) {
+      const out = ctx.createGain();
+      out.gain.value = 0;
+      out.connect(this.master);
+      const layer = (type, freq, q, gain) => {
+        const src = ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.loop = true;
+        src.playbackRate.value = 0.93 + Math.random() * 0.14;
+        const f = ctx.createBiquadFilter();
+        f.type = type;
+        f.frequency.value = freq;
+        f.Q.value = q;
+        const g = ctx.createGain();
+        g.gain.value = gain;
+        src.connect(f);
+        f.connect(g);
+        g.connect(out);
+        src.start();
+        return { src, g };
+      };
+      // 쏴아 하는 빗소리 + 바닥에 튀는 소리 + 낮은 웅웅거림
+      const layers = [layer('highpass', 4200, 0.4, 0.22), layer('bandpass', 1500, 0.6, 0.3), layer('lowpass', 260, 0.7, 0.35)];
+      // 빗줄기의 세기가 천천히 변함
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.07;
+      lfoGain.gain.value = 0.08;
+      lfo.connect(lfoGain);
+      lfoGain.connect(layers[1].g.gain);
+      lfo.start();
+      this.rain = { out, layers, lfo };
+    }
+    if (this.rain) this.rain.out.gain.setTargetAtTime(intensity * 0.55, ctx.currentTime, 0.8);
   }
 
   // 체력이 낮거나 섬광을 받으면 소리가 먹먹해짐 (0 = 정상, 1 = 아주 먹먹)
@@ -249,11 +298,54 @@ const SOUNDS = {
     const o = a.out(pos, 0.42 * vol, 0.15, 0.08);
     a.noise(o, t, 0.06, { type: 'lowpass', freq: 260 + Math.random() * 120, gain: 0.9 });
     a.noise(o, t + 0.01, 0.04, { type: 'bandpass', freq: 2200, q: 1.5, gain: 0.18 });
+    // 젖은 바닥: 물 튀는 소리
+    if (a.wet) a.noise(o, t + 0.015, 0.09, { type: 'bandpass', freq: 3200 + Math.random() * 900, q: 2.2, gain: 0.35, sweepTo: 1800 });
+  },
+  quietStep(a, t, pos, vol) {
+    const o = a.out(pos, 0.12 * vol, 0.12, 0.02);
+    a.noise(o, t, 0.05, { type: 'lowpass', freq: 220, gain: 0.6 });
+    if (a.wet) a.noise(o, t + 0.01, 0.05, { type: 'bandpass', freq: 2600, q: 2, gain: 0.15 });
+  },
+  impact(a, t, pos) {
+    // 탄이 몸에 맞는 둔탁한 소리 (가까울 때만 들림)
+    const o = a.out(pos, 0.35, 0.15, 0.05);
+    a.noise(o, t, 0.05, { type: 'lowpass', freq: 420, gain: 0.9 });
+    a.tone(o, t, 0.05, { type: 'sine', freq: 110, to: 70, gain: 0.4 });
+  },
+  radio(a, t) {
+    // 무전 수신: 짧은 잡음 + 끊김
+    const o = a.out(null, 0.22, 0.4, 0);
+    a.noise(o, t, 0.05, { type: 'bandpass', freq: 2600, q: 1.2, gain: 0.7 });
+    a.tone(o, t + 0.05, 0.05, { type: 'square', freq: 1450, gain: 0.08 });
+    a.noise(o, t + 0.28, 0.06, { type: 'bandpass', freq: 1900, q: 1.5, gain: 0.5 });
+  },
+  radioOut(a, t) {
+    // 무전 송신 (명령)
+    const o = a.out(null, 0.25, 0.3, 0);
+    a.tone(o, t, 0.04, { type: 'square', freq: 980, gain: 0.08 });
+    a.noise(o, t + 0.03, 0.12, { type: 'bandpass', freq: 2200, q: 1.3, gain: 0.45 });
+  },
+  wheel(a, t) {
+    const o = a.out(null, 0.15, 0.1, 0);
+    a.noise(o, t, 0.02, { type: 'bandpass', freq: 3800, q: 6, gain: 0.5 });
+  },
+  inspect(a, t) {
+    // 탄창을 살짝 빼서 확인하는 소리
+    const o = a.out(null, 0.3, 0.6, 0.03);
+    a.noise(o, t + 0.05, 0.03, { type: 'bandpass', freq: 2800, q: 6, gain: 0.7 });
+    a.noise(o, t + 0.3, 0.04, { type: 'bandpass', freq: 1900, q: 5, gain: 0.8 });
+  },
+  thunder(a, t, pos, vol) {
+    const o = a.out(null, 0.9 * vol, 6, 0.6);
+    a.noise(o, t, 0.25, { type: 'lowpass', freq: 900, gain: 0.5, attack: 0.02 });
+    a.noise(o, t + 0.1, 4.5, { type: 'lowpass', freq: 220, q: 0.8, gain: 1.0, attack: 0.3, sweepTo: 60 });
+    a.noise(o, t + 0.6, 2.5, { type: 'lowpass', freq: 140, gain: 0.7, attack: 0.4 });
   },
   land(a, t, pos, vol) {
     const o = a.out(pos, 0.55 * vol, 0.3, 0.1);
     a.noise(o, t, 0.14, { type: 'lowpass', freq: 300, gain: 1 });
     a.noise(o, t + 0.03, 0.08, { type: 'bandpass', freq: 1800, q: 2, gain: 0.25 });
+    if (a.wet) a.noise(o, t + 0.02, 0.18, { type: 'bandpass', freq: 2600, q: 1.4, gain: 0.45, sweepTo: 1200 });
   },
   hit(a, t) {
     const o = a.out(null, 0.4, 0.1, 0);

@@ -113,8 +113,13 @@ function showTeam() {
     S.teamScreen({
       settings,
       onBack: showTitle,
-      onNext: ({ team, difficulty, name }) => {
-        Object.assign(settings, { difficulty, name, lastTeam: team });
+      onMap: (mapId) => {
+        settings.mapId = mapId;
+        stage.setMap(mapId);
+        audio.setRain(stage.map.weather === 'rain' ? 1 : 0);
+      },
+      onNext: ({ team, difficulty, name, mapId }) => {
+        Object.assign(settings, { difficulty, name, lastTeam: team, mapId });
         saveSettings(settings);
         showDraft(team);
       },
@@ -146,6 +151,7 @@ function startGame(team, loadouts, byClick) {
     team,
     difficulty: settings.difficulty,
     loadouts,
+    mapId: settings.mapId,
     hooks: {
       onStarted: () => setOverlay(null),
       onPause: () =>
@@ -167,7 +173,7 @@ function startGame(team, loadouts, byClick) {
         board?.remove();
         board = null;
         if (show) {
-          board = S.scoreboard(match);
+          board = S.scoreboard(match, { onlyTeam: team });
           board.classList.add('floating');
           ui.appendChild(board);
         }
@@ -178,7 +184,7 @@ function startGame(team, loadouts, byClick) {
       },
     },
   });
-  setOverlay(S.clickToStart({ team, loadout: loadouts.get(game.player.id) ?? [], onClick: () => game.requestStart() }));
+  setOverlay(S.clickToStart({ team, loadout: loadouts.get(game.player.id) ?? [], mapId: game.match.map.id, onClick: () => game.requestStart() }));
   if (byClick) game.requestStart();
 }
 
@@ -209,7 +215,9 @@ function boot() {
     ui.innerHTML = `<section class="screen fatal"><div><h1>3D 렌더링 불가</h1><p>현재 브라우저 또는 장치에서 WebGL을 사용할 수 없음.<br>최신 Chrome 또는 Edge에서 재접속 바람.</p></div></section>`;
     return;
   }
+  if (settings.mapId && settings.mapId !== stage.map.id) stage.setMap(settings.mapId);
   stage.setLens({});
+  audio.setRain(stage.map.weather === 'rain' ? 1 : 0);
   requestAnimationFrame(menuLoop);
   showTitle();
   if (new URLSearchParams(location.search).has('debug')) exposeDebug();

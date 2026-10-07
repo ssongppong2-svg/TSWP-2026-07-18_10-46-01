@@ -20,7 +20,7 @@ const PATCH_SOUNDS = {
 
 // 한 경기를 화면에 연결: 시뮬레이션 + 3D + 소리 + HUD
 export class GameClient {
-  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, seed = Date.now(), hooks = {} }) {
+  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, mapId, seed = Date.now(), hooks = {} }) {
     this.stage = stage;
     this.audio = audio;
     this.settings = settings;
@@ -28,7 +28,8 @@ export class GameClient {
     this.hooks = hooks;
     this.team = team;
 
-    this.match = new Match({ playerTeam: team, playerName: settings.name || '나', loadouts, seed });
+    stage.setMap(mapId ?? stage.map.id);
+    this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed });
     attachBots(this.match, difficulty);
     this.player = this.match.player;
 
@@ -51,7 +52,7 @@ export class GameClient {
     stage.resize();
     this.effects = new Effects(stage.scene, this.match);
     this.effects.onCasingBounce = (p) => this.audio.play('casing', { pos: p });
-    this.hud = new Hud(uiRoot, this.match, this.player.id);
+    this.hud = new Hud(uiRoot, this.match, this.player.id, settings);
     this.lockpickUI = new LockpickUI(uiRoot);
     this.lockpickUI.onCard = (i) => this.controller.queue.cards.push(i);
 
@@ -66,11 +67,14 @@ export class GameClient {
     this.shake = 0;
     this.kickCam = new THREE.Vector2();
     this.kickVel = new THREE.Vector2();
+    this.rollKick = 0;
+    this.rollKickVel = 0;
     this.bobPhase = 0;
     this.roll = 0;
     this.landDip = 0;
     this.blur = 0;
-    this.stepDist = new Map();
+    this.inspectT = 0;
+    this.wasInspecting = false;
     this.beepT = 0;
     this.heartT = 0;
     this.alertT = { A: -99, B: -99 };
@@ -79,6 +83,13 @@ export class GameClient {
     this.tmp = new THREE.Vector3();
     this.tmp2 = new THREE.Vector3();
     this.bindEvents();
+    // 비 오는 맵: 빗소리와 번개 뒤 천둥
+    this.audio.setRain(this.match.map.weather === 'rain' ? 1 : 0);
+    stage.onThunder = (delay, vol) => {
+      setTimeout(() => {
+        if (!this.disposed) this.audio.play('thunder', { vol });
+      }, delay * 1000);
+    };
 
     this.onKeyDown = (e) => {
       if (e.code === 'Escape' && this.input.fallback && this.started && !this.paused && !this.ended) this.pause();
@@ -162,9 +173,12 @@ export class GameClient {
       this.effects.onShot(e, muzzle.clone(), local, port?.clone(), cam);
       if (local) {
         this.viewmodel.shot(e.agent.adsT > 0.5);
-        // 발사마다 카메라에 짧은 충격
-        this.kickVel.x += (Math.random() - 0.5) * 0.02;
-        this.kickVel.y += 0.03 + Math.random() * 0.01;
+        // 발사마다 카메라에 강한 충격 (어깨를 치는 반동)
+        const heavy = e.weapon === 'pistol' ? 1.3 : 1;
+        this.kickVel.x += (Math.random() - 0.5) * 0.05 * heavy;
+        this.kickVel.y += (0.06 + Math.random() * 0.03) * heavy;
+        this.rollKick += (Math.random() - 0.5) * 0.03 * heavy;
+        this.shake = Math.min(1, this.shake + 0.08);
       }
       A.play(e.weapon, { pos: local ? null : e.origin });
       if (e.amp && local) A.play('ampShot');
@@ -177,6 +191,8 @@ export class GameClient {
     ev.on('impact', (e) => {
       this.effects.onImpact(e);
       if (e.kind === 'shield') A.play('shieldHit', { pos: e });
+      // 몸에 맞는 소리는 가까이에서만 들림 (화면에 명중 표시는 없음)
+      if (e.kind === 'flesh') A.play('impact', { pos: e });
     });
     ev.on('ricochet', (e) => {
       this.effects.onRicochet(e);
@@ -184,35 +200,46 @@ export class GameClient {
     });
     ev.on('hit', (e) => {
       this.views.get(e.target.id)?.hit();
-      if (isMe(e.attacker)) {
-        this.hud.hitMarker(e.headshot, e.killed);
-        A.play(e.headshot ? 'headshot' : 'hit');
-      }
+      // 정보 0: 명중·처치 표시 없음. 맞은 사람만 충격을 느낌
       if (viewing(e.target)) {
         if (isMe(e.target)) A.play('hurt');
-        this.shake = Math.min(1, this.shake + (e.headshot ? 0.6 : 0.3));
-        this.blur = Math.min(1, this.blur + e.amount / 60);
+        this.shake = Math.min(1, this.shake + (e.headshot ? 0.6 : 0.35));
+        this.blur = Math.min(1, this.blur + e.amount / 50);
         if (e.headshot && isMe(e.target)) A.play('ring');
-        if (e.attacker) {
-          const dx = e.attacker.pos.x - e.target.pos.x, dz = e.attacker.pos.z - e.target.pos.z;
-          this.hud.damageFrom(-(Math.atan2(-dx, -dz) - this.camYaw));
-        }
       }
     });
     ev.on('kill', (e) => {
-      this.hud.killfeed(e.killer, e.victim, e.weapon, e.headshot);
-      if (isMe(e.killer) && !isMe(e.victim)) A.play('kill');
       if (isMe(e.victim)) {
         A.play('death');
-        this.hud.banner('전투 불능', `${e.killer ? `${e.killer.name}에게 제압됨` : ''} · 아군 시점으로 전환`, 'bad');
+        this.hud.banner('전투 불능', '아군 시점으로 전환', 'bad');
+      } else if (e.victim.team === this.team) {
+        // 아군의 무전이 끊김 (누구에게 당했는지는 모름)
+        this.hud.radio({ name: '본부', text: `${e.victim.name} 응답 없음.`, kind: 'lost' });
       }
+    });
+    ev.on('footstep', (e) => {
+      const me = viewing(e.agent);
+      if (e.loud) A.play('step', { pos: me ? null : e.agent.pos, vol: me ? 0.45 : 1 });
+      else if (me || Math.hypot(e.agent.pos.x - this.stage.camera.position.x, e.agent.pos.z - this.stage.camera.position.z) < 5) {
+        A.play('quietStep', { pos: me ? null : e.agent.pos, vol: me ? 1 : 0.8 });
+      }
+    });
+    ev.on('radio', (e) => {
+      if (e.team !== this.team) return;
+      A.play('radio');
+      this.hud.radio({ name: e.agent.name, text: e.text, kind: e.kind });
+    });
+    ev.on('command', (e) => {
+      if (e.team !== this.team) return;
+      if (isMe(e.agent)) A.play('radioOut');
+      this.hud.order(e.order, e.agent);
     });
     ev.on('patch', (e) => {
       this.effects.onPatch(e);
       const pos = e.zone ? { x: e.zone.x, y: e.zone.y, z: e.zone.z } : { x: e.agent.pos.x, y: e.agent.pos.y + 1, z: e.agent.pos.z };
       A.play(PATCH_SOUNDS[e.patchId], { pos: isMe(e.agent) && !e.zone ? null : pos });
       if (isMe(e.agent)) this.hud.concept(e.patchId);
-      if (e.patchId === 'weightScanner' && e.agent.team === this.team) this.hud.banner('무게 감지', `적 ${e.revealed.length}명 탐지 · 4초간 위치 표시`, 'warn');
+      if (e.patchId === 'weightScanner' && e.agent.team === this.team) this.hud.banner('무게 감지 작동', '4초간 달리기·사격·착지 진동 탐지', 'warn');
       if (e.patchId === 'resultantSurge' && e.agent.team === this.team) this.hud.banner('합력 폭주', '분대 전원 소총 공격력 +3 · 8초', 'good');
     });
     ev.on('patchDenied', (e) => {
@@ -252,7 +279,9 @@ export class GameClient {
     ev.on('bombDefused', (e) => {
       A.play('defused');
       const left = this.match.bombs.filter((b) => b.state === 'armed').length;
-      this.hud.banner(`폭탄 ${e.bomb.id} 해체 완료`, `${e.agent.name} · ${left ? `잔여 폭탄 ${left}기` : '전 폭탄 해체'}`, this.team === TEAMS.DEFUSE ? 'good' : 'bad');
+      // 포스팀은 누가 해체했는지 모름 (폭탄 신호만 끊김)
+      const who = this.team === TEAMS.DEFUSE ? `${e.agent.name} · ` : '';
+      this.hud.banner(this.team === TEAMS.DEFUSE ? `폭탄 ${e.bomb.id} 해체 완료` : `폭탄 ${e.bomb.id} 신호 두절`, `${who}${left ? `잔여 폭탄 ${left}기` : '전 폭탄 해체'}`, this.team === TEAMS.DEFUSE ? 'good' : 'bad');
     });
     ev.on('explode', () => {
       this.effects.onExplode(this.stage.camera.position);
@@ -267,7 +296,6 @@ export class GameClient {
       A.play('roundStart');
       this.hud.banner('작전 개시', this.team === TEAMS.DEFUSE ? '목표: 폭탄 2기 해체' : '목표: 폭탄 방어 · 해체팀 제압', 'good');
     });
-    ev.on('forceWiped', () => this.hud.banner('포스팀 전원 제압', '잔여 폭탄 해체 시 작전 완료', this.team === TEAMS.DEFUSE ? 'good' : 'bad'));
     ev.on('reload', (e) => viewing(e.agent) && A.play('reload'));
     ev.on('swap', (e) => viewing(e.agent) && A.play('swap'));
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
@@ -317,6 +345,7 @@ export class GameClient {
       if (steps === 6) this.acc = 0;
       this.caughtT -= dt;
       this.sounds(dt);
+      this.updateInspect(dt);
       this.watchPerformance(dt);
     }
     const alpha = this.started && !this.paused ? Math.min(1, this.acc / DT) : 1;
@@ -345,8 +374,16 @@ export class GameClient {
       swapT: va.swapT,
       lockpick: !!va.lockpick,
       amp: va.ampT > 0 && va.weapon === 'rifle',
+      inspect: va === this.player ? this.inspectT : 0,
+      light: this.stage.bolt,
     });
-    this.hud.update(dt, { viewAgent: va, spectating: va !== this.player });
+    this.hud.update(dt, {
+      viewAgent: va,
+      spectating: va !== this.player,
+      inspect: va === this.player ? this.inspectT : 0,
+      showMap: this.started && !this.paused && this.input.isDown('KeyM'),
+      wheel: this.controller.wheelOpen ? this.controller.wheelSel : null,
+    });
     const lp = this.player.lockpick;
     this.lockpickUI.update(this.player, lp ? m.bombById(lp.bombId) : null);
 
@@ -387,7 +424,7 @@ export class GameClient {
     const speed = Math.hypot(a.vel.x, a.vel.z);
     const moving = a.onGround && speed > 0.4;
     this.bobPhase += dt * (moving ? speed * 2.1 : 0);
-    const bobAmp = moving ? Math.min(1, speed / 5) * (1 - a.adsT * 0.7) * shakeScale : 0;
+    const bobAmp = moving ? Math.min(1, speed / 3.6) * (1 - a.adsT * 0.7) * shakeScale : 0;
     const bobY = -Math.abs(Math.sin(this.bobPhase)) * 0.045 * bobAmp;
     const bobX = Math.cos(this.bobPhase) * 0.025 * bobAmp;
     this.landDip = Math.max(0, this.landDip - dt * 3);
@@ -413,6 +450,9 @@ export class GameClient {
     // 발사 충격 (스프링으로 금방 돌아옴)
     this.kickVel.addScaledVector(this.kickCam, -260 * dt).multiplyScalar(Math.exp(-dt * 22));
     this.kickCam.addScaledVector(this.kickVel, dt * 10);
+    this.rollKickVel += -this.rollKick * 220 * dt;
+    this.rollKickVel *= Math.exp(-dt * 18);
+    this.rollKick += this.rollKickVel * dt * 10;
     // 손떨림 (가만히 있어도 약간)
     const t = performance.now() / 1000;
     const hand = (0.0025 + bobAmp * 0.003) * shakeScale * (1 - a.adsT * 0.6);
@@ -426,7 +466,7 @@ export class GameClient {
     const s = (this.shake * this.shake * 0.03 + this.effects.shake * 0.04) * shakeScale;
     cam.rotation.y = this.camYaw + swayX + this.kickCam.x * shakeScale + (Math.random() - 0.5) * s;
     cam.rotation.x = this.camPitch + swayY + this.kickCam.y * shakeScale + (Math.random() - 0.5) * s;
-    cam.rotation.z = this.roll;
+    cam.rotation.z = this.roll + this.rollKick * shakeScale;
     // 정조준 확대
     const zoom = 1 + (a.adsT ?? 0) * ((WEAPONS[a.weapon].adsZoom ?? 1) - 1);
     this.stage.setZoom(zoom);
@@ -434,23 +474,18 @@ export class GameClient {
     this.audio.setListener(cam.position, fwd);
   }
 
+  // 탄창 확인 (T를 누르고 있는 동안): 총을 기울여 탄창을 보고, 화면에 대략적인 양만 표시
+  updateInspect(dt) {
+    const p = this.player;
+    const want = this.input.isDown('KeyT') && p.alive && !p.lockpick && p.reloadT <= 0 && p.swapT <= 0 && p.adsT < 0.3 && !this.controller.wheelOpen;
+    if (want && !this.wasInspecting) this.audio.play('inspect');
+    this.wasInspecting = want;
+    this.inspectT = Math.max(0, Math.min(1, this.inspectT + (want ? 1 : -1) * dt * 3.2));
+  }
+
   sounds(dt) {
     const m = this.match;
-    // 발소리 (Shift로 걷거나 앉으면 조용함)
-    for (const a of m.agents) {
-      if (!a.alive || !a.onGround) continue;
-      const sp = Math.hypot(a.vel.x, a.vel.z);
-      if (sp < 3.2) {
-        this.stepDist.set(a.id, 0);
-        continue;
-      }
-      const d = (this.stepDist.get(a.id) ?? 0) + sp * dt;
-      if (d > 1.9) {
-        const me = a.id === this.viewAgent?.id;
-        this.audio.play('step', { pos: me ? null : a.pos, vol: me ? 0.45 : 1 });
-        this.stepDist.set(a.id, 0);
-      } else this.stepDist.set(a.id, d);
-    }
+    // 발소리는 시뮬레이션의 footstep 이벤트로 재생 (달리면 크게, 걸으면 작게)
     // 폭탄 경고음 (시간이 적을수록 빠르게)
     if (m.phase === 'live') {
       this.beepT -= dt;
@@ -499,6 +534,7 @@ export class GameClient {
     }
     this.effects.dispose();
     this.stage.overlay = null;
+    this.stage.onThunder = null;
     this.stage.setZoom(1);
     this.stage.setLens({});
     this.audio.setMuffle(0);

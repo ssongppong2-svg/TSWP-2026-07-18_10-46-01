@@ -40,34 +40,51 @@ export const PLAYER = {
   headRadius: 0.2,
   bodyHalf: 0.3,
   maxHp: 100,
-  // 이동: 무겁고 느리게 (가속·감속에 관성이 있음)
-  runSpeed: 5.0,
-  walkSpeed: 2.5,
-  crouchSpeed: 1.9,
-  adsSpeedMult: 0.62,
-  knifeSpeedMult: 1.12,
+  // 이동: 장비를 멘 사람의 속도 (가속·감속에 관성이 있음)
+  runSpeed: 3.6,
+  walkSpeed: 1.75,
+  crouchSpeed: 1.25,
+  adsSpeedMult: 0.55,
+  knifeSpeedMult: 1.08,
   leanSpeedMult: 0.7,
-  accel: 7,
-  decel: 10,
-  airAccel: 4,
+  accel: 5,
+  decel: 7.5,
+  airAccel: 3,
   slipAccel: 2.2, // 마찰력 0 구역: 바닥을 밀 수 없어 거의 가속이 안 됨
   slipMaxSpeed: 10,
   miredMult: 0.3, // 마찰 폭풍 구역: 이동 속도 70% 감소
-  jumpSpeed: 6.2,
+  jumpSpeed: 5.0,
   gravity: 18,
   stepHeight: 0.4,
   crouchRate: 7,
   leanRate: 6,
   leanOffset: 0.42,
-  tagSlow: 0.5, // 피격 시 잠깐 느려짐
-  tagTime: 0.35,
+  tagSlow: 0.45, // 피격 시 잠깐 느려짐
+  tagTime: 0.45,
+  stride: 1.55, // 발걸음 한 번의 거리(m)
+  quietSpeed: 2.2, // 이보다 느리면 발소리가 거의 나지 않음 (보행·앉아 걷기)
+};
+
+// 소리: 적이 들을 수 있는 거리(m). 정보는 소리로만 얻는다.
+export const NOISE = {
+  rifle: 75,
+  pistol: 60,
+  step: 15,
+  land: 20,
+  reload: 7,
+  swap: 4,
+  knife: 6,
+  patch: 18,
+  lockpick: 10,
+  rainMult: 0.8, // 비가 오면 작은 소리는 덜 들림 (총성 제외)
+  memory: 1.5, // 소리 기록 보관 시간(초)
 };
 
 export const BOMB = {
   interactRange: 2.2,
   turnTime: 1.0, // 합력을 맞춘 뒤 자물쇠가 돌아가는 시간
-  botTimeMin: 5,
-  botTimeMax: 8,
+  botTimeMin: 7, // 봇의 해체 시간 (사람이 합력 퍼즐을 푸는 시간과 비슷하게)
+  botTimeMax: 11,
 };
 
 export const ULT = {

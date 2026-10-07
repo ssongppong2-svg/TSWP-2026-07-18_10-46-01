@@ -2,20 +2,10 @@ import * as THREE from 'three';
 import { CELL } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
 import { posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { puddleTexture } from './weather.js';
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 
-// 조명 위치 (줄, 칸) — 가까운 벽에 등을 달고 그 앞에 빛을 둠. 앞쪽일수록 중요(낮은 품질에서도 켜짐).
-const LAMPS = [
-  { r: 5, c: 8, kind: 'sodium' }, { r: 5, c: 27, kind: 'sodium' },
-  { r: 16, c: 9, kind: 'fluo' }, { r: 16, c: 26, kind: 'fluo' },
-  { r: 10, c: 15, kind: 'sodium' }, { r: 28, c: 20, kind: 'sodium' },
-  { r: 21, c: 10, kind: 'fluo' }, { r: 23, c: 25, kind: 'fluo' },
-  { r: 25, c: 2, kind: 'sodium' }, { r: 25, c: 33, kind: 'sodium' },
-  { r: 20, c: 20, kind: 'fluo' },
-  { r: 38, c: 10, kind: 'sodium' }, { r: 38, c: 25, kind: 'sodium' }, { r: 32, c: 12, kind: 'fluo' },
-  { r: 1, c: 17, kind: 'sodium' }, { r: 1, c: 6, kind: 'fluo' }, { r: 1, c: 29, kind: 'fluo' },
-];
 const LAMP_STYLE = {
   sodium: { color: '#ffb35c', intensity: 30, lens: '#ffd39a' },
   fluo: { color: '#cfe0ff', intensity: 14, lens: '#dfe8f6' },
@@ -26,15 +16,48 @@ export function buildWorld(map, tex) {
   const group = new THREE.Group();
   group.name = 'world';
 
+  // 비가 오면 모든 표면이 젖어 어둡고 매끈해짐 (등불이 바닥에 번져 반사)
+  const wet = map.weather === 'rain';
+
   // ── 바닥
   tex.floor.repeat.set(map.width / 4, map.depth / 4);
   tex.floorBump.repeat.set(map.width / 4, map.depth / 4);
-  const floorMat = new THREE.MeshStandardMaterial({ map: tex.floor, bumpMap: tex.floorBump, bumpScale: 1.2, roughness: 0.9, metalness: 0.02 });
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: tex.floor,
+    bumpMap: tex.floorBump,
+    bumpScale: 1.2,
+    roughness: wet ? 0.62 : 0.9,
+    metalness: 0.02,
+    color: wet ? '#8d939b' : '#ffffff',
+  });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
   group.add(buildFloorMarkings(map));
+  if (wet) {
+    // 물웅덩이: 거의 거울처럼 매끈한 얇은 층
+    const pt = puddleTexture(map.width + map.depth);
+    pt.repeat.set(map.width / 18, map.depth / 18);
+    const puddles = new THREE.Mesh(
+      new THREE.PlaneGeometry(map.width, map.depth),
+      new THREE.MeshStandardMaterial({
+        color: '#07090c',
+        roughness: 0.2,
+        metalness: 0.0,
+        envMapIntensity: 0.25,
+        alphaMap: pt,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1.5,
+      }),
+    );
+    puddles.rotation.x = -Math.PI / 2;
+    puddles.position.y = 0.012;
+    puddles.receiveShadow = true;
+    group.add(puddles);
+  }
 
   // ── 벽: 보이는 면만 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
   const sides = new QuadBuilder();
@@ -67,7 +90,14 @@ export function buildWorld(map, tex) {
       tops.quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1]);
     }
   }
-  const wallMat = new THREE.MeshStandardMaterial({ map: tex.wall, bumpMap: tex.wallBump, bumpScale: 2.0, roughness: 0.93, metalness: 0.02 });
+  const wallMat = new THREE.MeshStandardMaterial({
+    map: tex.wall,
+    bumpMap: tex.wallBump,
+    bumpScale: 2.0,
+    roughness: wet ? 0.74 : 0.93,
+    metalness: 0.02,
+    color: wet ? '#a7acb3' : '#ffffff',
+  });
   const wallMesh = new THREE.Mesh(sides.build(), wallMat);
   wallMesh.castShadow = true;
   wallMesh.receiveShadow = true;
@@ -92,8 +122,9 @@ export function buildWorld(map, tex) {
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
     const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
     geo.translate(0, h / 2, 0);
-    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: style.rough, metalness: style.metal });
-    const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: style.rough, metalness: style.metal });
+    const rough = wet ? style.rough * 0.6 : style.rough;
+    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: rough, metalness: style.metal, color: wet ? '#b3b7bc' : '#ffffff' });
+    const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
     const mesh = new THREE.InstancedMesh(geo, [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
     cells.forEach(([c, r], i) => {
@@ -202,7 +233,7 @@ function buildFloorMarkings(map) {
 function addLamps(group, map) {
   const out = [];
   const housingMat = new THREE.MeshStandardMaterial({ color: '#1d1f22', roughness: 0.6, metalness: 0.6 });
-  for (const lamp of LAMPS) {
+  for (const lamp of map.def.decor?.lamps ?? []) {
     const st = LAMP_STYLE[lamp.kind];
     // 가장 가까운 벽 방향 찾기
     let dir = null;
@@ -315,34 +346,28 @@ const ICONS = {
   },
 };
 
+const POSTER_TOPICS = {
+  gravity: { title: '중력', icon: ICONS.gravity, lines: ['지구 중심 방향으로 당기는 힘', '크기 = 무게 (단위 N)', '1 kg의 무게 ≈ 9.8 N'] },
+  elastic: { title: '탄성력', icon: ICONS.elastic, lines: ['원래 형태로 복원하려는 힘', '변형시킨 힘의 반대 방향', '변형이 클수록 커짐'] },
+  resultant: { title: '합력', icon: ICONS.resultant, lines: ['같은 방향: 크기를 더함', '반대 방향: 큰 힘 − 작은 힘', '방향은 큰 힘 쪽'] },
+  friction: { title: '마찰력', icon: ICONS.friction, lines: ['운동을 방해하는 힘', '운동 방향의 반대', '거칠수록·무거울수록 커짐'] },
+};
+
+// 맵 정의(map.def.decor)에 적힌 교범 포스터·스프레이 표시를 붙임
 function addDecor(group, map) {
-  const posters = [
-    { no: 1, title: '중력', icon: ICONS.gravity, lines: ['지구 중심 방향으로 당기는 힘', '크기 = 무게 (단위 N)', '1 kg의 무게 ≈ 9.8 N'] },
-    { no: 2, title: '탄성력', icon: ICONS.elastic, lines: ['원래 형태로 복원하려는 힘', '변형시킨 힘의 반대 방향', '변형이 클수록 커짐'] },
-    { no: 3, title: '합력', icon: ICONS.resultant, lines: ['같은 방향: 크기를 더함', '반대 방향: 큰 힘 − 작은 힘', '방향은 큰 힘 쪽'] },
-    { no: 4, title: '마찰력', icon: ICONS.friction, lines: ['운동을 방해하는 힘', '운동 방향의 반대', '거칠수록·무거울수록 커짐'] },
-  ];
-  // 해체팀 시작 홀의 북쪽 벽(31번째 줄 남쪽 면)에 교범
-  const faceZ = map.originZ + 32 * CELL + 0.03;
-  const posterCols = [9, 12.5, 22.5, 26];
-  posters.forEach((p, i) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
-    m.position.set(map.originX + posterCols[i] * CELL, 1.9, faceZ);
-    m.receiveShadow = true;
-    group.add(m);
-  });
-  // 스프레이 표시 { 위치(칸 단위), 바라보는 방향 }
-  const signs = [
-    { text: 'A', sub: '← A', x: 7.8, z: 32, rotY: 0 },
-    { text: 'B', sub: 'B →', x: 28.2, z: 32, rotY: 0 },
-    { text: 'A', sub: '', x: 15, z: 15.3, rotY: Math.PI / 2 },
-    { text: 'B', sub: '', x: 21, z: 15.3, rotY: -Math.PI / 2 },
-    { text: 'A', sub: 'A →', x: 8.5, z: 4, rotY: Math.PI },
-    { text: 'B', sub: '← B', x: 27.5, z: 4, rotY: Math.PI },
-    { text: 'MID', sub: '', x: 17.9, z: 32, rotY: 0 },
-  ];
-  for (const s of signs) {
-    if (s.text === 'MID') continue;
+  const decor = map.def.decor ?? {};
+  const posters = decor.posters;
+  if (posters) {
+    const faceZ = map.originZ + posters.faceRow * CELL + 0.03;
+    posters.topics.forEach((key, i) => {
+      const p = { no: i + 1, ...POSTER_TOPICS[key] };
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
+      m.position.set(map.originX + posters.cols[i] * CELL, 1.9, faceZ);
+      m.receiveShadow = true;
+      group.add(m);
+    });
+  }
+  for (const s of decor.signs ?? []) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(2.2, 1.1),
       new THREE.MeshStandardMaterial({ map: sprayTexture(s.text, s.sub), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),

@@ -1,5 +1,16 @@
 import { emptyIntent } from '../sim/agent.js';
 
+// 지휘 명령 휠: G를 누른 채 마우스로 방향을 고르고 떼면 명령 (또는 숫자 키)
+// 각도는 화면 기준(오른쪽 0°, 아래 90°). key = 휠이 열려 있을 때의 숫자 키
+export const COMMANDS = [
+  { type: 'regroup', label: '집결', sub: '분대장 위치로', key: 1, angle: -90 },
+  { type: 'B', label: 'B 목표', sub: '해체 진입 / 방어', key: 5, angle: -30 },
+  { type: 'move', label: '지정 지점', sub: '조준한 곳으로 이동', key: 3, angle: 30 },
+  { type: 'hold', label: '위치 사수', sub: '현 위치 경계', key: 2, angle: 90 },
+  { type: 'free', label: '자율 교전', sub: '명령 해제', key: 6, angle: 150 },
+  { type: 'A', label: 'A 목표', sub: '해체 진입 / 방어', key: 4, angle: 210 },
+];
+
 // 키보드·마우스 입력. event.code를 써서 한글 자판 상태에서도 WASD가 그대로 동작합니다.
 export class Input {
   constructor(target) {
@@ -151,9 +162,28 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [] };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null };
     this.lastDx = 0;
     this.lastDy = 0;
+    this.wheelOpen = false;
+    this.wheelVec = { x: 0, y: 0 };
+    this.wheelSel = -1;
+    this.wheelUsed = false;
+  }
+
+  // 휠 방향 → 명령 번호 (가운데 근처면 -1)
+  pickSector(v) {
+    if (Math.hypot(v.x, v.y) < 26) return -1;
+    const ang = (Math.atan2(v.y, v.x) * 180) / Math.PI;
+    let best = -1, bestD = Infinity;
+    COMMANDS.forEach((c, i) => {
+      let d = Math.abs(((ang - c.angle + 540) % 360) - 180);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    return best;
   }
 
   syncFrom(agent) {
@@ -164,6 +194,44 @@ export class PlayerController {
   // 렌더 프레임마다 호출
   frame(agent) {
     const { dx, dy } = this.input.takeMouse();
+    // 지휘 휠: G를 누르고 있는 동안 시점은 고정, 마우스는 명령 선택에 사용
+    const canCommand = agent?.alive && !agent.lockpick && this.input.active;
+    const gDown = canCommand && this.input.isDown('KeyG');
+    if (gDown && !this.wheelOpen) {
+      this.wheelOpen = true;
+      this.wheelVec = { x: 0, y: 0 };
+      this.wheelUsed = false;
+    }
+    if (this.wheelOpen) {
+      if (gDown) {
+        this.wheelVec.x += dx;
+        this.wheelVec.y += dy;
+        const l = Math.hypot(this.wheelVec.x, this.wheelVec.y);
+        if (l > 110) {
+          this.wheelVec.x *= 110 / l;
+          this.wheelVec.y *= 110 / l;
+        }
+        this.wheelSel = this.pickSector(this.wheelVec);
+        this.lastDx = this.lastDy = 0;
+      } else {
+        if (!this.wheelUsed && this.wheelSel >= 0) this.queue.command = { type: COMMANDS[this.wheelSel].type };
+        this.wheelOpen = false;
+        this.wheelSel = -1;
+      }
+    }
+    if (this.wheelOpen) {
+      for (const code of this.input.takePressed()) {
+        const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
+        const cmd = COMMANDS.find((c) => c.key === digit);
+        if (cmd && !this.wheelUsed) {
+          this.queue.command = { type: cmd.type };
+          this.wheelUsed = true;
+          this.wheelSel = COMMANDS.indexOf(cmd);
+        }
+      }
+      this.input.takeWheel();
+      return;
+    }
     this.lastDx = dx;
     this.lastDy = dy;
     const zoom = 1 + ((agent?.adsT ?? 0) * ((this.zoomOf?.(agent) ?? 1) - 1));
@@ -206,7 +274,7 @@ export class PlayerController {
       i.jump = inp.isDown('Space');
       i.crouch = inp.isDown('ControlLeft') || inp.isDown('ControlRight');
       i.lean = (inp.isDown('KeyV') ? 1 : 0) - (inp.isDown('KeyZ') ? 1 : 0);
-      i.fire = (inp.buttons & 1) !== 0;
+      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen;
       i.ads = (inp.buttons & 4) !== 0;
     }
     const q = this.queue;
@@ -215,7 +283,8 @@ export class PlayerController {
     i.reload = q.reload;
     i.switchTo = q.switchTo;
     i.card = q.cards.length ? q.cards.shift() : -1;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards };
+    i.command = q.command;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null };
     return i;
   }
 }

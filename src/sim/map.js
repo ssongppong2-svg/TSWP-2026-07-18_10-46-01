@@ -1,72 +1,8 @@
 import { CELL } from './constants.js';
+import { getMapDef } from './maps/index.js';
 
-// ─────────────────────────────────────────────────────────────
-// 맵: 포스 바운드 (Force Bound)
-// 한 글자 = 2m × 2m 한 칸. 글자만 바꾸면 맵을 직접 고칠 수 있어요.
-//   #  벽 (4.8m)            C  큰 상자 (2.2m, 탄성판으로 올라갈 수 있음)
-//   c  작은 상자 (1.0m)      =  낮은 방벽 (1.1m)
-//   .  바닥                  a / b  A·B 구역 바닥
-//   A / B  폭탄 위치          F / D  포스팀 / 해체팀 시작 위치
-// 위쪽(북쪽)이 포스팀 진영, 아래쪽(남쪽)이 해체팀 진영입니다.
-// ─────────────────────────────────────────────────────────────
-export const FORCE_BOUND = {
-  id: 'force-bound',
-  name: '포스 바운드',
-  layout: [
-    '####################################',
-    '##................................##',
-    '##....C.......FFFFFFFF.......C....##',
-    '##................................##',
-    '##...#######............#######...##',
-    '##...........####..####...........##',
-    '##.C.........##......##.........C.##',
-    '##.aaaaaa==a.##.CCCC.##.b==bbbbbb.##',
-    '##.aaaaaaaaa.##......##.bbbbbbbbb.##',
-    '##.aCCaaaaaa.##.c..c.##.bbbbbbCCb.##',
-    '##.aaaaaaaaa.##......##.bbbbbbbbb.##',
-    '##.aaaaAaaaa............bbbbBbbbb.##',
-    '##.aacaaaaaa............bbbbbbcbb.##',
-    '##.aaaaaacaa............bbcbbbbbb.##',
-    '##.aaaaaacaa.##......##.bbcbbbbbb.##',
-    '##.aCaaaaaaa.##..CC..##.bbbbbbbCb.##',
-    '##...........##......##...........##',
-    '####...########......########...####',
-    '####...########......########...####',
-    '##...c.########C....C########.c...##',
-    '##.....########......########.....##',
-    '##................................##',
-    '##........c..............c........##',
-    '##................................##',
-    '##.....########.C..C.########.....##',
-    '##.....########......########.....##',
-    '##.C...########......########...C.##',
-    '##.C...########..CC..########...C.##',
-    '##.....########......########.....##',
-    '##...##########......##########...##',
-    '##...##########......##########...##',
-    '##.....########......########.....##',
-    '##................................##',
-    '##................................##',
-    '##....C......................C....##',
-    '##....c......................c....##',
-    '##............DDDDDDDD............##',
-    '##................................##',
-    '##................................##',
-    '####################################',
-  ],
-  // 포스팀 봇이 지키는 자리 (r=줄, c=칸, lr/lc=바라볼 칸)
-  holds: {
-    A: [
-      { r: 8, c: 10, lr: 12, lc: 14 },
-      { r: 10, c: 3, lr: 17, lc: 4 },
-    ],
-    B: [
-      { r: 8, c: 25, lr: 12, lc: 21 },
-      { r: 10, c: 32, lr: 17, lc: 31 },
-    ],
-    mid: [{ r: 8, c: 17, lr: 22, lc: 17 }],
-  },
-};
+// 맵 데이터(글자 격자·구역 이름 등)는 ./maps/ 폴더에 있다. 이 파일은 격자를 게임에서 쓰는 형태로 바꾼다.
+export { FORCE_BOUND } from './maps/force-bound.js';
 
 export const TILES = {
   '#': { h: 4.8, kind: 'wall' },
@@ -76,9 +12,12 @@ export const TILES = {
 };
 
 export class GameMap {
-  constructor(def = FORCE_BOUND) {
+  constructor(def = getMapDef()) {
+    if (typeof def === 'string') def = getMapDef(def);
     this.def = def;
+    this.id = def.id;
     this.name = def.name;
+    this.weather = def.weather ?? 'clear';
     this.rows = def.layout.length;
     this.cols = def.layout[0].length;
     this.width = this.cols * CELL;
@@ -110,8 +49,23 @@ export class GameMap {
       }
     }
     this.bombs.sort((a, b) => a.id.localeCompare(b.id));
-    const toWorld = (h) => ({ x: this.cellX(h.c), z: this.cellZ(h.r), lookX: this.cellX(h.lc), lookZ: this.cellZ(h.lr) });
+    const toWorld = (h) => ({
+      x: this.cellX(h.c),
+      z: this.cellZ(h.r),
+      lookX: this.cellX(h.lc),
+      lookZ: this.cellZ(h.lr),
+      via: h.via ? { x: this.cellX(h.via.c), z: this.cellZ(h.via.r) } : null,
+    });
     this.holds = Object.fromEntries(Object.entries(def.holds ?? {}).map(([k, list]) => [k, list.map(toWorld)]));
+    this.staging = Object.fromEntries(Object.entries(def.staging ?? {}).map(([k, list]) => [k, list.map(toWorld)]));
+    this.callouts = def.callouts ?? [];
+  }
+
+  // 무전 보고용 구역 이름 (없으면 null)
+  calloutAt(x, z) {
+    const { c, r } = this.toCell(x, z);
+    for (const k of this.callouts) if (r >= k.r0 && r <= k.r1 && c >= k.c0 && c <= k.c1) return k.name;
+    return null;
   }
 
   idx(c, r) {

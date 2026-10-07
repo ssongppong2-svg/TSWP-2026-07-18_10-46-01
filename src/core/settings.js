@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   bodycam: true, // 바디캠 렌즈 효과
   shake: 1, // 화면 흔들림 세기
+  crosshair: 'dot', // 조준점: 'dot' 작은 점 / 'off' 없음
+  mapId: 'force-bound',
 };
 
 export function loadSettings() {
