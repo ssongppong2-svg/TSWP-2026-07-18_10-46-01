@@ -424,6 +424,14 @@ export class Hud {
         if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `폭탄 ${near.id} · 아군 해체 진행 중. 엄호.` : `<kbd>F</kbd> 폭탄 ${near.id} 해체 개시`;
         else prompt = `폭탄 ${near.id} · 방어 유지`;
       }
+      // 지렛대 (지레 셔터)
+      const lever = !near && m.devices?.leverAt(a);
+      if (lever) prompt = `<kbd>F</kbd> ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
+      // 미는 상자: 붙어서 밀고 있으면 합력 표시
+      if (!near && !lever) {
+        const crate = m.devices?.list.find((d) => d.type === 'crate' && d.st.pushers > 0 && Math.hypot(a.pos.x - m.map.cellX(d.st.c), a.pos.z - m.map.cellZ(d.st.r)) < 1.7);
+        if (crate) prompt = `상자 미는 중 · 합력 ${crate.st.pushers}명 <small>(같은 방향으로 함께 밀면 더 빨리)</small>`;
+      }
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';
       else if (a.slippery) prompt = '마찰력 0 구역 · 제동 불가';

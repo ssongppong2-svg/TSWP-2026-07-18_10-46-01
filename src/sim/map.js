@@ -25,7 +25,7 @@ export const TILES = {
 };
 
 // 막힌 구간의 종류 (화면에서 재질을 고를 때 씀)
-export const KIND = { wall: 1, slab: 2, rail: 3, crate: 4, bigCrate: 5, barrier: 6, roof: 7, sill: 8, lintel: 9 };
+export const KIND = { wall: 1, slab: 2, rail: 3, crate: 4, bigCrate: 5, barrier: 6, roof: 7, sill: 8, lintel: 9, gate: 10, lift: 11, push: 12 };
 export const KIND_NAME = Object.fromEntries(Object.entries(KIND).map(([k, v]) => [v, k]));
 const PROP_KINDS = new Set([KIND.crate, KIND.bigCrate, KIND.barrier]);
 
@@ -66,6 +66,18 @@ export class GameMap {
     this.siteCells = { A: [], B: [] };
     this.props = []; // 상자·방벽 { c, r, y, h, kind }
     this.roofs = (def.roofs ?? []).map((q) => ({ ...q }));
+    // 맵 장치 (devices.js가 움직임): 승강기 칸·미끄럼틀 칸·탄성 발판 칸
+    this.devices = (def.devices ?? []).map((d, id) => ({ ...d, id }));
+    this.liftCells = new Set();
+    this.slideCells = new Set();
+    this.padCells = new Set();
+    for (const d of this.devices) {
+      if (d.type === 'lift') this.liftCells.add(d.r * this.cols + d.c);
+      if (d.type === 'pad') this.padCells.add(d.r * this.cols + d.c);
+      if (d.type === 'slide') for (let r = d.r0; r <= d.r1; r++) for (let c = d.c0; c <= d.c1; c++) this.slideCells.add(r * this.cols + c);
+    }
+    this.staticSpans = []; // 칸마다 처음 만든 구간 (움직이는 장치 구간을 더하고 뺄 때 기준)
+    this.dyn = new Map(); // 칸 → 장치가 더한 구간 [y0, y1, kind]
 
     for (let r = 0; r < this.rows; r++) {
       const line = ground[r];
@@ -158,9 +170,59 @@ export class GameMap {
     if (up !== '#' && up !== 'w' && this.roofs.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1)) add(ROOF - SLAB, ROOF, KIND.roof);
     // 막힌 구간을 아래부터 정렬하고, 바닥에서 이어진 높이 (예전 heightAt)
     this.sortSpans(i);
+    this.staticSpans[i] = this.spansAt(c, r);
+    this.updateHeight(i);
+  }
+
+  updateHeight(i) {
+    if (this.rampDir[i]) return;
     let h = 0;
     for (let k = 0; k < this.sn[i]; k++) if (this.sy0[i * MAXS + k] <= h + 1e-3) h = Math.max(h, this.sy1[i * MAXS + k]);
     this.heights[i] = h;
+  }
+
+  // 장치가 칸에 구간을 더하거나(span) 뺌(null): 승강기 바닥판, 닫힌 셔터
+  setDynamic(c, r, span) {
+    const i = this.idx(c, r);
+    if (span) this.dyn.set(i, span);
+    else if (!this.dyn.delete(i)) return;
+    const list = [...this.staticSpans[i]];
+    if (span) list.push(span);
+    list.sort((a, b) => a[0] - b[0]);
+    this.sn[i] = list.length;
+    list.forEach(([y0, y1, kd], k) => {
+      this.sy0[i * MAXS + k] = y0;
+      this.sy1[i * MAXS + k] = y1;
+      this.sk[i * MAXS + k] = kd;
+    });
+    this.updateHeight(i);
+  }
+
+  // 닫힌 셔터처럼 지금 장치가 막고 있는 칸 (길찾기가 피함)
+  dynBlocked(c, r) {
+    const d = this.inBounds(c, r) && this.dyn.get(this.idx(c, r));
+    return !!d && (d[2] === KIND.gate || d[2] === KIND.push);
+  }
+
+  isLift(c, r) {
+    return this.liftCells.has(r * this.cols + c);
+  }
+
+  isPad(c, r) {
+    return this.padCells.has(r * this.cols + c);
+  }
+
+  isSlide(c, r) {
+    return this.slideCells.has(r * this.cols + c);
+  }
+
+  // 미끄럼틀 위면 내려가는 방향 (단위 벡터), 아니면 null
+  slideAt(x, z) {
+    const { c, r } = this.toCell(x, z);
+    if (!this.inBounds(c, r) || !this.isSlide(c, r)) return null;
+    const d = this.rampDir[this.idx(c, r)];
+    if (!d) return null;
+    return [null, { x: 0, z: 1 }, { x: 0, z: -1 }, { x: 1, z: 0 }, { x: -1, z: 0 }][d];
   }
 
   sortSpans(i) {
@@ -215,7 +277,7 @@ export class GameMap {
         for (const [dc, dr, bit] of EDGES) {
           const nc = c + dc, nr = r + dr;
           if (!this.inBounds(nc, nr)) continue;
-          if (this.surfaces(nc, nr).includes(STORY)) continue;
+          if (this.surfaces(nc, nr).includes(STORY) || this.isLift(nc, nr)) continue;
           // 그 높이에 벽·창턱이 있으면 난간 필요 없음
           if (this.spansAt(nc, nr).some(([y0, y1]) => y0 <= STORY + 0.3 && y1 >= STORY + 0.5)) continue;
           // 계단 윗끝이 이 가장자리에 닿아 있으면 트여 있음

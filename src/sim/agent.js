@@ -1,3 +1,4 @@
+import { SLIDE } from './devices.js';
 import { PLAYER, ULT } from './constants.js';
 import { LOADOUT_SLOTS, WEAPONS } from './data.js';
 
@@ -192,9 +193,22 @@ export function stepMovement(agent, intent, map, dt, canMove) {
   const sin = Math.sin(agent.yaw), cos = Math.cos(agent.yaw);
   const wx = -sin * mz + cos * mx;
   const wz = -cos * mz - sin * mx;
+  // 밀려는 방향 (상자 밀기에 씀)
+  agent.wish = { x: wx, z: wz };
   const speed = moveSpeed(agent, intent);
 
-  if (agent.onGround) {
+  const slide = agent.onGround ? map.slideAt?.(agent.pos.x, agent.pos.z) : null;
+  if (slide) {
+    // 마찰 미끄럼틀: 마찰력이 거의 없어 내려가는 쪽으로 계속 빨라지고, 거슬러 오를 수 없음 (옆으로만 조금 조종)
+    const along = vel.x * slide.x + vel.z * slide.z;
+    const side = { x: -slide.z, z: slide.x };
+    const sideIn = wx * side.x + wz * side.z;
+    const sideV = vel.x * side.x + vel.z * side.z;
+    const down = Math.min(SLIDE.maxSpeed, Math.max(0, along) + SLIDE.accel * dt);
+    const lateral = sideV + (sideIn * SLIDE.control - sideV) * Math.min(1, dt * 6);
+    vel.x = slide.x * down + side.x * lateral;
+    vel.z = slide.z * down + side.z * lateral;
+  } else if (agent.onGround) {
     if (agent.slippery) {
       vel.x += wx * P.slipAccel * dt;
       vel.z += wz * P.slipAccel * dt;

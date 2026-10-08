@@ -8,7 +8,7 @@ import { emptyIntent, freshAmmo } from '../sim/agent.js';
 import { PROJECTILE } from '../sim/constants.js';
 import { WEAPONS } from '../sim/data.js';
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
 const ITEMS = [...WEAP, 'light', 'heavy']; // 상점에서 사는 것
 const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
@@ -97,6 +97,7 @@ export class HostSync {
     if (Array.isArray(v)) return v.map((x) => this.enc(x, d + 1));
     if (v.stats && v.pos && v.team) return { $a: this.ai(v) };
     if ('progress' in v && 'picker' in v) return { $b: v.id };
+    if (v.st && v.type && this.match.devices?.list.includes(v)) return { $d: v.id };
     const o = {};
     for (const k in v) {
       if (k === 'prev' || k === 'projectile') continue;
@@ -153,6 +154,7 @@ export class HostSync {
       O: TEAMS_.map((t) => (m.orders[t] ? this.enc(m.orders[t], 1) : 0)),
       I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t), r1(i.y ?? 0)])),
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
+      D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)
       E: this.events.map((e) => [e.s, e.p]),
     };
     if (m.phase === 'ended') snap.R = m.reason;
@@ -302,6 +304,7 @@ export class ClientSync {
       b.picker = pk >= 0 ? m.agents[pk]?.id ?? null : null;
       b.progress = pr;
     });
+    if (snap.D) m.devices.unpack(snap.D);
     m.zones = mergeById(m.zones, snap.Z);
     m.veils = mergeById(m.veils, snap.V);
     m.shields = mergeById(m.shields, snap.S);
@@ -360,6 +363,7 @@ export class ClientSync {
     if (Array.isArray(v)) return v.map((x) => this.dec(x));
     if ('$a' in v) return this.match.agents[v.$a] ?? null;
     if ('$b' in v) return this.match.bombById(v.$b);
+    if ('$d' in v) return this.match.devices?.list[v.$d] ?? null;
     const o = {};
     for (const k in v) o[k] = this.dec(v[k]);
     return o;

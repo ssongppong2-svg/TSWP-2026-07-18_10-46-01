@@ -66,6 +66,8 @@ export class NavGrid {
     for (let r = 0; r < this.rows; r++) {
       for (let c = 0; c < this.cols; c++) {
         const i = map.idx(c, r);
+        // 승강기·탄성 발판 칸은 봇이 지나가지 않음 (바닥판이 오르내리거나 밟으면 튕겨 오름)
+        if (map.isLift?.(c, r) || map.isPad?.(c, r)) continue;
         const ramp = map.ramp(c, r);
         if (ramp) {
           // 계단 위 머리 공간 확인
@@ -103,7 +105,10 @@ export class NavGrid {
             if (n.ramp && m.ramp && n.ramp.dir === m.ramp.dir && Math.abs(n.ramp.h0 - m.ramp.h0) < 0.01) this.edges[a].push([b, 1]);
             continue;
           }
-          if (Math.abs(ya - yb) <= STEP) this.edges[a].push([b, 1]);
+          if (Math.abs(ya - yb) > STEP) continue;
+          // 마찰 미끄럼틀: 내려가는 쪽으로만 (거슬러 오를 수 없음)
+          if ((map.isSlide?.(n.c, n.r) || map.isSlide?.(m.c, m.r)) && m.y > n.y + 0.05) continue;
+          this.edges[a].push([b, 1]);
         }
         // 2층 가장자리 → 아래가 트인 이웃 칸의 1층으로 뛰어내림
         if (!n.ramp && n.y > STORY - 0.5 && !map.railBetween(n.c, n.r, dc, dr)) {
@@ -185,6 +190,7 @@ export class NavGrid {
     const t = this.nodeNear(to.x, to.y ?? 0, to.z);
     if (s == null || t == null) return null;
     const nodes = this.nodes;
+    const map = this.map;
     const N = nodes.length;
     const g = new Float32Array(N).fill(Infinity);
     const came = new Int32Array(N).fill(-1);
@@ -209,6 +215,8 @@ export class NavGrid {
       closed[cur] = 1;
       for (const [b, cost] of this.edges[cur]) {
         if (closed[b]) continue;
+        // 닫힌 셔터 칸은 피함
+        if (map.dynBlocked?.(nodes[b].c, nodes[b].r) && nodes[b].y < 1) continue;
         const ng = g[cur] + cost;
         if (ng < g[b]) {
           g[b] = ng;

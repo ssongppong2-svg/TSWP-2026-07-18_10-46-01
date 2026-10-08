@@ -155,3 +155,27 @@ test('시작 정보 압축: 풀었을 때 명단·패치가 같음', async () =>
   assert.deepEqual(back.roster, plan.roster);
   assert.deepEqual(back.loadouts, plan.loadouts);
 });
+
+test('온라인 동기화: 맵 장치(지레 셔터·승강기) 상태가 참가자 화면에 전달되고 길이 막힘', () => {
+  const { host, client } = setup({ mapId: 'science-hall' });
+  const hs = new HostSync(host);
+  client.localAgent = client.agentById('defuse-1');
+  const cs = new ClientSync(client, 'defuse-1');
+  host.phase = 'live';
+  const gate = host.devices.list.find((d) => d.type === 'gate');
+  const lever = gate.levers[0];
+  const pusher = host.agentById('defuse-0');
+  host.setController(pusher.id, { getIntent: (m, a) => emptyIntent(a) });
+  pusher.pos.x = pusher.prev.x = host.map.cellX(lever.c);
+  pusher.pos.z = pusher.prev.z = host.map.cellZ(lever.r);
+  pusher.pos.y = pusher.prev.y = 0;
+  assert.ok(host.devices.tryUse(pusher), '지렛대 사용');
+  for (let k = 0; k < 60 * 6; k++) host.tick(DT);
+  cs.apply(JSON.parse(JSON.stringify(hs.snapshot())), host.time);
+  const cg = client.devices.list.find((d) => d.type === 'gate');
+  const [r, c] = cg.cells[0];
+  assert.ok(cg.st.closed && client.map.dynBlocked(c, r), '참가자 맵에서도 셔터가 닫혀 막힘');
+  const hl = host.devices.list.find((d) => d.type === 'lift');
+  const cl = client.devices.list.find((d) => d.type === 'lift');
+  assert.ok(Math.abs(hl.st.y - cl.st.y) < 0.02, '승강기 높이 같음');
+});

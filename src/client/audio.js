@@ -472,6 +472,28 @@ const SOUNDS = {
     const o = a.out(pos, 0.2 * vol, 0.3, 0.05);
     a.tone(o, t, 0.2, { type: 'sine', freq: 700, to: 220, gain: 0.25 });
   },
+  // 셔터가 말려 내려오거나 올라가는 철판 소리
+  shutter(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 1.0, 0.25);
+    for (let i = 0; i < 9; i++) a.noise(o, t + i * 0.075, 0.06, { type: 'bandpass', freq: 900 + Math.random() * 500, q: 4, gain: 0.5 });
+    a.noise(o, t, 0.7, { type: 'lowpass', freq: 260, gain: 0.35, attack: 0.05 });
+  },
+  shutterStop(a, t, pos, vol) {
+    const o = a.out(pos, 0.6 * vol, 0.5, 0.25);
+    a.noise(o, t, 0.15, { type: 'lowpass', freq: 380, gain: 1 });
+    a.tone(o, t, 0.18, { type: 'sine', freq: 90, to: 60, gain: 0.5 });
+  },
+  // 무거운 상자가 바닥을 긁으며 한 칸 밀림
+  cratePush(a, t, pos, vol) {
+    const o = a.out(pos, 0.55 * vol, 0.6, 0.2);
+    a.noise(o, t, 0.32, { type: 'bandpass', freq: 320, q: 1.2, gain: 0.9, attack: 0.03, sweepTo: 180 });
+    a.noise(o, t + 0.3, 0.08, { type: 'lowpass', freq: 200, gain: 0.7 });
+  },
+  liftStop(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 0.5, 0.2);
+    a.noise(o, t, 0.1, { type: 'lowpass', freq: 300, gain: 0.8 });
+    a.tone(o, t + 0.02, 0.25, { type: 'triangle', freq: 220, to: 180, gain: 0.12 });
+  },
   pad(a, t, pos, vol) {
     const o = a.out(pos, 0.6 * vol, 0.7, 0.15);
     a.noise(o, t, 0.12, { type: 'lowpass', freq: 220, gain: 1 });

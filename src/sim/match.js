@@ -10,6 +10,7 @@ import { CONCEPTS } from './concepts.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
+import { Devices } from './devices.js';
 
 // 팀 명단 (포스 패치 선택 화면과 경기에서 같은 id를 씀)
 export function makeRoster(playerTeam, playerName = '나') {
@@ -72,6 +73,7 @@ export class Match {
     this.events = new Emitter();
     this.playerTeam = playerTeam;
     this.agents = [];
+    this.devices = new Devices(this); // 탄성 발판·승강기·지레 셔터·미끄럼틀
     this.controllers = new Map();
     this.projectiles = [];
     this.veils = [];
@@ -193,6 +195,7 @@ export class Match {
     this.timeLeft = ROUND_TIME;
     this.roundWinner = null;
     this.roundReason = '';
+    this.devices.reset();
     this.placeBombs();
     const firstOfHalf = this.round === 1 || this.round === ROUNDS.half + 1;
     for (const a of this.agents) {
@@ -423,6 +426,7 @@ export class Match {
     const mobile = this.mobile;
 
     this.updateZones(dt);
+    this.devices.update(dt);
     for (const a of this.agents) {
       if (!a.alive) {
         a.deadT += dt;
@@ -475,7 +479,7 @@ export class Match {
     if (intent.report && live) this.reportContact(a);
     if (live) {
       if (a.lockpick) this.stepLockpick(a, intent, dt);
-      else if (intent.interact && canAct) this.tryStartLockpick(a);
+      else if (intent.interact && canAct && !this.devices.tryUse(a)) this.tryStartLockpick(a);
       if (canAct && !a.lockpick) {
         intent.patch.forEach((pressed, i) => {
           if (pressed) this.usePatch(a, i);
@@ -793,6 +797,8 @@ export class Match {
   clientTick(dt) {
     this.time += dt;
     if (this.phase === 'live') this.timeLeft = Math.max(0, this.timeLeft - dt);
+    // 승강기·탄성 발판은 화면에서도 미리 움직임 (방장 상태를 받으면 맞춤)
+    this.devices.update(dt);
     const a = this.localAgent;
     if (a?.alive && this.phase !== 'ended') {
       const ctrl = this.controllers.get(a.id);

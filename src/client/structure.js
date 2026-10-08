@@ -181,7 +181,7 @@ export function buildStructure(map, mats, { museum = false } = {}) {
   buildStairs(map, q, shade);
 
   // 재질별 메쉬
-  const order = ['wall', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing'];
+  const order = ['wall', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip'];
   const alias = { grateUnder: 'grate' };
   for (const name of order) {
     const b = Q[name];
@@ -272,6 +272,34 @@ function buildStairs(map, q, shade) {
         return o && o.dir === rp.dir && Math.abs(o.h0 - rp.h0) < EPS;
       };
       const H = CELL / 2;
+      if (map.isSlide?.(c, r)) {
+        // 마찰 미끄럼틀: 계단 대신 매끈한 판 + 양옆 낮은 턱
+        const k = (rp.h1 - rp.h0) / CELL;
+        const nl = Math.hypot(k, 1);
+        const n = [(-ux * k) / nl, 1 / nl, (-uz * k) / nl];
+        const a0 = P(0, -H, rp.h0), a1 = P(0, H, rp.h0), a2 = P(CELL, H, rp.h1), a3 = P(CELL, -H, rp.h1);
+        const sh = shade(c, r, rp.h1 + 0.05);
+        q('chute').quad(a0, a1, a2, a3, n, [a0[0] / 4, -a0[2] / 4], [a1[0] / 4, -a1[2] / 4], [a2[0] / 4, -a2[2] / 4], [a3[0] / 4, -a3[2] / 4], sh);
+        for (const sgn of [-1, 1]) {
+          if (sameSide(sgn)) continue;
+          const t = sgn * H;
+          const b0 = P(0, t, 0), b1 = P(CELL, t, 0), b2 = P(CELL, t, rp.h1), b3 = P(0, t, rp.h0);
+          const nn = [wx * sgn, 0, wz * sgn];
+          const quad = sgn > 0 ? [b0, b1, b2, b3] : [b1, b0, b3, b2];
+          const hs = (p) => (p[0] * ux + p[2] * uz) / 4;
+          q('wall').quad(quad[0], quad[1], quad[2], quad[3], nn, [hs(quad[0]), quad[0][1] / 4.8], [hs(quad[1]), quad[1][1] / 4.8], [hs(quad[2]), quad[2][1] / 4.8], [hs(quad[3]), quad[3][1] / 4.8], shade(c + wx * sgn, r + wz * sgn, 0.5));
+          // 턱 (안쪽 면 + 윗면)
+          const L = 0.28, T = 0.08;
+          const i0 = P(0, t - sgn * T, rp.h0), i1 = P(CELL, t - sgn * T, rp.h1), i2 = P(CELL, t - sgn * T, rp.h1 + L), i3 = P(0, t - sgn * T, rp.h0 + L);
+          const ni = [-wx * sgn, 0, -wz * sgn];
+          const qi = sgn > 0 ? [i1, i0, i3, i2] : [i0, i1, i2, i3];
+          q('chuteLip').quad(qi[0], qi[1], qi[2], qi[3], ni, [0, 0], [1, 0], [1, 1], [0, 1], sh);
+          const o0 = P(0, t, rp.h0 + L), o1 = P(CELL, t, rp.h1 + L), o2 = P(CELL, t - sgn * T, rp.h1 + L), o3 = P(0, t - sgn * T, rp.h0 + L);
+          const qo = sgn > 0 ? [o0, o1, o2, o3] : [o1, o0, o3, o2];
+          q('chuteLip').quad(qo[0], qo[1], qo[2], qo[3], [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], sh);
+        }
+        continue;
+      }
       for (let i = 0; i < STEPS; i++) {
         const ya = rp.h0 + i * rise, yb = ya + rise;
         const s0 = i * depth, s1 = s0 + depth;

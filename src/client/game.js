@@ -14,6 +14,7 @@ import { Input, PlayerController } from './input.js';
 import { ViewModel } from './viewmodel.js';
 import { QUALITY, QUALITY_ORDER } from './stage.js';
 import { ConceptCards } from './exhibits.js';
+import { DevicesView } from './devices-view.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID } from '../sim/concepts.js';
 import { addConcept, loadProgress } from '../core/progress.js';
@@ -92,6 +93,7 @@ export class GameClient {
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
+    this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
     this.newConcepts = [];
     this.effects.onCasingBounce = (p) => this.audio.play('casing', { pos: p });
@@ -425,6 +427,15 @@ export class GameClient {
     });
     ev.on('swap', (e) => viewing(e.agent) && A.play('swap'));
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
+    ev.on('padLaunch', (e) => A.play('pad', { pos: e.agent.pos, vol: viewing(e.agent) ? 1.2 : 1 }));
+    ev.on('gate', (e) => {
+      const [r, c] = e.device.cells[0];
+      const pos = { x: this.match.map.cellX(c), y: 2, z: this.match.map.cellZ(r) };
+      A.play(e.done ? 'shutterStop' : 'shutter', { pos });
+      if (!e.done && e.by && isMe(e.by)) this.hud.radio({ name: e.device.name ?? '지레 셔터', text: `${e.closed ? '셔터 내림' : '셔터 올림'} · 지레: 받침점에서 먼 곳의 작은 힘으로 무거운 셔터를 움직임`, kind: 'order' });
+    });
+    ev.on('cratePush', (e) => A.play('cratePush', { pos: { x: this.match.map.cellX(e.device.st.c), y: 0.5, z: this.match.map.cellZ(e.device.st.r) } }));
+    ev.on('lift', (e) => A.play('liftStop', { pos: { x: this.match.map.cellX(e.device.c), y: e.device.st.y, z: this.match.map.cellZ(e.device.r) } }));
     ev.on('land', (e) => {
       if (viewing(e.agent)) {
         this.viewmodel.landed(e.speed);
@@ -502,6 +513,7 @@ export class GameClient {
     }
     this.effects.update(dt, alpha, this.team);
     this.conceptCards.update(time, this.player.id);
+    this.devicesView.update();
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
@@ -748,6 +760,7 @@ export class GameClient {
     }
     this.effects.dispose();
     this.conceptCards.dispose();
+    this.devicesView.dispose();
     this.stage.overlay = null;
     this.stage.onThunder = null;
     this.stage.setZoom(1);

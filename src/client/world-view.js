@@ -91,6 +91,12 @@ export function buildWorld(map, baseTex) {
     railGlass: new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2, depthWrite: false }),
     roofTop: new THREE.MeshStandardMaterial({ ...V, color: '#3d4044', roughness: 0.95 }),
     tread: new THREE.MeshStandardMaterial({ ...V, map: slabTex, roughness: museum ? 0.35 : 0.85, color: museum ? bright(1.08, 1.06, 1.02) : floorCol }),
+    chute: museum
+      ? new THREE.MeshStandardMaterial({ ...V, color: '#dfe7ec', roughness: 0.12, metalness: 0.1 })
+      : new THREE.MeshStandardMaterial({ ...V, color: '#c8642a', roughness: 0.25, metalness: 0.35 }),
+    chuteLip: museum
+      ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85, side: THREE.DoubleSide })
+      : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
     nosing: museum
       ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85 })
       : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.6, metalness: 0.1 }),
