@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "포스 바운드 — 중1 과학 「힘」 단원으로 만든 5:5 FPS",
+  "description": "FORCE (임시 제목) — 중1 과학 「힘」 단원으로 만든 5:5 전술 FPS",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
