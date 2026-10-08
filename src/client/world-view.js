@@ -95,7 +95,7 @@ export function buildWorld(map, baseTex) {
   wallMesh.castShadow = true;
   wallMesh.receiveShadow = true;
   group.add(wallMesh);
-  const topMesh = new THREE.Mesh(tops.build(), new THREE.MeshStandardMaterial({ map: tex.wallTop, roughness: 0.7, metalness: 0.5 }));
+  const topMesh = new THREE.Mesh(tops.build(), new THREE.MeshStandardMaterial({ map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }));
   topMesh.castShadow = true;
   topMesh.receiveShadow = true;
   group.add(topMesh);
