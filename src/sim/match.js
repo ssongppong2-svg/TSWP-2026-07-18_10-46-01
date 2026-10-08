@@ -59,7 +59,9 @@ export function segmentShield(a, b, sh) {
 
 export class Match {
   // conceptIds: 개념 카드로 먼저 놓을 개념 (아직 도감에 없는 것 등). conceptCount: 맵에 놓을 카드 수
-  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4 } = {}) {
+  // roster: 직접 정한 명단 (온라인: 사람 여러 명 + 봇). client: 온라인 참가자 화면용 — 규칙 계산은 방장이 하고
+  //         여기서는 자기 요원의 이동·사격 연출만 미리 보여 줌 (피해·패치·해체는 방장 결과를 받아 씀)
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false } = {}) {
     this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
@@ -88,8 +90,10 @@ export class Match {
     this.warned = new Set();
     this.forceWipedSent = false;
     this.bombs = this.map.bombs.map((b) => ({ id: b.id, x: b.x, y: 0, z: b.z, state: 'armed', picker: null, progress: 0, alertT: -99 }));
+    this.client = client;
+    this.localAgent = null; // client 모드에서 이 화면의 요원
 
-    const roster = makeRoster(playerTeam, playerName);
+    roster ??= makeRoster(playerTeam, playerName);
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
       const members = roster.filter((m) => m.team === team);
       const spawns = this.map.spawns[team];
@@ -104,6 +108,7 @@ export class Match {
             loadout: loadouts.get(m.id) ?? [],
           }),
         );
+        this.agents.at(-1).human = !!m.human; // 온라인으로 들어온 다른 사람 (봇이 조종하지 않음)
       });
     }
     this.byId = new Map(this.agents.map((a) => [a.id, a]));
@@ -161,6 +166,7 @@ export class Match {
 
   // ───────────────────────── 한 틱 진행 ─────────────────────────
   tick(dt) {
+    if (this.client) return this.clientTick(dt);
     this.time += dt;
     if (this.phase === 'ended') {
       this.endT += dt;
@@ -243,7 +249,11 @@ export class Match {
     a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
     a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * 7, 0, 1);
     this.stepWeapon(a, intent, dt, live && !a.lockpick);
+    this.moveAgent(a, intent, dt, live);
+  }
 
+  // 이동 + 착지 소리 + 발걸음 (방장·참가자 화면이 같이 씀)
+  moveAgent(a, intent, dt, live) {
     const wasGround = a.onGround;
     const vy = a.vel.y;
     stepMovement(a, intent, this.map, dt, live && !a.lockpick);
@@ -270,6 +280,7 @@ export class Match {
   // ───────────────────────── 소리 ─────────────────────────
   // 소리를 남김: 적 봇은 들을 수 있는 거리 안이면 듣고, 무게 감지기는 발걸음·총성을 탐지
   makeNoise(a, kind, at = null) {
+    if (this.client) return null; // 소리 판정(봇 청각·무게 감지기)은 방장만
     const loudKinds = kind === 'rifle' || kind === 'pistol';
     const radius = (NOISE[kind] ?? 10) * (this.map.weather === 'rain' && !loudKinds ? NOISE.rainMult : 1);
     const p = at ?? a.pos;
@@ -487,6 +498,11 @@ export class Match {
     const w = WEAPONS.knife;
     const m = heavy ? w.heavy : w.light;
     a.meleeCd = m.rate;
+    if (this.client) {
+      // 참가자 화면: 휘두르는 동작만 (맞았는지는 방장이 판정)
+      this.emit('melee', { agent: a, heavy, target: null });
+      return;
+    }
     this.makeNoise(a, 'knife');
     const eye = eyePos(a);
     const d = dirFromAngles(a.yaw, a.pitch);
@@ -512,6 +528,42 @@ export class Match {
     const tl = Math.hypot(tx, tz) || 1;
     const backstab = (fx * tx + fz * tz) / tl > 0.5;
     this.applyDamage(best, m.damage * (backstab ? w.backstabMult : 1), a, { weapon: 'knife', pos: chestPos(best), backstab });
+  }
+
+  // ───────────────────────── 온라인 참가자 화면 ─────────────────────────
+  // 방장이 보낸 상태를 적용하는 사이사이, 자기 요원만 미리 움직이고 총알 궤적은 화면용으로만 날림
+  clientTick(dt) {
+    this.time += dt;
+    if (this.phase === 'live') this.timeLeft = Math.max(0, this.timeLeft - dt);
+    const a = this.localAgent;
+    if (a?.alive && this.phase !== 'ended') {
+      const ctrl = this.controllers.get(a.id);
+      const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
+      const live = this.phase === 'live';
+      a.yaw = intent.yaw;
+      a.pitch = clamp(intent.pitch, -1.45, 1.45);
+      a.punch *= Math.exp(-dt * 8);
+      const w = WEAPONS[a.weapon];
+      a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
+      a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * 7, 0, 1);
+      this.stepWeapon(a, intent, dt, live && !a.lockpick && !a.held);
+      if (!a.held) this.moveAgent(a, intent, dt, live && !a.lockpick);
+    }
+    // 다른 요원의 총알 궤적 (화면용)
+    const keep = [];
+    for (const p of this.projectiles) {
+      p.prev.x = p.pos.x;
+      p.prev.y = p.pos.y;
+      p.prev.z = p.pos.z;
+      const next = { x: p.pos.x + p.vel.x * dt, y: p.pos.y + p.vel.y * dt, z: p.pos.z + p.vel.z * dt };
+      if (this.map.raycast(p.pos, next)) continue;
+      p.pos.x = next.x;
+      p.pos.y = next.y;
+      p.pos.z = next.z;
+      p.life -= dt;
+      if (p.life > 0) keep.push(p);
+    }
+    this.projectiles = keep;
   }
 
   // ───────────────────────── 투사체 ─────────────────────────
@@ -1000,7 +1052,7 @@ export class Match {
     bomb.picker = a.id;
     bomb.progress = 0;
     bomb.alertT = this.time;
-    a.lockpick = a.isPlayer
+    a.lockpick = a.isPlayer || a.human
       ? { bombId: bomb.id, kind: 'puzzle', puzzle: generatePuzzle(this.rng), selected: Array(CARD_COUNT).fill(false), turnT: 0 }
       : { bombId: bomb.id, kind: 'timed', t: 0, need: this.rng.range(BOMB.botTimeMin, BOMB.botTimeMax) };
     a.vel.x = 0;

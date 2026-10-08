@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { attachBots } from '../ai/bot.js';
+import { BotBrain, attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
-import { DT, NOISE, TEAMS } from '../sim/constants.js';
-import { PATCHES, WEAPONS } from '../sim/data.js';
+import { BOT_NAMES, DT, NOISE, TEAMS } from '../sim/constants.js';
+import { PATCHES, PATCH_ORDER, WEAPONS } from '../sim/data.js';
+import { ClientSync, HostSync, InputRecorder, RemoteController, rosterFor, unpackPlan } from '../net/protocol.js';
 import { Match } from '../sim/match.js';
 import { Hud } from '../ui/hud.js';
 import { LockpickUI } from '../ui/lockpick-ui.js';
@@ -24,28 +25,62 @@ const PATCH_SOUNDS = {
 
 // 한 경기를 화면에 연결: 시뮬레이션 + 3D + 소리 + HUD
 export class GameClient {
-  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, mapId, seed = Date.now(), hooks = {} }) {
+  // net: 온라인 경기 { role: 'host' | 'client', session, start(방장이 올린 시작 정보), myKey }
+  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, mapId, seed = Date.now(), hooks = {}, net = null }) {
     this.stage = stage;
     this.audio = audio;
     this.settings = settings;
     this.uiRoot = uiRoot;
     this.hooks = hooks;
-    this.team = team;
+    this.net = net;
 
-    stage.setMap(mapId ?? stage.map.id);
     // 개념 카드: 아직 도감에 없는 개념부터 (순서는 무작위)
     const have = loadProgress().concepts;
     const fresh = CONCEPTS.map((c) => c.id).filter((id) => !have.includes(id)).sort(() => Math.random() - 0.5);
-    this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh });
-    attachBots(this.match, difficulty);
-    this.player = this.match.player;
+    if (net) {
+      // 온라인: 방장이 정한 명단·패치·시드로 모두 같은 경기를 만듦
+      stage.setMap(net.start.map);
+      const plan = unpackPlan(net.start.p, PATCH_ORDER, BOT_NAMES);
+      const roster = rosterFor(plan, net.myKey);
+      this.keys = new Map(plan.roster.filter((r) => r.key).map((r) => [r.id, r.key]));
+      // 개념 카드는 모두에게 같은 것이 놓이도록 시드로만 정함
+      this.match = new Match({ map: stage.map, roster, loadouts: new Map(plan.loadouts), seed: net.start.seed, client: net.role === 'client' });
+      this.player = this.match.player;
+      team = this.player.team;
+      if (net.role === 'host') {
+        attachBots(this.match, net.start.diff);
+        this.hostSync = new HostSync(this.match, { maxBytes: 3300 });
+        for (const a of this.match.agents) {
+          if (!a.human) continue;
+          const key = this.keys.get(a.id);
+          this.match.setController(a.id, new RemoteController(() => net.session.inputOf(key), (s) => (this.hostSync.acks[a.id] = s)));
+        }
+      } else {
+        this.match.localAgent = this.player;
+        this.clientSync = new ClientSync(this.match, this.player.id);
+      }
+      this.netT = 0;
+      this.netN = 0;
+      this.netCheckT = 0;
+    } else {
+      stage.setMap(mapId ?? stage.map.id);
+      this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh });
+      attachBots(this.match, difficulty);
+      this.player = this.match.player;
+    }
+    this.team = team;
 
     this.input = new Input(stage.container);
     this.input.enabled = true;
     this.controller = new PlayerController(this.input, settings);
     this.controller.zoomOf = (a) => WEAPONS[a.weapon].adsZoom ?? 1;
     this.controller.syncFrom(this.player);
-    this.match.setController(this.player.id, this.controller);
+    if (net?.role === 'client') {
+      // 참가자: 입력을 기록해 방장에게 보내고, 이 화면에서는 이동·사격만 미리 보여 줌
+      this.recorder = new InputRecorder(this.controller);
+      this.recorder.onCard = (seq) => (this.clientSync.pendingCardSeq = seq);
+      this.match.setController(this.player.id, this.recorder);
+    } else this.match.setController(this.player.id, this.controller);
     this.input.onLockChange = (locked, info) => this.onLockChange(locked, info);
 
     this.views = new Map();
@@ -371,7 +406,10 @@ export class GameClient {
 
     const pressed = this.input.pressed.slice();
     this.controller.frame(this.player);
-    if (this.started && !this.paused) {
+    // 온라인 경기는 일시정지해도 멈추지 않음 (다른 사람이 계속 싸우는 중)
+    const running = this.net ? !this.netOver : this.started && !this.paused;
+    if (running) {
+      if (this.clientSync) this.netReceive(now);
       if (!this.player.alive && pressed.includes('Mouse0')) this.specIndex++;
       this.acc += dt;
       let steps = 0;
@@ -381,12 +419,14 @@ export class GameClient {
         steps++;
       }
       if (steps === 6) this.acc = 0;
+      if (this.clientSync) this.clientSync.smooth(dt, now / 1000);
+      if (this.net) this.netSend(dt);
       this.caughtT -= dt;
       this.sounds(dt);
       this.updateInspect(dt);
       this.watchPerformance(dt);
     }
-    const alpha = this.started && !this.paused ? Math.min(1, this.acc / DT) : 1;
+    const alpha = running ? Math.min(1, this.acc / DT) : 1;
     this.updateCamera(dt, alpha);
 
     const time = now / 1000;
@@ -536,6 +576,58 @@ export class GameClient {
     }
   }
 
+  // ───────────── 온라인 ─────────────
+  // 참가자: 방장 상태 받기. 방장이 사라지거나 다른 판을 시작했으면 끝냄
+  netReceive(now) {
+    const host = this.net.session.host();
+    if (!host || host.start?.id !== this.net.start.id) {
+      this.netLostT = (this.netLostT ?? 0) + 1;
+      if (this.netLostT > 180 && !this.ended) this.netAbort('방장과의 연결이 끊겼습니다.');
+      return;
+    }
+    this.netLostT = 0;
+    if (host.g) this.clientSync.apply(host.g, now / 1000);
+  }
+
+  // 방장: 초당 20번 상태 올리기 · 나간 사람은 봇이 대신 / 참가자: 초당 30번 입력 올리기
+  netSend(dt) {
+    const s = this.net.session;
+    this.netT -= dt;
+    if (this.netT > 0) return;
+    if (this.hostSync) {
+      this.netT = 0.05;
+      this.netN++;
+      s.set({ g: this.hostSync.snapshot({ withStats: this.netN % 10 === 0 }) });
+      this.netCheckT -= 0.05;
+      if (this.netCheckT <= 0) {
+        this.netCheckT = 1;
+        this.takeOverLeavers();
+      }
+    } else if (this.recorder?.latest) {
+      this.netT = 1 / 30;
+      s.set({ in: this.recorder.latest });
+    }
+  }
+
+  takeOverLeavers() {
+    const m = this.match;
+    m.agents.forEach((a) => {
+      if (!a.human) return;
+      const key = this.keys.get(a.id);
+      if (!this.net.session.gone(key)) return;
+      a.human = false;
+      const index = m.agents.filter((x) => x.team === a.team).indexOf(a);
+      m.setController(a.id, new BotBrain(a, m, this.net.start.diff, index));
+      m.radio(a, '연결 끊김 — 봇이 대신함', { kind: 'lost' });
+    });
+  }
+
+  netAbort(text) {
+    this.netOver = true;
+    this.hooks.onToast?.(text);
+    this.hooks.onAbort?.();
+  }
+
   // 프레임 유지: 2초마다 평균 프레임을 보고 해상도를 먼저 조절하고,
   // 해상도를 끝까지 낮춰도 30fps가 안 되면 (그래픽 '자동'일 때) 품질을 한 단계 내림
   watchPerformance(dt) {
@@ -572,6 +664,8 @@ export class GameClient {
 
   dispose() {
     this.disposed = true;
+    this.hostSync?.dispose();
+    if (this.net) this.net.session.set({ in: null, ...(this.hostSync ? { g: null } : {}) });
     cancelAnimationFrame(this.raf);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);

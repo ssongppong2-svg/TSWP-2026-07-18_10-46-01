@@ -430,9 +430,9 @@ export class BotBrain {
   hearReport(match, a) {
     const since = this.reportSeenT ?? match.time - 0.5;
     this.reportSeenT = match.time;
-    const rep = match.intel[a.team].findLast((i) => i.t > since && match.agentById(i.reporterId)?.isPlayer);
+    const rep = match.intel[a.team].findLast((i) => i.t > since && (match.agentById(i.reporterId)?.isPlayer || match.agentById(i.reporterId)?.human));
     if (!rep) return;
-    const mates = match.agents.filter((m) => m.alive && m.team === a.team && !m.isPlayer);
+    const mates = match.agents.filter((m) => m.alive && m.team === a.team && !m.isPlayer && !m.human);
     const nearest = mates.sort((p, q) => dist2(p.pos, rep) - dist2(q.pos, rep))[0];
     if (nearest?.id !== a.id || dist2(a.pos, rep) > 50) return;
     this.alertLook = { point: { x: rep.x, y: 1.3, z: rep.z }, until: match.time + 3 };
@@ -457,7 +457,7 @@ export class BotBrain {
       this.orderHold = { x: a.pos.x, z: a.pos.z, yaw: a.yaw };
       this.pauseT = 0;
       // 살아 있는 봇 중 가장 앞 번호가 대표로 응답
-      const first = match.agents.find((m) => m.alive && m.team === a.team && !m.isPlayer && m.id !== issuer.id);
+      const first = match.agents.find((m) => m.alive && m.team === a.team && !m.isPlayer && !m.human && m.id !== issuer.id);
       if (first?.id === a.id) this.ackT = 0.6;
     }
     const slot = Math.max(0, this.index - 1);
@@ -749,7 +749,7 @@ export function attachBots(match, difficulty) {
   };
   const counters = { defuse: 0, force: 0 };
   for (const a of match.agents) {
-    if (a.isPlayer) {
+    if (a.isPlayer || a.human) {
       counters[a.team]++;
       continue;
     }

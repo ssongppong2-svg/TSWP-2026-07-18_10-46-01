@@ -8,6 +8,8 @@ import { TEAMS } from './sim/constants.js';
 import { TeamDraft } from './sim/draft.js';
 import { makeRoster } from './sim/match.js';
 import * as S from './ui/screens.js';
+import { onlineScreen } from './ui/online.js';
+import { getMapDef } from './sim/maps/index.js';
 
 const app = document.getElementById('app');
 const ui = document.getElementById('ui');
@@ -93,11 +95,84 @@ ui.addEventListener('click', (e) => {
   if (e.target.closest('button')) audio.play('ui');
 });
 
+// 온라인: 연결 통로·방은 화면을 오가도 유지 (경기가 끝나면 같은 방 대기실로 돌아옴)
+const net = { transport: undefined, session: null, lastStart: null };
+
+function showOnline() {
+  endGame();
+  setScreen(onlineScreen({ settings, net, toast, onBack: showTitle, onStart: startNetGame }));
+}
+
+function startNetGame({ start, myKey, role }) {
+  saveSettings(settings);
+  setScreen(null);
+  closeModal();
+  audio.setRain(getMapDef(start.map).weather === 'rain' ? 1 : 0);
+  game = new GameClient({
+    stage,
+    audio,
+    settings,
+    uiRoot: ui,
+    net: { role, session: net.session, start, myKey },
+    hooks: {
+      onStarted: () => setOverlay(null),
+      onPause: () => setOverlay(S.pauseMenu({ onResume: () => game?.resume(), onSettings: openSettings, onControls: openControls, onQuit: leaveNetGame, online: true })),
+      onResume: () => {
+        setOverlay(null);
+        closeModal();
+      },
+      onToast: toast,
+      onQualityChange: () => saveSettings(settings),
+      onScoreboard: (show, match) => {
+        board?.remove();
+        board = null;
+        if (show) {
+          board = S.scoreboard(match, { onlyTeam: game?.team });
+          board.classList.add('floating');
+          ui.appendChild(board);
+        }
+      },
+      onAbort: () => showOnline(),
+      onEnd: (result) => {
+        endGame();
+        setScreen(
+          S.resultScreen({
+            result,
+            online: true,
+            onAgain: backToLobby,
+            onTeam: backToLobby,
+            onMenu: async () => {
+              await net.session?.leave();
+              showTitle();
+            },
+          }),
+        );
+      },
+    },
+  });
+  setOverlay(S.clickToStart({ team: game.team, loadout: game.player.patches.map((p) => p?.id ?? null), mapId: start.map, online: true, onClick: () => game.requestStart() }));
+}
+
+// 경기 중 나가기: 방장이면 경기가 끝나고, 참가자면 봇이 대신함
+function leaveNetGame() {
+  const host = game?.hostSync;
+  endGame();
+  if (host) net.session?.set({ start: null, g: null });
+  showOnline();
+}
+
+function backToLobby() {
+  if (net.session?.isHost) net.session.set({ start: null, g: null });
+  net.session?.set({ ready: false });
+  showOnline();
+}
+
 function showTitle() {
   endGame();
   setScreen(
     S.titleScreen({
       onStart: showTeam,
+      onOnline: showOnline,
       onCodex: () => openModal(S.codexModal({ onClose: closeModal })),
       onControls: openControls,
       onSettings: openSettings,
@@ -233,6 +308,9 @@ waitFonts().then(boot);
 // 자동 테스트용 (주소 끝에 ?debug)
 function exposeDebug() {
   window.forceBound = {
+    get net() {
+      return net;
+    },
     get game() {
       return game;
     },

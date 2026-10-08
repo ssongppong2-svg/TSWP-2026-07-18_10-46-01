@@ -21,7 +21,7 @@ const tierColor = (id) => PATCH_TIERS[PATCHES[id].tier].color;
 const slotKeys = (tier) => LOADOUT_SLOTS.filter((s) => s.tier === tier).map((s) => s.key).join('·');
 
 // ───────────────────────── 타이틀 ─────────────────────────
-export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex }) {
+export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline }) {
   const prog = loadProgress();
   const el = h(`
     <section class="screen title-screen">
@@ -31,7 +31,10 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         <div class="logo-ko">포스</div>
         <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>정보는 없다. 소리를 듣고, 분대를 지휘하고, 합력으로 기폭 장치를 해제하라.</p>
         <div class="menu">
-          <button class="btn primary big" data-act="start">작전 개시</button>
+          <div class="menu-main">
+            <button class="btn primary big" data-act="start">작전 개시 <small>봇 9명</small></button>
+            <button class="btn big online-btn" data-act="online">온라인 작전 <small>친구와 함께</small></button>
+          </div>
           <div class="menu-row">
             <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}</small></button>
             <button class="btn ghost" data-act="controls">조작 교범</button>
@@ -51,6 +54,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
     if (act === 'settings') onSettings();
     if (act === 'fullscreen') onFullscreen();
     if (act === 'codex') onCodex?.();
+    if (act === 'online') onOnline?.();
   });
   return el;
 }
@@ -397,7 +401,7 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
 }
 
 // ───────────────────────── 출격 대기 / 일시 중지 ─────────────────────────
-export function clickToStart({ team, loadout, mapId, onClick }) {
+export function clickToStart({ team, loadout, mapId, onClick, online = false }) {
   const map = getMapDef(mapId);
   const el = h(`
     <section class="overlay start-overlay t-${team}">
@@ -413,8 +417,9 @@ export function clickToStart({ team, loadout, mapId, onClick }) {
           const id = loadout[i];
           return `<div class="${id ? '' : 'empty'}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${s.key}</kbd>${id ? `${PATCH_ICONS[id]}<b>${PATCHES[id].name}</b>` : '<b>미장착</b>'}</div>`;
         }).join('')}</div>
-        <button class="btn primary big">클릭 · 작전 개시</button>
-        <p>마우스 고정 · <kbd>Esc</kbd> 일시 중지 · <kbd>Ctrl</kbd> 앉기 사용 시 전체 화면 권장(브라우저 단축키 충돌 방지)</p>
+        <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 작전 개시'}</button>
+        ${online ? '<p class="sc-online">온라인 경기 · 카운트다운은 이미 진행 중입니다</p>' : ''}
+        <p>마우스 고정 · <kbd>Esc</kbd> ${online ? '메뉴(경기는 계속)' : '일시 중지'} · <kbd>Ctrl</kbd> 앉기 사용 시 전체 화면 권장(브라우저 단축키 충돌 방지)</p>
       </div>
     </section>`);
   // 버튼뿐 아니라 화면 어디를 눌러도 시작
@@ -422,15 +427,16 @@ export function clickToStart({ team, loadout, mapId, onClick }) {
   return el;
 }
 
-export function pauseMenu({ onResume, onSettings, onControls, onQuit }) {
+export function pauseMenu({ onResume, onSettings, onControls, onQuit, online = false }) {
   const el = h(`
     <section class="overlay pause-overlay">
       <div class="pause-card">
-        <h2>작전 일시 중지</h2>
-        <button class="btn primary big" data-act="resume">작전 재개</button>
+        <h2>${online ? '메뉴 · 경기는 계속 진행 중' : '작전 일시 중지'}</h2>
+        ${online ? '<p class="pause-note">온라인 경기는 멈추지 않습니다. 메뉴를 보는 동안 요원은 제자리에 있습니다.</p>' : ''}
+        <button class="btn primary big" data-act="resume">${online ? '복귀' : '작전 재개'}</button>
         <button class="btn ghost" data-act="settings">설정</button>
         <button class="btn ghost" data-act="controls">조작 교범</button>
-        <button class="btn danger" data-act="quit">작전 이탈</button>
+        <button class="btn danger" data-act="quit">${online ? '대기실로 나가기 (봇이 대신함)' : '작전 이탈'}</button>
       </div>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -576,7 +582,7 @@ export function scoreboard(match, { onlyTeam = null } = {}) {
 }
 
 // ───────────────────────── 작전 결과 ─────────────────────────
-export function resultScreen({ result, onAgain, onTeam, onMenu }) {
+export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }) {
   const { match, winner, reason, team, player } = result;
   const won = winner === team;
   const used = [...new Set(player.patches.filter(Boolean).map((p) => p.id))];
@@ -620,9 +626,9 @@ export function resultScreen({ result, onAgain, onTeam, onMenu }) {
         <div class="concept-cards">${concepts.map((c) => `<div class="concept-card" style="--c:${c.color}"><div class="cc-icon">${c.icon}</div><b>${c.title}</b><p>${c.text}</p></div>`).join('')}</div>
       </div>
       <footer class="screen-foot">
-        <button class="btn ghost" data-act="menu">메인</button>
-        <button class="btn ghost" data-act="team">소속 변경</button>
-        <button class="btn primary big" data-act="again">재출격 · 같은 소속</button>
+        <button class="btn ghost" data-act="menu">${online ? '방 나가기' : '메인'}</button>
+        ${online ? '' : '<button class="btn ghost" data-act="team">소속 변경</button>'}
+        <button class="btn primary big" data-act="again">${online ? '대기실로' : '재출격 · 같은 소속'}</button>
       </footer>
     </section>`);
   el.querySelector('.result-body').appendChild(scoreboard(match));
