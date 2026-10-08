@@ -76,12 +76,12 @@ export class Hud {
           <div><small>상태</small><b class="ins-hp"></b></div>
         </div>
       </div>
-      <div class="hint-keys"><kbd>G</kbd> 지휘 <kbd>T</kbd> 탄창 확인 <kbd>M</kbd> 작전 지도</div>
+      <div class="hint-keys"><kbd>G</kbd> 지휘 <kbd>휠 클릭</kbd> 적 보고 <kbd>T</kbd> 탄창 확인 <kbd>M</kbd> 작전 지도</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
       <div class="cmd-wheel"></div>
-      <div class="tac-map"><div class="tm-head"><b>작전 지도</b><span>${esc(match.map.name)} · 적 위치 정보 없음 · ? = 무전 보고된 소리</span></div><canvas></canvas></div>
+      <div class="tac-map"><div class="tm-head"><b>작전 지도</b><span>${esc(match.map.name)} · 적 위치 정보 없음 · ? 소리 보고 · ! 목격 보고</span></div><canvas></canvas></div>
     `;
     const $ = (s) => this.root.querySelector(s);
     this.$ = $;

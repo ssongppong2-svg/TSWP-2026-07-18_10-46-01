@@ -4,7 +4,7 @@ import { TILES } from '../sim/map.js';
 const SITE = { A: '#d9a441', B: '#9b8ac4' };
 const ZONE_FILL = { friction: 'rgba(150,200,215,0.22)', storm: 'rgba(196,150,90,0.26)', net: 'rgba(181,154,223,0.3)', collapse: 'rgba(181,154,223,0.32)' };
 
-// 작전 지도 (M을 누르고 있는 동안): 지형·구역 이름·폭탄·아군·지휘 지점·무전으로 보고된 소리만 표시. 적 위치는 없음.
+// 작전 지도 (M을 누르고 있는 동안): 지형·구역 이름·폭탄·아군·지휘 지점·무전 보고(? 소리, ! 목격)만 표시. 적 위치는 없음.
 export class TacticalMap {
   constructor(canvas, match, localId, { scale = 9 } = {}) {
     this.canvas = canvas;
@@ -85,20 +85,21 @@ export class TacticalMap {
       g.fill();
     }
 
-    // 무전으로 보고된 소리 (점점 흐려짐)
+    // 무전으로 보고된 소리·목격 (점점 흐려짐)
     for (const i of m.intel[myTeam] ?? []) {
       const age = m.time - i.t;
       if (age > 8) continue;
       const [x, y] = this.toPx(i.x, i.z);
+      const col = i.kind === 'seen' ? '#e5534b' : '#e3b341';
       g.globalAlpha = 1 - age / 8;
-      g.strokeStyle = '#e3b341';
+      g.strokeStyle = col;
       g.lineWidth = 1.5;
       g.beginPath();
       g.arc(x, y, S * 0.9 + age * 0.6, 0, Math.PI * 2);
       g.stroke();
-      g.fillStyle = '#e3b341';
+      g.fillStyle = col;
       g.font = `700 ${S * 1.1}px Rajdhani, sans-serif`;
-      g.fillText('?', x, y + 0.5);
+      g.fillText(i.kind === 'seen' ? '!' : '?', x, y + 0.5);
       g.globalAlpha = 1;
     }
 

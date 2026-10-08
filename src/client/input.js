@@ -49,6 +49,7 @@ export class Input {
       },
       mousedown: (e) => {
         if (!this.enabled) return;
+        if (e.button === 1) e.preventDefault(); // 휠 클릭(적 보고)으로 자동 스크롤이 켜지지 않게
         if (this.locked || this.fallback) {
           this.buttons |= 1 << e.button;
           this.pressed.push(`Mouse${e.button}`);
@@ -162,7 +163,7 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false };
     this.lastDx = 0;
     this.lastDy = 0;
     this.wheelOpen = false;
@@ -250,6 +251,7 @@ export class PlayerController {
       if (slot !== undefined) this.queue.patch[slot] = true;
       else if (code === 'KeyF') this.queue.interact = true;
       else if (code === 'KeyR') this.queue.reload = true;
+      else if (code === 'Mouse1' || code === 'KeyH') this.queue.report = true;
       else if (digit === 1) this.queue.switchTo = 'rifle';
       else if (digit === 2) this.queue.switchTo = 'pistol';
       else if (digit === 3) this.queue.switchTo = 'knife';
@@ -284,7 +286,8 @@ export class PlayerController {
     i.switchTo = q.switchTo;
     i.card = q.cards.length ? q.cards.shift() : -1;
     i.command = q.command;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null };
+    i.report = q.report;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false };
     return i;
   }
 }

@@ -380,7 +380,7 @@ export function clickToStart({ team, loadout, mapId, onClick }) {
         <ul class="sc-rules">
           <li><b>정보 0</b> — 적 위치·처치 표시 없음. 발소리·총성·무전으로만 파악</li>
           <li><b>한 발</b> — 머리 1발, 몸통 4발. 반동이 강하니 짧게 끊어 쏠 것</li>
-          <li><kbd>G</kbd> 분대 지휘 · <kbd>T</kbd> 탄창·상태 확인 · <kbd>M</kbd> 작전 지도 · <kbd>Shift</kbd> 보행(무음)</li>
+          <li><kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>T</kbd> 탄창·상태 확인 · <kbd>M</kbd> 작전 지도 · <kbd>Shift</kbd> 보행(무음)</li>
         </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
           const id = loadout[i];
@@ -439,6 +439,7 @@ export function controlsModal({ onClose }) {
     ]],
     ['지휘 · 정보', [
       ['G (누른 채 마우스)', '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
+      ['휠 클릭 / H', '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
       ['T (누른 채)', '탄창 확인 · 몸 상태 확인'],
       ['M (누른 채)', '작전 지도 (지형 · 아군 · 무전 보고)'],
       ['Tab', '아군 현황'],

@@ -78,6 +78,7 @@ export function emptyIntent(agent) {
     interact: false,
     card: -1,
     command: null, // 지휘 명령 { type } (분대장만)
+    report: false, // 적 보고: 조준한 곳을 무전으로 알림
   };
 }
 

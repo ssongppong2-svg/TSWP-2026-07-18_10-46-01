@@ -122,6 +122,13 @@ export class BotBrain {
       this.ackT -= dt;
       if (this.ackT <= 0) this.sendAck(match, a);
     }
+    if (this.reportAck) {
+      this.reportAck.t -= dt;
+      if (this.reportAck.t <= 0) {
+        if (a.alive) match.radio(a, this.reportAck.text, { kind: 'ack' });
+        this.reportAck = null;
+      }
+    }
 
     // ── 조준 방향 정하기
     let desired = null;
@@ -345,6 +352,7 @@ export class BotBrain {
   think(match, a, target, visible) {
     // 맞았는데 적이 안 보이면 총소리가 난 쪽을 봄 (총성은 아래 청각에서 처리)
     this.listen(match, a, visible);
+    this.hearReport(match, a);
     // 아군 무전: 최근에 보고된 소리 위치를 경계
     if (!visible && !(this.alertLook?.until > match.time)) {
       const intel = match.intel[a.team]
@@ -416,6 +424,23 @@ export class BotBrain {
     this.radioT = match.time;
     match.shareIntel(a, { x: guess.x, z: guess.z, kind: n.kind });
     match.radio(a, `${NOISE_TEXT[n.kind] ?? '소음'} 포착 — ${place}${range}`, { kind: 'contact', pos: guess });
+  }
+
+  // 플레이어의 적 보고: 보고 지점에서 가장 가까운 분대원이 짧게 응답하고 그쪽을 경계
+  hearReport(match, a) {
+    const since = this.reportSeenT ?? match.time - 0.5;
+    this.reportSeenT = match.time;
+    const rep = match.intel[a.team].findLast((i) => i.t > since && match.agentById(i.reporterId)?.isPlayer);
+    if (!rep) return;
+    const mates = match.agents.filter((m) => m.alive && m.team === a.team && !m.isPlayer);
+    const nearest = mates.sort((p, q) => dist2(p.pos, rep) - dist2(q.pos, rep))[0];
+    if (nearest?.id !== a.id || dist2(a.pos, rep) > 50) return;
+    this.alertLook = { point: { x: rep.x, y: 1.3, z: rep.z }, until: match.time + 3 };
+    const clock = match.radioClock?.[a.team];
+    if (clock && match.time - (clock.ackT ?? -99) < 4) return;
+    if (clock) clock.ackT = match.time;
+    const place = match.map.calloutAt(rep.x, rep.z) ?? '그쪽';
+    this.reportAck = { t: this.rng.range(0.6, 1.1), text: rep.kind === 'seen' ? `수신. ${place} 견제.` : `수신. ${place} 경계.` };
   }
 
   // ───────────────────────── 지휘 명령 ─────────────────────────

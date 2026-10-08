@@ -93,3 +93,61 @@ test('무전: 적 발소리를 들은 분대원이 구역 이름과 함께 보�
   assert.match(report.text, /발소리 포착/);
   assert.ok(match.intel.defuse.length > 0, '팀 정보 공유');
 });
+
+test('적 보고: 플레이어가 조준한 곳을 무전으로 알리고, 보이는 적을 가리키면 그 위치를 공유함', () => {
+  const match = new Match({ seed: 10, playerTeam: TEAMS.DEFUSE });
+  attachBots(match, 'normal');
+  match.phase = 'live';
+  const me = match.player;
+  const radios = [];
+  match.events.on('radio', (e) => radios.push(e));
+
+  // 보이는 적이 없으면 '의심' 보고
+  me.visibleEnemies = [];
+  assert.equal(match.reportContact(me), true);
+  assert.match(radios.at(-1).text, /^적 의심 — /);
+  assert.equal(radios.at(-1).agent, me);
+  assert.equal(match.intel.defuse.at(-1).kind, 'report');
+  // 연타는 무시 (1.5초)
+  assert.equal(match.reportContact(me), false);
+
+  // 조준선 위에 보이는 적이 있으면 '발견' + 그 적의 위치
+  match.time += 2;
+  const enemy = match.agents.find((a) => a.team === TEAMS.FORCE);
+  enemy.pos = { x: me.pos.x - Math.sin(me.yaw) * 6, y: me.pos.y, z: me.pos.z - Math.cos(me.yaw) * 6 };
+  me.pitch = 0;
+  me.visibleEnemies = [enemy.id];
+  assert.equal(match.reportContact(me), true);
+  assert.match(radios.at(-1).text, /^적 발견 — /);
+  const intel = match.intel.defuse.at(-1);
+  assert.equal(intel.kind, 'seen');
+  assert.ok(Math.hypot(intel.x - enemy.pos.x, intel.z - enemy.pos.z) < 0.01);
+});
+
+test('적 보고: 입력(intent.report)으로도 보고되고 팀 무전으로만 나감', () => {
+  const match = new Match({ seed: 11, playerTeam: TEAMS.FORCE });
+  attachBots(match, 'normal');
+  match.phase = 'live';
+  const me = match.player;
+  let sent = false;
+  match.setController(me.id, {
+    getIntent(m, a) {
+      const i = emptyIntent(a);
+      if (!sent) i.report = sent = true;
+      return i;
+    },
+  });
+  const radios = [];
+  match.events.on('radio', (e) => radios.push(e));
+  step(match, 2);
+  const mine = radios.filter((r) => r.agent === me);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].team, TEAMS.FORCE);
+  assert.equal(mine[0].report, true);
+  assert.ok(match.intel.force.some((i) => i.reporterId === me.id));
+  // 가장 가까운 분대원 한 명이 짧게 응답
+  step(match, 60 * 2);
+  const acks = radios.filter((r) => r.kind === 'ack' && r.agent !== me && /경계|견제/.test(r.text));
+  assert.equal(acks.length, 1);
+  assert.equal(acks[0].team, TEAMS.FORCE);
+});

@@ -199,6 +199,7 @@ export class Match {
 
     const canAct = live && !a.held;
     if (intent.command && live) this.issueCommand(a, intent.command);
+    if (intent.report && live) this.reportContact(a);
     if (live) {
       if (a.lockpick) this.stepLockpick(a, intent, dt);
       else if (intent.interact && canAct) this.tryStartLockpick(a);
@@ -266,6 +267,37 @@ export class Match {
     const order = cmd.type === 'free' ? null : { id: this.nextId++, type: cmd.type, point, issuerId: a.id, t: this.time, yaw: a.yaw };
     this.orders[a.team] = order;
     this.emit('command', { agent: a, team: a.team, type: cmd.type, order });
+  }
+
+  // 적 보고 (플레이어): 조준한 곳을 구역 이름과 함께 무전으로 알림 → 아군 봇이 그쪽을 경계·수색
+  // 직접 보고 있는 적이 그 근처에 있으면 '발견', 아니면 '의심' (보고자가 아는 것 이상은 알려 주지 않음)
+  reportContact(a) {
+    if (this.time - (a.reportAt ?? -99) < 1.5) return false;
+    a.reportAt = this.time;
+    // 조준선 가까이(약 7°)에 보이는 적이 있으면 그 적의 위치, 없으면 조준한 바닥·벽 지점
+    const eye = eyePos(a);
+    const dir = dirFromAngles(a.yaw, a.pitch);
+    let p = null, best = Infinity;
+    for (const id of a.visibleEnemies ?? []) {
+      const e = this.agentById(id);
+      if (!e?.alive) continue;
+      const c = chestPos(e);
+      const vx = c.x - eye.x, vy = c.y - eye.y, vz = c.z - eye.z;
+      const d = Math.hypot(vx, vy, vz);
+      const cos = (vx * dir.x + vy * dir.y + vz * dir.z) / d;
+      if (cos > 0.992 && d < best) {
+        best = d;
+        p = { x: e.pos.x, y: e.pos.y, z: e.pos.z };
+      }
+    }
+    const seen = !!p;
+    p ??= this.aimPoint(a, 60);
+    const callout = this.map.calloutAt(p.x, p.z);
+    const d = Math.hypot(p.x - a.pos.x, p.z - a.pos.z);
+    const place = callout ?? `${Math.round(d)}m 앞`;
+    this.shareIntel(a, { x: p.x, z: p.z, kind: seen ? 'seen' : 'report' });
+    this.radio(a, `${seen ? '적 발견' : '적 의심'} — ${place}`, { kind: 'contact', pos: p, report: true });
+    return true;
   }
 
   // 무전: 같은 팀에게만 전달되는 짧은 보고
