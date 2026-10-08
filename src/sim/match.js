@@ -93,7 +93,6 @@ export class Match {
     this.endT = 0;
     this.visT = 0;
     this.warned = new Set();
-    this.forceWipedSent = false;
     // 라운드제 기록
     this.round = 1;
     this.score = { defuse: 0, force: 0 }; // 분대별 이긴 라운드 수
@@ -190,7 +189,6 @@ export class Match {
     this.orders = { defuse: null, force: null };
     this.intel = { defuse: [], force: [] };
     this.warned = new Set();
-    this.forceWipedSent = false;
     this.timeLeft = ROUND_TIME;
     this.roundWinner = null;
     this.roundReason = '';
@@ -984,10 +982,6 @@ export class Match {
     const assists = Object.keys(t.round?.by ?? {}).filter((id) => id !== attacker?.id).map((id) => this.agentById(id)).filter(Boolean);
     for (const x of assists) x.stats.assists = (x.stats.assists ?? 0) + 1;
     this.emit('kill', { victim: t, killer: attacker, headshot, weapon, assists, streak: attacker?.round?.kills ?? 0 });
-    if (!this.forceWipedSent && this.alive(TEAMS.FORCE).length === 0 && this.alive(TEAMS.DEFUSE).length > 0) {
-      this.forceWipedSent = true;
-      this.emit('forceWiped', {});
-    }
   }
 
   // ───────────────────────── 포스 패치 ─────────────────────────

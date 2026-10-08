@@ -1463,7 +1463,7 @@ button {
 .banner {
   position: absolute;
   left: 50%;
-  top: 21%;
+  top: 19%;
   transform: translateX(-50%);
   min-width: 360px;
   padding: 10px 26px 12px;
@@ -2161,7 +2161,7 @@ button {
 .vh-round {
   position: absolute;
   left: 50%;
-  top: 24%;
+  top: 17%;
   transform: translateX(-50%);
   min-width: 420px;
   text-align: center;
@@ -2800,6 +2800,8 @@ button {
 
 .hint-keys {
   padding: 5px 12px;
+  font-size: 11.5px;
+  white-space: nowrap;
   background: rgba(8, 10, 12, 0.55);
 }
 

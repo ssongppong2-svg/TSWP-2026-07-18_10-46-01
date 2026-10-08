@@ -430,6 +430,53 @@ export class Effects {
     });
     this.shake = 0;
     this.flash = 0;
+    this.buildBarriers(match.barriers ?? {});
+  }
+
+  // 구매 시간 장벽: 시작 구역 둘레의 반투명 빗살 벽 (구매 시간이 끝나면 사라짐)
+  buildBarriers(barriers) {
+    this.barrierMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 1 }, uColor: { value: new THREE.Color('#4fe0c0') } },
+      vertexShader: /* glsl */ `
+        varying vec3 vW;
+        varying float vY;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vW = w.xyz;
+          vY = uv.y;
+          gl_Position = projectionMatrix * viewMatrix * w;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform float uTime, uAlpha;
+        uniform vec3 uColor;
+        varying vec3 vW;
+        varying float vY;
+        void main() {
+          float s = fract((vW.x + vW.z) * 0.9 + vW.y * 1.4 - uTime * 0.5);
+          float stripe = smoothstep(0.42, 0.5, s) * (1.0 - smoothstep(0.62, 0.7, s));
+          float edge = smoothstep(0.0, 0.06, vY) * (1.0 - smoothstep(0.75, 1.0, vY));
+          float a = (0.05 + 0.15 * stripe + 0.3 * (1.0 - smoothstep(0.0, 0.08, vY))) * edge * uAlpha;
+          gl_FragColor = vec4(uColor * a, 1.0);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    this.barrierGroup = new THREE.Group();
+    const H = 3.2;
+    for (const b of Object.values(barriers)) {
+      const edges = [[b.x0, b.z0, b.x1, b.z0], [b.x1, b.z0, b.x1, b.z1], [b.x1, b.z1, b.x0, b.z1], [b.x0, b.z1, b.x0, b.z0]];
+      for (const [x0, z0, x1, z1] of edges) {
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(len, H), this.barrierMat);
+        m.position.set((x0 + x1) / 2, H / 2, (z0 + z1) / 2);
+        m.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+        m.renderOrder = 3;
+        this.barrierGroup.add(m);
+      }
+    }
+    this.group.add(this.barrierGroup);
   }
 
   // ── 이벤트 반응
@@ -576,6 +623,11 @@ export class Effects {
   update(dt, alpha, viewerTeam) {
     this.time += dt;
     const m = this.match;
+    // 구매 시간 장벽: 구매 시간에만 (끝나면 빠르게 사라짐)
+    const u = this.barrierMat.uniforms;
+    u.uTime.value = this.time;
+    u.uAlpha.value += ((m.phase === 'buy' && m.rounds ? 1 : 0) - u.uAlpha.value) * Math.min(1, dt * 6);
+    this.barrierGroup.visible = u.uAlpha.value > 0.01;
     this.sparks.update(dt);
     this.dust.update(dt);
     this.smoke.update(dt);

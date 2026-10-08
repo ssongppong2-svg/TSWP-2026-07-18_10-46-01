@@ -212,6 +212,10 @@ export class Hud {
   // 화면 가운데 큰 알림 (라운드 시작·승리·패배·공수 교대)
   roundBanner(kicker, title, sub = '', kind = 'info', time = 2.6) {
     const E = this.els;
+    // 큰 알림이 뜨면 밀려 있던 작은 알림은 버림 (겹쳐 보이지 않게)
+    this.bannerQueue.length = 0;
+    this.bannerT = 0;
+    E.banner.classList.remove('show');
     E.roundKicker.textContent = kicker;
     E.roundTitle.textContent = title;
     E.roundSub.textContent = sub;
@@ -448,10 +452,10 @@ export class Hud {
     this.set('wheelOpen', wheel !== null, (v) => E.wheel.classList.toggle('show', v));
     this.set('wheelSel', wheel, (v) => this.wheelItems.forEach((it, i) => it.classList.toggle('on', i === v)));
 
-    // 미니맵 (초당 20번) · 작전 지도 (M)
+    // 미니맵 (초당 약 12번) · 작전 지도 (M)
     this.miniT -= dt;
     if (this.miniT <= 0) {
-      this.miniT = 0.05;
+      this.miniT = 0.08;
       this.miniMap.update(dt, a);
     }
     this.set('map', showMap, (v) => E.tacMap.classList.toggle('show', v));
@@ -463,7 +467,7 @@ export class Hud {
 
     // 알림
     this.bannerT -= dt;
-    if (this.bannerT <= 0 && this.bannerQueue.length) {
+    if (this.bannerT <= 0 && this.bannerQueue.length && this.roundT <= 0.4) {
       const b = this.bannerQueue.shift();
       E.bannerTitle.textContent = b.title;
       E.bannerSub.textContent = b.sub;

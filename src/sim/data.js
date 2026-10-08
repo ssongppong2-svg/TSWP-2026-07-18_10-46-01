@@ -228,7 +228,6 @@ export const WEAPONS = {
   },
 };
 
-export const WEAPON_ORDER = ['rifle', 'pistol', 'knife'];
 // 상점에 놓이는 순서 (보조무기 → 주무기 싼 것부터)
 export const SHOP_WEAPONS = ['pistol', 'sheriff', 'shotgun', 'smg', 'rifle', 'sniper'];
 
