@@ -340,7 +340,8 @@ function boxUV(geo, density) {
 }
 
 const UV_DENSITY = { uniform: 2.2, carrier: 10, pouch: 7, helmet: 3.5, sleeve: 2.2 };
-const NO_SHADOW = new Set(['skin', 'eye', 'lens', 'accent', 'strobe', 'steel']);
+// 그림자는 몸통·다리·헬멧처럼 큰 재질만 드리움 (작은 부품까지 그리면 그림자 패스의 그리기 호출이 두 배로 늘어남)
+const SHADOW = new Set(['uniform', 'carrier', 'pouch', 'helmet', 'boot', 'bala']);
 
 // 뼈대 하나에 붙는 부품들을 재질별로 합쳐 메시 수를 줄임
 export class Parts {
@@ -905,7 +906,7 @@ export class AgentView {
     for (const [mat, geo] of Object.entries(geos)) {
       const m = new THREE.Mesh(geo, this.M[mat]);
       m.name = `${key}:${mat}`;
-      m.castShadow = !NO_SHADOW.has(mat);
+      m.castShadow = SHADOW.has(mat);
       g.add(m);
       this.meshCount++;
     }
