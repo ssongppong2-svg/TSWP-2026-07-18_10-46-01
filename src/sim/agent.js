@@ -111,6 +111,8 @@ export function eyePos(a) {
 }
 
 export const chestPos = (a) => ({ x: a.pos.x, y: a.pos.y + lerp(PLAYER.chestStand, PLAYER.chestCrouch, a.crouch ?? 0), z: a.pos.z });
+// 머리 끝까지의 키 (천장·벽 충돌용)
+export const bodyHeight = (a) => lerp(PLAYER.heightStand, PLAYER.heightCrouch, a.crouch ?? 0);
 export const bodyTop = (a) => lerp(PLAYER.bodyTopStand, PLAYER.bodyTopCrouch, a.crouch ?? 0);
 
 export function moveSpeed(a, intent) {
@@ -170,10 +172,12 @@ export function stepMovement(agent, intent, map, dt, canMove) {
     }
     agent.pos.x += vel.x * dt;
     agent.pos.z += vel.z * dt;
-    map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel);
+    map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel, bodyHeight(agent));
     agent.pos.y += vel.y * dt;
     const g = map.groundHeight(agent.pos.x, agent.pos.z, P.radius * 0.95, agent.prev.y + P.stepHeight);
     if (agent.pos.y < g) agent.pos.y = g;
+    const ceil = map.ceilingHeight(agent.pos.x, agent.pos.z, P.radius * 0.9, agent.prev.y + 0.5);
+    if (agent.pos.y + bodyHeight(agent) > ceil) agent.pos.y = Math.max(g, ceil - bodyHeight(agent));
     agent.onGround = false;
     return;
   }
@@ -228,9 +232,18 @@ export function stepMovement(agent, intent, map, dt, canMove) {
 
   agent.pos.x += vel.x * dt;
   agent.pos.z += vel.z * dt;
-  map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel);
+  const bodyH = bodyHeight(agent);
+  map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel, bodyH);
 
   agent.pos.y += vel.y * dt;
+  // 천장(2층 바닥판 아래·문틀)에 머리가 닿으면 더 오르지 못함
+  if (vel.y > 0) {
+    const ceil = map.ceilingHeight(agent.pos.x, agent.pos.z, P.radius * 0.9, agent.prev.y + 0.5);
+    if (agent.pos.y + bodyH > ceil) {
+      agent.pos.y = Math.max(agent.prev.y, ceil - bodyH);
+      vel.y = 0;
+    }
+  }
   const ground = map.groundHeight(agent.pos.x, agent.pos.z, P.radius * 0.95, agent.prev.y + P.stepHeight);
   if (agent.pos.y <= ground) {
     agent.pos.y = ground;

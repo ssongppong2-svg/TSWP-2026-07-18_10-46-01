@@ -298,6 +298,37 @@ export function createTextures() {
   return { floor, floorBump, wall, wallBump, wallTop, crate, container, barrier };
 }
 
+// 철제 통로 발판 (2m × 2m 한 장): 격자 철판 + 가장자리 테두리 + 녹 얼룩
+let grateCache = null;
+export function grateTexture() {
+  if (grateCache) return grateCache;
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  paintNoise(g, S, S, [38, 40, 42], 8, { seed: 61, cells: 4, octaves: 3 });
+  // 격자 사이 구멍 (아래가 어둡게 비침)
+  const n = 16, cell = S / n;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      g.fillStyle = 'rgba(8,9,10,0.85)';
+      g.fillRect(x * cell + 3, y * cell + 3, cell - 6, cell - 6);
+    }
+  }
+  // 격자 철살 윗면의 밝은 모서리
+  g.fillStyle = 'rgba(150,152,150,0.35)';
+  for (let i = 0; i <= n; i++) {
+    g.fillRect(i * cell - 1, 0, 2, S);
+    g.fillRect(0, i * cell - 1, S, 2);
+  }
+  // 판 테두리 (2m 판 이음새)
+  g.fillStyle = 'rgba(70,72,70,0.9)';
+  g.fillRect(0, 0, S, 6);
+  g.fillRect(0, 0, 6, S);
+  blotches(g, S, S, 6, 'rgba(120,64,30,0.22)', 10, 40, 63);
+  grateCache = toTexture(c);
+  return grateCache;
+}
+
 // 위장 무늬 천 (팀별)
 export function camoTexture(team) {
   const c = makeCanvas(256, 256);

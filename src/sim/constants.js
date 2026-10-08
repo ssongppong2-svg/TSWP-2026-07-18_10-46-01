@@ -55,6 +55,8 @@ export const PLAYER = {
   eyeCrouch: 1.12,
   bodyTopStand: 1.42,
   bodyTopCrouch: 0.95,
+  heightStand: 1.85, // 머리 끝 (천장 충돌)
+  heightCrouch: 1.3,
   chestStand: 1.15,
   chestCrouch: 0.78,
   headRadius: 0.2,

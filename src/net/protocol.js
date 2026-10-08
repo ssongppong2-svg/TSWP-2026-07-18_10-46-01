@@ -146,12 +146,12 @@ export class HostSync {
       ],
       A,
       H,
-      B: m.bombs.map((b) => [BOMB_STATES.indexOf(b.state), b.picker ? this.idx.get(b.picker) : -1, r2(b.progress), r2(b.x), r2(b.z)]),
+      B: m.bombs.map((b) => [BOMB_STATES.indexOf(b.state), b.picker ? this.idx.get(b.picker) : -1, r2(b.progress), r2(b.x), r2(b.z), r2(b.y ?? 0)]),
       Z: m.zones.map((z) => this.enc(z, 1)),
       V: m.veils.map((v) => this.enc(v, 1)),
       S: m.shields.map((s) => this.enc(s, 1)),
       O: TEAMS_.map((t) => (m.orders[t] ? this.enc(m.orders[t], 1) : 0)),
-      I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t)])),
+      I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t), r1(i.y ?? 0)])),
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
       E: this.events.map((e) => [e.s, e.p]),
     };
@@ -290,12 +290,13 @@ export class ClientSync {
       } else if (a.lockpick) a.lockpick = null;
     }
 
-    snap.B.forEach(([st, pk, pr, bx, bz], i) => {
+    snap.B.forEach(([st, pk, pr, bx, bz, by], i) => {
       const b = m.bombs[i];
       if (!b) return;
       if (bx != null) {
         b.x = bx;
         b.z = bz;
+        b.y = by ?? 0;
       }
       b.state = BOMB_STATES[st];
       b.picker = pk >= 0 ? m.agents[pk]?.id ?? null : null;
@@ -306,7 +307,7 @@ export class ClientSync {
     m.shields = mergeById(m.shields, snap.S);
     TEAMS_.forEach((t, i) => {
       m.orders[t] = snap.O[i] ? this.dec(snap.O[i]) : null;
-      m.intel[t] = snap.I[i].map(([ix, iz, kind, rep, it]) => ({ x: ix, z: iz, kind, reporterId: m.agents[rep]?.id ?? null, t: it }));
+      m.intel[t] = snap.I[i].map(([ix, iz, kind, rep, it, iy]) => ({ x: ix, y: iy ?? 0, z: iz, kind, reporterId: m.agents[rep]?.id ?? null, t: it }));
     });
     snap.C.forEach((takers, i) => {
       if (m.concepts[i]) m.concepts[i].takenBy = takers.map((k) => m.agents[k]?.id).filter(Boolean);

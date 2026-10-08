@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
-import { TILES } from '../sim/map.js';
+import { TILES, ROOF } from '../sim/map.js';
 import { makeSolidMaterial } from './agent-view.js';
 
 // 과학 전시물·실험 장비. 모양이 같은 것끼리 InstancedMesh로 한 번에 그린다.
@@ -156,10 +156,15 @@ function instanced(geo, mat, cells, place) {
   return mesh;
 }
 
+// 그 종류의 상자 칸 목록 { c, r, y } (2층 바닥 위의 상자도 포함)
 function cellsOf(map, kind, skip = () => false) {
-  const out = [];
-  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) if (TILES[map.charAt(c, r)]?.kind === kind && !skip(c, r)) out.push({ c, r });
-  return out;
+  return map.props.filter((p) => p.kind === kind && !skip(p.c, p.r)).map(({ c, r, y }) => ({ c, r, y }));
+}
+
+// 방금 넣은 부품들을 그 칸의 바닥 높이만큼 올림
+function liftFrom(list, start, y) {
+  if (!y) return;
+  for (let i = start; i < list.length; i++) list[i].translate(0, y, 0);
 }
 
 // ── 포스 바운드: 작은 상자 위의 실험 장비 (상자 5개 중 2개꼴)
@@ -175,9 +180,9 @@ export function buildLabProps(map) {
   }
   const q = new THREE.Quaternion();
   for (const [key, cells] of Object.entries(by)) {
-    const mesh = instanced(smallGeo(key), mat, cells, (m, { c, r }) => {
+    const mesh = instanced(smallGeo(key), mat, cells, (m, { c, r, y }) => {
       q.setFromAxisAngle(new V3(0, 1, 0), (hash(r, c) % 8) * (Math.PI / 4));
-      m.compose(new V3(map.cellX(c), TILES.c.h, map.cellZ(r)), q, new V3(1.15, 1.15, 1.15));
+      m.compose(new V3(map.cellX(c), y + TILES.c.h, map.cellZ(r)), q, new V3(1.15, 1.15, 1.15));
     });
     mesh.castShadow = true;
     group.add(mesh);
@@ -206,17 +211,17 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     part(box(W + 0.02, 0.04, W + 0.02), '#3a3c40', 0.4, 0.4, [0, 0.9, 0]),
   ]);
   const at = (c, r, y = 0) => new V3(map.cellX(c), y, map.cellZ(r));
-  group.add(instanced(plinth, solid, cases, (m, { c, r }) => m.compose(at(c, r), q.identity(), one)));
+  group.add(instanced(plinth, solid, cases, (m, { c, r, y }) => m.compose(at(c, r, y), q.identity(), one)));
   const glassMat = new THREE.MeshStandardMaterial({ color: '#bcd3dc', transparent: true, opacity: 0.16, roughness: 0.04, metalness: 0.1, depthWrite: false });
-  const glass = instanced(new THREE.BoxGeometry(W * 0.94, 0.56, W * 0.94).translate(0, 0.92 + 0.28, 0), glassMat, cases, (m, { c, r }) => m.compose(at(c, r), q.identity(), one));
+  const glass = instanced(new THREE.BoxGeometry(W * 0.94, 0.56, W * 0.94).translate(0, 0.92 + 0.28, 0), glassMat, cases, (m, { c, r, y }) => m.compose(at(c, r, y), q.identity(), one));
   glass.renderOrder = 3;
   group.add(glass);
   const byKind = {};
   for (const cell of cases) (byKind[SMALL_KEYS[hash(cell.c, cell.r) % SMALL_KEYS.length]] ??= []).push(cell);
   for (const [key, cells] of Object.entries(byKind)) {
-    group.add(instanced(smallGeo(key), solid, cells, (m, { c, r }) => {
+    group.add(instanced(smallGeo(key), solid, cells, (m, { c, r, y }) => {
       q.setFromAxisAngle(new V3(0, 1, 0), (hash(r, c) % 4) * (Math.PI / 2));
-      m.compose(at(c, r, 0.92), q, one);
+      m.compose(at(c, r, y + 0.92), q, one);
     }));
   }
 
@@ -227,8 +232,9 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
   const KW = CELL * 0.96, KH = TILES.C.h;
   const panelGeos = [];
   const kioskSolid = [];
-  kiosks.forEach(({ c, r }, i) => {
+  kiosks.forEach(({ c, r, y }, i) => {
     const x = map.cellX(c), z = map.cellZ(r);
+    const s0 = kioskSolid.length, p0 = panelGeos.length;
     kioskSolid.push(part(box(KW, 0.22, KW), '#2c2e32', 0.6, 0.1, [x, 0.11, z]));
     kioskSolid.push(part(box(KW + 0.04, 0.12, KW + 0.04), '#3a3c40', 0.4, 0.5, [x, KH - 0.06, z]));
     kioskSolid.push(part(box(KW * 0.98, KH - 0.34, KW * 0.98), '#e4e0d6', 0.7, 0, [x, 0.22 + (KH - 0.34) / 2, z]));
@@ -244,13 +250,16 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
       g.translate(x + nx * (KW / 2 + 0.006), 0.26 + ph / 2, z + nz * (KW / 2 + 0.006));
       panelGeos.push(g);
     }
+    liftFrom(kioskSolid, s0, y);
+    liftFrom(panelGeos, p0, y);
   });
 
   // 전시 탁자 (낮은 방벽 칸): 비스듬한 윗면에 설명판
   const tables = cellsOf(map, 'barrier');
   const TW = CELL * 0.9, TH = TILES['='].h;
-  tables.forEach(({ c, r }) => {
+  tables.forEach(({ c, r, y }) => {
     const x = map.cellX(c), z = map.cellZ(r);
+    const s0 = kioskSolid.length, p0 = panelGeos.length;
     kioskSolid.push(part(box(TW, TH - 0.2, TW), '#7a5f45', 0.7, 0, [x, (TH - 0.2) / 2, z]));
     kioskSolid.push(part(box(TW + 0.04, 0.06, TW + 0.04), '#3a3c40', 0.4, 0.4, [x, TH - 0.2, z]));
     const g = new THREE.PlaneGeometry(TW * 0.9, TW * 0.9 * (704 / 512) * 0.55);
@@ -259,18 +268,23 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     g.rotateY(((hash(r, c) % 4) * Math.PI) / 2);
     g.translate(x, TH - 0.08, z);
     panelGeos.push(g);
+    liftFrom(kioskSolid, s0, y);
+    liftFrom(panelGeos, p0, y);
   });
 
   // 수조 (부력): 금속 틀 + 물 + 뜬 나무토막 + 가라앉은 추
   const waterGeos = [];
-  tanks.forEach(({ c, r }) => {
+  tanks.forEach(({ c, r, y }) => {
     const x = map.cellX(c), z = map.cellZ(r);
+    const s0 = kioskSolid.length, w0 = waterGeos.length;
     kioskSolid.push(part(box(KW, 0.3, KW), '#2c2e32', 0.6, 0.2, [x, 0.15, z]));
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) kioskSolid.push(part(box(0.08, KH - 0.3, 0.08), STEEL, 0.35, 0.8, [x + (sx * (KW - 0.08)) / 2, 0.3 + (KH - 0.3) / 2, z + (sz * (KW - 0.08)) / 2]));
     kioskSolid.push(part(box(KW, 0.06, KW), STEEL, 0.35, 0.8, [x, KH - 0.03, z]));
     kioskSolid.push(part(box(0.5, 0.36, 0.5), WOOD, 0.75, 0, [x + 0.3, KH - 0.32, z - 0.2], [0, 0.5, 0]));
     kioskSolid.push(part(cyl(0.16, 0.16, 0.3, 16), BRASS, 0.3, 0.9, [x - 0.35, 0.46, z + 0.3]));
     waterGeos.push(new THREE.BoxGeometry(KW - 0.12, KH - 0.45, KW - 0.12).translate(x, 0.3 + (KH - 0.45) / 2, z));
+    liftFrom(kioskSolid, s0, y);
+    liftFrom(waterGeos, w0, y);
   });
 
   if (kioskSolid.length) {
@@ -288,6 +302,26 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     group.add(water);
   }
 
+  // 아트리움 천창: 지붕이 빈 사각형 위에 유리 + 철골 격자 (부딪힘 없음, 보기만)
+  const sky = decor.skylight;
+  if (sky) {
+    const x0 = map.originX + sky.c0 * CELL, x1 = map.originX + (sky.c1 + 1) * CELL;
+    const z0 = map.originZ + sky.r0 * CELL, z1 = map.originZ + (sky.r1 + 1) * CELL;
+    const y = ROOF - 0.05;
+    const glassTop = new THREE.Mesh(
+      new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(Math.PI / 2).translate((x0 + x1) / 2, y, (z0 + z1) / 2),
+      new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.18, roughness: 0.05, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    glassTop.renderOrder = 3;
+    group.add(glassTop);
+    const beams = [];
+    for (let xx = x0; xx <= x1 + 1e-3; xx += CELL) beams.push(part(box(0.12, 0.3, z1 - z0), DARK, 0.5, 0.6, [xx, y - 0.15, (z0 + z1) / 2]));
+    for (let zz = z0; zz <= z1 + 1e-3; zz += CELL) beams.push(part(box(x1 - x0, 0.3, 0.12), DARK, 0.5, 0.6, [(x0 + x1) / 2, y - 0.15, zz]));
+    const frame = new THREE.Mesh(mergeGeometries(beams), solid);
+    frame.castShadow = true;
+    group.add(frame);
+  }
+
   // 푸코 진자: 팔각 탑 위로 긴 줄에 매달린 추가 흔들리고, 흔들리는 면이 천천히 돈다
   if (pend) {
     const x = map.originX + (pend.c + 0.5) * CELL, z = map.originZ + (pend.r + 0.5) * CELL;
@@ -301,7 +335,8 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     const t = new THREE.Mesh(tower, solid);
     t.castShadow = true;
     group.add(t);
-    const L = 26;
+    // 아트리움 천창의 철골 보에 매달림 (줄 길이 = 지붕 높이 - 추 높이)
+    const L = ROOF - 0.3 - (KH + 1.1);
     const pivot = new THREE.Group();
     pivot.position.set(x, KH + 1.1 + L, z);
     const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, L, 6).translate(0, -L / 2, 0), new THREE.MeshStandardMaterial({ color: '#8d9298', roughness: 0.4, metalness: 0.8 }));
@@ -310,7 +345,7 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     group.add(pivot);
     const period = 2 * Math.PI * Math.sqrt(L / 9.8);
     group.userData.tick = (time) => {
-      const swing = Math.sin((time / period) * Math.PI * 2) * 0.05;
+      const swing = Math.sin((time / period) * Math.PI * 2) * 0.22;
       const plane = time * 0.02; // 흔들리는 면이 천천히 회전
       pivot.rotation.set(Math.cos(plane) * swing, 0, Math.sin(plane) * swing);
     };
@@ -336,7 +371,7 @@ export class ConceptCards {
     scene.add(this.group);
     this.views = match.concepts.map((c) => {
       const g = new THREE.Group();
-      g.position.set(c.x, 0, c.z);
+      g.position.set(c.x, c.y ?? 0, c.z);
       const card = new THREE.Mesh(
         new THREE.PlaneGeometry(0.36, 0.5),
         new THREE.MeshBasicMaterial({ map: cardTexture(c.id), transparent: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }),

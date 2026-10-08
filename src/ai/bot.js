@@ -96,7 +96,7 @@ export class BotBrain {
       this.hold = list[i] ?? list[0] ?? null;
       if (!this.hold) {
         const b = map.bombs[this.index % map.bombs.length];
-        this.hold = { x: b.x, z: b.z + 3, lookX: b.x, lookZ: b.z + 10 };
+        this.hold = { x: b.x, y: b.y ?? 0, z: b.z + 3, lookX: b.x, lookY: (b.y ?? 0) + 1.5, lookZ: b.z + 10 };
       }
     }
   }
@@ -156,14 +156,14 @@ export class BotBrain {
     }
     if (!desired && this.alertLook && this.alertLook.until > match.time) {
       desired = anglesTo(eye, this.alertLook.point);
-      desired.pitch = clamp(desired.pitch, -0.2, 0.2);
+      desired.pitch = clamp(desired.pitch, -0.5, 0.5);
     }
 
     // ── 이동 방향 정하기 (소리를 듣고 경계 중이면 멈춤)
     let wish = null;
     const paused = this.pauseT > 0 && !visible && !this.goal?.urgent;
     if (live && this.startDelay <= 0 && !a.lockpick && this.goal?.point && !paused) {
-      wish = this.navigate(match, a, this.goal.point.x, this.goal.point.z, this.goal.arrive ?? 0.8, dt);
+      wish = this.navigate(match, a, this.goal.point, this.goal.arrive ?? 0.8, dt);
     }
     if (!desired) {
       if (wish && Math.hypot(wish.x, wish.z) > 0.1) {
@@ -174,7 +174,8 @@ export class BotBrain {
           this.scanT = this.rng.range(1.4, 3.2);
           this.scanOffset = this.rng.range(-0.45, 0.45);
         }
-        desired = anglesTo(eye, { ...this.goal.look, y: eye.y });
+        // 바라볼 곳의 눈높이로 (2층에서 1층 입구를 볼 때는 내려다봄)
+        desired = anglesTo(eye, { ...this.goal.look, y: this.goal.look.y ?? eye.y });
         desired.yaw += this.scanOffset;
       } else {
         desired = { yaw: this.aimYaw, pitch: 0 };
@@ -368,7 +369,7 @@ export class BotBrain {
       const intel = match.intel[a.team]
         .filter((i) => match.time - i.t < 5 && i.reporterId !== a.id && dist2(i, a.pos) < 30)
         .sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos))[0];
-      if (intel) this.alertLook = { point: { x: intel.x, y: 1.4, z: intel.z }, until: match.time + 1.5 };
+      if (intel) this.alertLook = { point: { x: intel.x, y: (intel.y ?? 0) + 1.4, z: intel.z }, until: match.time + 1.5 };
     }
     // 아군이 지금 보고 있는 적 (미니맵에 뜨는 적과 같음)
     if (!visible && !(this.alertLook?.until > match.time)) {
@@ -412,10 +413,10 @@ export class BotBrain {
     const { n, d } = best;
     // 소리로 짐작한 위치 (멀수록 부정확)
     const e = d * 0.12;
-    const guess = { x: n.x + this.rng.range(-e, e), z: n.z + this.rng.range(-e, e) };
+    const guess = { x: n.x + this.rng.range(-e, e), y: n.y ?? 0, z: n.z + this.rng.range(-e, e) };
     this.heard = { ...guess, t: match.time, kind: n.kind, sourceId: n.agentId };
     if (!visible) {
-      this.alertLook = { point: { x: guess.x, y: 1.4, z: guess.z }, until: match.time + 2.5 };
+      this.alertLook = { point: { x: guess.x, y: guess.y + 1.4, z: guess.z }, until: match.time + 2.5 };
       // 가까운 발소리·착지음은 멈춰서 경계 (총성은 이미 교전 중일 가능성이 큼)
       if (d < 20 && !a.lockpick && (n.kind === 'step' || n.kind === 'land' || n.kind === 'reload')) {
         this.pauseT = this.rng.range(1.2, 2.8);
@@ -431,15 +432,15 @@ export class BotBrain {
     if (!clock || match.time - clock.t < 3.5 || match.time - this.radioT < 7) return;
     const last = clock.bySource.get(n.agentId) ?? -99;
     if (match.time - last < 7) return;
-    const callout = match.map.calloutAt(guess.x, guess.z);
-    const mine = match.map.calloutAt(a.pos.x, a.pos.z);
+    const callout = match.map.calloutAt(guess.x, guess.z, guess.y);
+    const mine = match.map.calloutAt(a.pos.x, a.pos.z, a.pos.y);
     const dir = compass(guess.x - a.pos.x, guess.z - a.pos.z);
     const place = callout ? (callout === mine ? `${callout} ${dir}쪽` : callout) : `${dir}쪽`;
     const range = d < 12 ? ' · 근거리' : d > 35 ? ' · 원거리' : '';
     clock.t = match.time;
     clock.bySource.set(n.agentId, match.time);
     this.radioT = match.time;
-    match.shareIntel(a, { x: guess.x, z: guess.z, kind: n.kind });
+    match.shareIntel(a, { x: guess.x, y: guess.y, z: guess.z, kind: n.kind });
     match.radio(a, `${NOISE_TEXT[n.kind] ?? '소음'} 포착 — ${place}${range}`, { kind: 'contact', pos: guess });
   }
 
@@ -452,11 +453,11 @@ export class BotBrain {
     const mates = match.agents.filter((m) => m.alive && m.team === a.team && !m.isPlayer && !m.human);
     const nearest = mates.sort((p, q) => dist2(p.pos, rep) - dist2(q.pos, rep))[0];
     if (nearest?.id !== a.id || dist2(a.pos, rep) > 50) return;
-    this.alertLook = { point: { x: rep.x, y: 1.3, z: rep.z }, until: match.time + 3 };
+    this.alertLook = { point: { x: rep.x, y: (rep.y ?? 0) + 1.3, z: rep.z }, until: match.time + 3 };
     const clock = match.radioClock?.[a.team];
     if (clock && match.time - (clock.ackT ?? -99) < 4) return;
     if (clock) clock.ackT = match.time;
-    const place = match.map.calloutAt(rep.x, rep.z) ?? '그쪽';
+    const place = match.map.calloutAt(rep.x, rep.z, rep.y ?? 0) ?? '그쪽';
     this.reportAck = { t: this.rng.range(0.6, 1.1), text: rep.kind === 'seen' ? `수신. ${place} 견제.` : `수신. ${place} 경계.` };
   }
 
@@ -496,7 +497,7 @@ export class BotBrain {
       }
       case 'hold': {
         const h = this.orderHold;
-        this.goal = { point: { x: h.x, z: h.z }, arrive: 0.6, look: { x: h.x - Math.sin(h.yaw) * 10, z: h.z - Math.cos(h.yaw) * 10 }, crouchAtGoal: this.holdCrouch };
+        this.goal = { point: { x: h.x, y: h.y, z: h.z }, arrive: 0.6, look: { x: h.x - Math.sin(h.yaw) * 10, z: h.z - Math.cos(h.yaw) * 10 }, crouchAtGoal: this.holdCrouch };
         return true;
       }
       case 'move': {
@@ -525,7 +526,7 @@ export class BotBrain {
         const h = list[slot % Math.max(1, list.length)];
         if (!h) return false;
         const off = slot >= list.length ? ((slot % 2) * 2 - 1) * 1.5 : 0;
-        this.goal = { point: { x: h.x + off, z: h.z }, arrive: 0.7, look: { x: h.lookX, z: h.lookZ }, quiet: dist2(h, a.pos) < 16, crouchAtGoal: this.holdCrouch };
+        this.goal = { point: { x: h.x + off, y: h.y, z: h.z }, arrive: 0.7, look: { x: h.lookX, y: h.lookY, z: h.lookZ }, quiet: dist2(h, a.pos) < 16, crouchAtGoal: this.holdCrouch };
         return true;
       }
       default:
@@ -565,12 +566,12 @@ export class BotBrain {
       if (this.stage.via && !this.viaDone) {
         if (dist2(this.stage.via, a.pos) < 2.5) this.viaDone = true;
         else {
-          this.goal = { point: { x: this.stage.via.x, z: this.stage.via.z }, arrive: 2 };
+          this.goal = { point: { x: this.stage.via.x, y: this.stage.via.y, z: this.stage.via.z }, arrive: 2 };
           return;
         }
       }
       const near = dist2(this.stage, a.pos) < 3;
-      this.goal = { point: { x: this.stage.x, z: this.stage.z }, arrive: 0.9, look: { x: this.stage.lookX, z: this.stage.lookZ }, crouchAtGoal: near && this.holdCrouch };
+      this.goal = { point: { x: this.stage.x, y: this.stage.y, z: this.stage.z }, arrive: 0.9, look: { x: this.stage.lookX, y: this.stage.lookY, z: this.stage.lookZ }, crouchAtGoal: near && this.holdCrouch };
       return;
     }
     this.goToBomb(match, a, bomb, false);
@@ -583,7 +584,7 @@ export class BotBrain {
       // 동료가 해체 중 → 옆에서 엄호 (포스팀 쪽 입구를 봄)
       const ang = this.index * 1.7;
       this.goal = {
-        point: { x: bomb.x + Math.cos(ang) * 3, z: bomb.z + Math.sin(ang) * 3 },
+        point: { x: bomb.x + Math.cos(ang) * 3, y: bomb.y, z: bomb.z + Math.sin(ang) * 3 },
         look: { x: bomb.x + Math.cos(ang) * 10, z: bomb.z - 10 },
         arrive: 1.2,
         quiet: true,
@@ -591,7 +592,7 @@ export class BotBrain {
       };
       return;
     }
-    this.goal = { point: { x: bomb.x, z: bomb.z }, arrive: 1.0, look: { x: bomb.x, z: bomb.z - 10 }, quiet, urgent: ordered && d > 30 };
+    this.goal = { point: { x: bomb.x, y: bomb.y, z: bomb.z }, arrive: 1.0, look: { x: bomb.x, z: bomb.z - 10 }, quiet, urgent: ordered && d > 30 };
     const nearbyEnemy = (a.visibleEnemies ?? []).length > 0;
     if (d < 1.6 && !a.lockpick && !nearbyEnemy && !bomb.picker && this.pauseT <= 0) this.wantLockpick = true;
   }
@@ -609,7 +610,7 @@ export class BotBrain {
       const respond = this.homeSite === alerted.id || this.homeSite === 'mid' || armed.length === 1 || match.time - alerted.alertT > 0 && dist2(alerted, a.pos) < 30;
       if (respond) {
         const d = dist2(alerted, a.pos);
-        this.goal = { point: { x: alerted.x, z: alerted.z }, arrive: 3, look: { x: alerted.x, z: alerted.z }, quiet: d < 16, urgent: !!alerted.picker };
+        this.goal = { point: { x: alerted.x, y: alerted.y, z: alerted.z }, arrive: 3, look: { x: alerted.x, z: alerted.z }, quiet: d < 16, urgent: !!alerted.picker };
         return;
       }
     }
@@ -626,12 +627,12 @@ export class BotBrain {
         .filter((i) => i && match.time - i.t < 6 && dist2(i, a.pos) < 32)
         .sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos))[0];
       if (info) {
-        this.goal = { point: { x: info.x, z: info.z }, arrive: 2.5, look: { x: info.x, z: info.z }, quiet: true };
+        this.goal = { point: { x: info.x, y: info.y ?? 0, z: info.z }, arrive: 2.5, look: { x: info.x, z: info.z }, quiet: true };
         return;
       }
     }
     const atHold = dist2(hold, a.pos) < 2;
-    this.goal = { point: { x: hold.x, z: hold.z }, arrive: 0.6, look: { x: hold.lookX, z: hold.lookZ }, quiet: atHold, crouchAtGoal: this.holdCrouch };
+    this.goal = { point: { x: hold.x, y: hold.y, z: hold.z }, arrive: 0.6, look: { x: hold.lookX, y: hold.lookY, z: hold.lookZ }, quiet: atHold, crouchAtGoal: this.holdCrouch };
   }
 
   considerPatches(match, a, target, visible) {
@@ -678,7 +679,7 @@ export class BotBrain {
           if (visible || !this.path || this.pathIdx >= this.path.length || this.goal?.quiet) break;
           const wp = this.path[this.pathIdx];
           const d = dist2(wp, a.pos);
-          if (d > 11 && a.onGround && match.nav.clearLine(a.pos.x, a.pos.z, wp.x, wp.z, 0.5) && this.rng.chance(0.25)) {
+          if (d > 11 && a.onGround && Math.abs((wp.y ?? 0) - a.pos.y) < 0.3 && match.nav.clearLine(a.pos.x, a.pos.z, wp.x, wp.z, 0.5, a.pos.y) && this.rng.chance(0.25)) {
             this.pending = { slot, point: { x: wp.x, y: eye.y, z: wp.z }, t: 0.8, yawOnly: true };
           }
           break;
@@ -710,19 +711,22 @@ export class BotBrain {
   }
 
   // ───────────────────────── 길찾기 ─────────────────────────
-  navigate(match, a, gx, gz, arrive, dt) {
+  navigate(match, a, goal, arrive, dt) {
     this.repathT -= dt;
-    const goalMoved = !this.pathGoal || Math.hypot(this.pathGoal.x - gx, this.pathGoal.z - gz) > 1.5;
+    const gy = goal.y ?? 0;
+    const goalMoved = !this.pathGoal || Math.hypot(this.pathGoal.x - goal.x, this.pathGoal.z - goal.z) > 1.5 || Math.abs(this.pathGoal.y - gy) > 1;
     if (!this.path || goalMoved || this.repathT <= 0) {
-      this.path = match.nav.findPath(a.pos.x, a.pos.z, gx, gz) ?? [];
+      this.path = match.nav.findPath({ x: a.pos.x, y: a.pos.y, z: a.pos.z }, { x: goal.x, y: gy, z: goal.z }) ?? [];
       this.pathIdx = 0;
-      this.pathGoal = { x: gx, z: gz };
+      this.pathGoal = { x: goal.x, y: gy, z: goal.z };
       this.repathT = 4;
     }
     const p = this.path;
     while (this.pathIdx < p.length) {
       const last = this.pathIdx === p.length - 1;
-      if (dist2(a.pos, p[this.pathIdx]) < (last ? arrive : 0.7)) this.pathIdx++;
+      const wp = p[this.pathIdx];
+      // 높이도 맞아야 도착 (계단 아래·위를 구분)
+      if (dist2(a.pos, wp) < (last ? arrive : 0.7) && Math.abs(a.pos.y - (wp.y ?? 0)) < 1.3) this.pathIdx++;
       else break;
     }
     if (this.pathIdx >= p.length) return null;

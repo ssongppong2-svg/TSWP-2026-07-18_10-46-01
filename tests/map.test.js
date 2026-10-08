@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameMap } from '../src/sim/map.js';
+import { GameMap, STORY } from '../src/sim/map.js';
 import { NavGrid } from '../src/sim/nav.js';
+import { MAP_ORDER } from '../src/sim/maps/index.js';
 
 const map = new GameMap();
 
@@ -9,12 +10,18 @@ test('맵: 폭탄 2개와 팀별 시작 위치', () => {
   assert.deepEqual(map.bombs.map((b) => b.id), ['A', 'B']);
   assert.ok(map.spawns.defuse.length >= 5);
   assert.ok(map.spawns.force.length >= 5);
-  assert.equal(map.holds.A.length, 2);
-  for (const list of Object.values(map.holds)) {
-    for (const h of list) {
-      const { c, r } = map.toCell(h.x, h.z);
-      assert.ok(map.walkable(c, r), '지키는 자리는 바닥이어야 함');
+  assert.ok(map.holds.A.length >= 2);
+});
+
+test('맵: 모든 맵의 지키는 자리·모이는 자리·개념 카드 자리는 그 층의 바닥', () => {
+  for (const id of MAP_ORDER) {
+    const m = new GameMap(id);
+    const spots = [...Object.values(m.holds).flat(), ...Object.values(m.staging).flat()];
+    for (const h of spots) {
+      const { c, r } = m.toCell(h.x, h.z);
+      assert.ok(m.walkableAt(c, r, h.y), `${id} 자리 (${r}, ${c}, y${h.y})`);
     }
+    for (const s of m.def.concepts) assert.ok(m.walkableAt(s.c, s.r, s.f ? STORY : 0), `${id} 개념 카드 (${s.r}, ${s.c})`);
   }
 });
 
@@ -56,18 +63,21 @@ test('길찾기: 양 팀 시작 위치에서 두 폭탄까지 길이 있음', ()
 });
 
 test('맵: 두 팀 진영 사이에 눈높이 직선 시야가 없음 (시작하자마자 저격 방지)', () => {
-  const area = (r0, r1) => {
-    const out = [];
-    for (let r = r0; r <= r1; r++) {
-      for (let c = 0; c < map.cols; c++) {
-        if (!map.walkable(c, r)) continue;
-        for (const [ox, oz] of [[0.25, 0.25], [0.75, 0.75]]) out.push({ x: map.originX + (c + ox) * 2, y: 1.6, z: map.originZ + (r + oz) * 2 });
+  for (const id of MAP_ORDER) {
+    const m = new GameMap(id);
+    const area = (r0, r1) => {
+      const out = [];
+      for (let r = r0; r <= r1; r++) {
+        for (let c = 0; c < m.cols; c++) {
+          if (!m.walkable(c, r)) continue;
+          for (const [ox, oz] of [[0.25, 0.25], [0.75, 0.75]]) out.push({ x: m.originX + (c + ox) * 2, y: 1.6, z: m.originZ + (r + oz) * 2 });
+        }
       }
-    }
-    return out;
-  };
-  const north = area(1, 4), south = area(32, 38);
-  let lines = 0;
-  for (const a of north) for (const b of south) if (map.lineOfSight(a, b)) lines++;
-  assert.equal(lines, 0);
+      return out;
+    };
+    const north = area(1, 4), south = area(32, 38);
+    let lines = 0;
+    for (const a of north) for (const b of south) if (m.lineOfSight(a, b)) lines++;
+    assert.equal(lines, 0, id);
+  }
 });

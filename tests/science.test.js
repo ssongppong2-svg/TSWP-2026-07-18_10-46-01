@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Match } from '../src/sim/match.js';
 import { attachBots } from '../src/ai/bot.js';
 import { DT, TEAMS } from '../src/sim/constants.js';
-import { TILES } from '../src/sim/map.js';
+import { STORY } from '../src/sim/map.js';
+import { NavGrid } from '../src/sim/nav.js';
 import { MAP_ORDER, getMapDef } from '../src/sim/maps/index.js';
 import { CONCEPTS, CONCEPT_BY_ID, pickQuiz } from '../src/sim/concepts.js';
 
@@ -18,22 +19,23 @@ test('맵 목록: 과학관이 등록되어 있고 모든 바닥 칸이 해체�
     const map = match.map;
     assert.equal(map.bombs.length, 2, id);
     assert.ok(map.spawns.defuse.length && map.spawns.force.length, id);
-    // 너비 우선 탐색으로 갈 수 있는 칸 확인
+    // 길찾기 그래프(층 포함)에서 해체팀 진영으로부터 갈 수 있는 바닥 확인
+    const nav = new NavGrid(map);
     const start = map.spawns.defuse[0];
-    const seen = new Set([`${start.c},${start.r}`]);
-    const queue = [[start.c, start.r]];
+    const seen = new Uint8Array(nav.nodes.length);
+    const queue = [nav.nodeNear(start.x, 0, start.z)];
+    seen[queue[0]] = 1;
     while (queue.length) {
-      const [c, r] = queue.shift();
-      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nc = c + dc, nr = r + dr;
-        if (!map.inBounds(nc, nr) || TILES[map.charAt(nc, nr)] || seen.has(`${nc},${nr}`)) continue;
-        seen.add(`${nc},${nr}`);
-        queue.push([nc, nr]);
+      for (const [b] of nav.edges[queue.pop()]) {
+        if (seen[b]) continue;
+        seen[b] = 1;
+        queue.push(b);
       }
     }
-    for (const b of map.bombs) assert.ok(seen.has(`${b.c},${b.r}`), `${id} 폭탄 ${b.id}에 갈 수 있음`);
-    for (const s of map.spawns.force) assert.ok(seen.has(`${s.c},${s.r}`), `${id} 포스 진영에 갈 수 있음`);
-    for (const s of getMapDef(id).concepts ?? []) assert.ok(seen.has(`${s.c},${s.r}`), `${id} 개념 카드 자리 ${s.r},${s.c}`);
+    const reach = (c, r, y = 0) => nav.byCell[map.idx(c, r)].some((b) => seen[b] && Math.abs(nav.nodes[b].y - y) < 0.05);
+    for (const b of map.bombs) assert.ok(reach(b.c, b.r, b.y), `${id} 폭탄 ${b.id}에 갈 수 있음`);
+    for (const s of map.spawns.force) assert.ok(reach(s.c, s.r), `${id} 포스 진영에 갈 수 있음`);
+    for (const s of getMapDef(id).concepts ?? []) assert.ok(reach(s.c, s.r, s.f ? STORY : 0), `${id} 개념 카드 자리 ${s.r},${s.c}`);
   }
 });
 

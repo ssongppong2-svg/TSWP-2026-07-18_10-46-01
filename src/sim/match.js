@@ -8,7 +8,7 @@ import {
 import { ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { CONCEPTS } from './concepts.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
-import { GameMap } from './map.js';
+import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
 
 // 팀 명단 (포스 패치 선택 화면과 경기에서 같은 id를 씀)
@@ -101,7 +101,7 @@ export class Match {
     this.roundWinner = null; // 방금 끝난 라운드에서 이긴 쪽 (해체/포스)
     this.roundReason = '';
     this.swapped = false; // 공수 교대 후
-    this.bombs = this.map.bombs.map((b) => ({ id: b.id, x: b.x, y: 0, z: b.z, state: 'armed', picker: null, progress: 0, alertT: -99 }));
+    this.bombs = this.map.bombs.map((b) => ({ id: b.id, x: b.x, y: b.y ?? 0, z: b.z, state: 'armed', picker: null, progress: 0, alertT: -99 }));
     this.client = client;
     this.localAgent = null; // client 모드에서 이 화면의 요원
     this.barriers = this.makeBarriers();
@@ -171,10 +171,11 @@ export class Match {
   placeBombs() {
     const map = this.map;
     for (const b of this.bombs) {
-      const cells = (map.siteCells[b.id] ?? []).filter(({ c, r }) =>
-        [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].every(([dc, dr]) => map.walkable(c + dc, r + dr)));
-      const cell = cells.length ? cells[Math.floor(this.rng.next() * cells.length)] : map.toCell(b.x, b.z);
-      Object.assign(b, { x: map.cellX(cell.c), z: map.cellZ(cell.r), y: 0, state: 'armed', picker: null, progress: 0, alertT: -99 });
+      // 그 칸과 이웃 두 칸 이상이 같은 층 바닥인 곳 (2층 통로 위에도 놓일 수 있음)
+      const cells = (map.siteCells[b.id] ?? []).filter(({ c, r, y }) =>
+        map.walkableAt(c, r, y) && [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dc, dr]) => map.walkableAt(c + dc, r + dr, y)).length >= 2);
+      const cell = cells.length ? cells[Math.floor(this.rng.next() * cells.length)] : { ...map.toCell(b.x, b.z), y: b.y ?? 0 };
+      Object.assign(b, { x: map.cellX(cell.c), z: map.cellZ(cell.r), y: cell.y ?? 0, state: 'armed', picker: null, progress: 0, alertT: -99 });
     }
   }
 
@@ -352,13 +353,13 @@ export class Match {
     const ids = [...new Set((prefer ?? []).filter((id) => CONCEPTS.some((c) => c.id === id)))];
     const rest = CONCEPTS.map((c) => c.id).filter((id) => !ids.includes(id));
     while (rest.length) ids.push(rest.splice(Math.floor(this.rng.next() * rest.length), 1)[0]);
-    return picked.map((s, i) => ({ key: i, id: ids[i], x: this.map.cellX(s.c), z: this.map.cellZ(s.r), takenBy: [] }));
+    return picked.map((s, i) => ({ key: i, id: ids[i], x: this.map.cellX(s.c), y: s.f ? STORY : 0, z: this.map.cellZ(s.r), takenBy: [] }));
   }
 
   updateConcepts() {
     for (const c of this.concepts) {
       for (const a of this.agents) {
-        if (!a.alive || !(a.isPlayer || a.human) || a.pos.y > 1.2) continue;
+        if (!a.alive || !(a.isPlayer || a.human) || Math.abs(a.pos.y - (c.y ?? 0)) > 1.2) continue;
         if (Math.hypot(a.pos.x - c.x, a.pos.z - c.z) > 1.1 || c.takenBy.includes(a.id)) continue;
         c.takenBy.push(a.id);
         (a.concepts ??= []).push(c.id);
@@ -581,10 +582,10 @@ export class Match {
     }
     const seen = !!p;
     p ??= this.aimPoint(a, 60);
-    const callout = this.map.calloutAt(p.x, p.z);
+    const callout = this.map.calloutAt(p.x, p.z, p.y ?? 0);
     const d = Math.hypot(p.x - a.pos.x, p.z - a.pos.z);
     const place = callout ?? `${Math.round(d)}m 앞`;
-    this.shareIntel(a, { x: p.x, z: p.z, kind: seen ? 'seen' : 'report' });
+    this.shareIntel(a, { x: p.x, y: p.y ?? 0, z: p.z, kind: seen ? 'seen' : 'report' });
     this.radio(a, `${seen ? '적 발견' : '적 의심'} — ${place}`, { kind: 'contact', pos: p, report: true });
     return true;
   }
@@ -1045,7 +1046,7 @@ export class Match {
         let d = 2.0;
         const clear = (dd) => {
           const { c, r } = this.map.toCell(a.pos.x + fx * dd, a.pos.z + fz * dd);
-          return this.map.walkable(c, r) && this.map.lineOfSight(eyePos(a), { x: a.pos.x + fx * dd, y: a.pos.y + 1, z: a.pos.z + fz * dd });
+          return this.map.walkableAt(c, r, a.pos.y) && this.map.lineOfSight(eyePos(a), { x: a.pos.x + fx * dd, y: a.pos.y + 1, z: a.pos.z + fz * dd });
         };
         while (d > 0.8 && !clear(d)) d -= 0.3;
         const base = a.pos.y + 0.2;
@@ -1153,36 +1154,41 @@ export class Match {
     return true;
   }
 
-  // 조준한 곳의 바닥 지점 (벽 너머·맵 밖으로 나가지 않게)
+  // 조준한 곳의 바닥 지점 (벽 너머·맵 밖으로 나가지 않게). 2층 바닥·상자 위도 그 높이로
   aimPoint(a, range) {
     const eye = eyePos(a);
     const d = dirFromAngles(a.yaw, a.pitch);
     const end = { x: eye.x + d.x * range, y: eye.y + d.y * range, z: eye.z + d.z * range };
     const hit = this.map.raycast(eye, end);
     let p = hit ? { x: hit.x, y: hit.y, z: hit.z } : end;
-    if (hit && hit.ny === 0) {
+    // 벽에 맞으면 벽 앞으로 조금 물림
+    if (hit && Math.abs(hit.ny) < 0.5) {
       p.x += hit.nx * 0.6;
       p.z += hit.nz * 0.6;
     }
-    const valid = (q) => {
+    // 그 지점 아래의 바닥 (허공이면 눈에서 그 지점까지 거슬러 가며 처음 바닥이 있는 곳)
+    const support = (q) => {
       const { c, r } = this.map.toCell(q.x, q.z);
-      const h = this.map.heightAt(c, r);
-      return h < 4 && h <= Math.max(q.y, 0) + 0.05;
+      if (!this.map.inBounds(c, r)) return null;
+      const y = this.map.dropToGround(q.x, q.z, Math.max(q.y, 0) + 0.3);
+      return y <= Math.max(q.y, 0) + 0.35 && Math.max(q.y, 0) - y < 4 ? y : null;
     };
-    if (!valid(p)) {
+    let y = support(p);
+    if (y == null) {
       const steps = Math.ceil(dist(eye, p));
       for (let i = steps; i >= 0; i--) {
         const q = { x: eye.x + (p.x - eye.x) * (i / steps), y: eye.y + (p.y - eye.y) * (i / steps), z: eye.z + (p.z - eye.z) * (i / steps) };
-        if (valid(q)) {
+        y = support(q);
+        if (y != null) {
           p = q;
           break;
         }
-        if (i === 0) p = { x: a.pos.x, y: a.pos.y, z: a.pos.z };
+      }
+      if (y == null) {
+        p = { x: a.pos.x, y: a.pos.y, z: a.pos.z };
+        y = a.pos.y;
       }
     }
-    const { c, r } = this.map.toCell(p.x, p.z);
-    const h = this.map.heightAt(c, r);
-    const y = h <= Math.max(p.y, 0) + 0.05 ? h : 0;
     return { x: p.x, y, z: p.z };
   }
 

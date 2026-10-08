@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
-import { TILES } from '../sim/map.js';
-import { museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { TILES, STORY, KIND } from '../sim/map.js';
+import { grateTexture, museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
 import { buildLabProps, buildMuseumProps } from './exhibits.js';
 import { puddleRoughness } from './weather.js';
+import { buildStructure, shadeFn } from './structure.js';
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 
@@ -44,61 +45,57 @@ export function buildWorld(map, baseTex) {
     roughness: museum ? 0.4 : wet ? 0.7 : 0.9,
     roughnessMap: puddles,
     metalness: 0.02,
-    color: day ? (museum ? bright(1.0, 0.98, 0.94) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
+    color: day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
   });
-  withFloorMarkings(floorMat, buildFloorMarkings(map));
+  withFloorMarkings(floorMat, buildFloorMarkings(map), buildFloorShade(map, museum));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
 
-  // ── 벽: 보이는 면만 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
-  const sides = new QuadBuilder();
-  const tops = new QuadBuilder();
-  for (let r = 0; r < map.rows; r++) {
-    for (let c = 0; c < map.cols; c++) {
-      if (TILES[map.charAt(c, r)]?.kind !== 'wall') continue;
-      const h = map.heightAt(c, r);
-      const x0 = map.originX + c * CELL, x1 = x0 + CELL;
-      const z0 = map.originZ + r * CELL, z1 = z0 + CELL;
-      const faces = [
-        [0, -1, [x1, z0], [x0, z0], 0, 0, -1],
-        [0, 1, [x0, z1], [x1, z1], 0, 0, 1],
-        [-1, 0, [x0, z0], [x0, z1], -1, 0, 0],
-        [1, 0, [x1, z1], [x1, z0], 1, 0, 0],
-      ];
-      for (const [dc, dr, a, b, nx, ny, nz] of faces) {
-        if (!map.inBounds(c + dc, r + dr)) continue;
-        const nh = map.heightAt(c + dc, r + dr);
-        if (nh >= h) continue;
-        const y0 = Math.max(0, nh);
-        const ua = (nx !== 0 ? a[1] * -nx : a[0] * nz) / 4;
-        const ub = (nx !== 0 ? b[1] * -nx : b[0] * nz) / 4;
-        sides.quad(
-          [a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], h, b[1]], [a[0], h, a[1]],
-          [nx, ny, nz],
-          [ua, y0 / 4.8], [ub, y0 / 4.8], [ub, h / 4.8], [ua, h / 4.8],
-        );
-      }
-      tops.quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1]);
-    }
-  }
+  // ── 건물: 벽(1·2층)·창문·2층 바닥판·난간·지붕·계단 (맵의 막힌 높이 구간 그대로, 보이는 면만)
+  const worldTex = (t, k = 1) => {
+    const c = t.clone();
+    c.repeat.set(k, k);
+    c.needsUpdate = true;
+    return c;
+  };
+  const V = { vertexColors: true };
   const wallMat = new THREE.MeshStandardMaterial({
+    ...V,
     map: tex.wall,
     bumpMap: tex.wallBump,
     bumpScale: museum ? 0.8 : 2.0,
     roughness: museum ? 0.82 : wet ? 0.74 : 0.93,
     metalness: 0.02,
-    color: day ? (museum ? bright(1.12, 1.1, 1.05) : bright(1.75, 1.7, 1.62)) : museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
+    color: day ? (museum ? bright(0.96, 0.94, 0.9) : bright(1.75, 1.7, 1.62)) : museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
   });
-  const wallMesh = new THREE.Mesh(sides.build(), wallMat);
-  wallMesh.castShadow = true;
-  wallMesh.receiveShadow = true;
-  group.add(wallMesh);
-  const topMesh = new THREE.Mesh(tops.build(), new THREE.MeshStandardMaterial({ map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }));
-  topMesh.castShadow = true;
-  topMesh.receiveShadow = true;
-  group.add(topMesh);
+  const floorCol = day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff';
+  const slabTex = worldTex(tex.floor);
+  const mats = {
+    wall: wallMat,
+    wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
+    ceil: museum
+      ? new THREE.MeshStandardMaterial({ ...V, color: '#c4beb2', roughness: 0.92 })
+      : new THREE.MeshStandardMaterial({ ...V, map: worldTex(tex.floor), roughness: 0.95, color: day ? bright(1.3, 1.28, 1.25) : '#8e9196' }),
+    slabTop: new THREE.MeshStandardMaterial({ ...V, map: slabTex, bumpMap: worldTex(tex.floorBump), bumpScale: museum ? 0.6 : 1.2, roughness: museum ? 0.4 : 0.9, metalness: 0.02, color: floorCol }),
+    grate: new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
+    edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
+    edgeSteel: new THREE.MeshStandardMaterial({ ...V, color: '#4b5157', roughness: 0.5, metalness: 0.7 }),
+    rail: museum
+      ? new THREE.MeshStandardMaterial({ color: '#8f7442', roughness: 0.35, metalness: 0.8 })
+      : new THREE.MeshStandardMaterial({ color: '#3b4046', roughness: 0.55, metalness: 0.6 }),
+    railTop: museum
+      ? new THREE.MeshStandardMaterial({ color: '#7a5f45', roughness: 0.45 })
+      : new THREE.MeshStandardMaterial({ color: '#d0a62a', roughness: 0.45, metalness: 0.35 }),
+    railGlass: new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2, depthWrite: false }),
+    roofTop: new THREE.MeshStandardMaterial({ ...V, color: '#3d4044', roughness: 0.95 }),
+    tread: new THREE.MeshStandardMaterial({ ...V, map: slabTex, roughness: museum ? 0.35 : 0.85, color: museum ? bright(1.08, 1.06, 1.02) : floorCol }),
+    nosing: museum
+      ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85 })
+      : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.6, metalness: 0.1 }),
+  };
+  group.add(buildStructure(map, mats, { museum }));
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
   const kinds = museum ? {} : {
@@ -112,11 +109,10 @@ export function buildWorld(map, baseTex) {
     group.add(props);
     group.userData.tick = props.userData.tick;
   } else if (map.def.decor?.labProps) group.add(buildLabProps(map));
+  const shade = shadeFn(map, museum);
   for (const [kind, style] of Object.entries(kinds)) {
-    const cells = [];
-    for (let r = 0; r < map.rows; r++) {
-      for (let c = 0; c < map.cols; c++) if (TILES[map.charAt(c, r)]?.kind === kind) cells.push([c, r]);
-    }
+    // 1층·2층 바닥 위의 상자 (map.props: 칸·높이)
+    const cells = map.props.filter((p) => p.kind === kind).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
     const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
@@ -126,11 +122,15 @@ export function buildWorld(map, baseTex) {
     const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
     const mesh = new THREE.InstancedMesh(geo, [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
-    cells.forEach(([c, r], i) => {
+    const col = new THREE.Color();
+    cells.forEach(([c, r, y], i) => {
       const rot = ((c * 7 + r * 13) % 4) * (Math.PI / 2);
       m.makeRotationY(kind === 'bigCrate' ? 0 : rot);
-      m.setPosition(map.cellX(c), 0, map.cellZ(r));
+      m.setPosition(map.cellX(c), y, map.cellZ(r));
       mesh.setMatrixAt(i, m);
+      // 실내(지붕·2층 바닥 아래)의 상자는 조금 어둡게
+      const k = shade(c, r, y + h + 0.05);
+      mesh.setColorAt(i, col.setRGB(k, k, k));
     });
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -154,31 +154,6 @@ export function buildWorld(map, baseTex) {
   group.add(buildSkyline(map, day));
   group.userData.lamps = lamps;
   return group;
-}
-
-class QuadBuilder {
-  constructor() {
-    this.pos = [];
-    this.nor = [];
-    this.uv = [];
-    this.idx = [];
-  }
-  quad(a, b, c, d, n, ua, ub, uc, ud) {
-    const base = this.pos.length / 3;
-    for (const p of [a, b, c, d]) this.pos.push(...p);
-    for (let i = 0; i < 4; i++) this.nor.push(...n);
-    for (const u of [ua, ub, uc, ud]) this.uv.push(...u);
-    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  }
-  build() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setIndex(this.idx);
-    g.computeBoundingSphere();
-    return g;
-  }
 }
 
 // 바닥 페인트 선 (구역 경계는 노란색, 진영은 흰색) — 닳은 느낌
@@ -222,18 +197,44 @@ function buildFloorMarkings(map) {
 }
 
 // 구역 선(바닥 표시)을 바닥 재질 안에서 섞음 — 맵 전체를 덮는 반투명 층을 따로 그리지 않음
-function withFloorMarkings(mat, marks) {
+// 실내 그늘(shade: 칸마다 한 픽셀, 부드럽게 보간)도 같이 곱함
+function withFloorMarkings(mat, marks, shade) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.markMap = { value: marks };
+    sh.uniforms.shadeMap = { value: shade };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vMarkUv;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMarkUv = uv;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D markMap;\nvarying vec2 vMarkUv;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\nvec4 mk = texture2D(markMap, vMarkUv);\ndiffuseColor.rgb = mix(diffuseColor.rgb, mk.rgb, mk.a);');
+      .replace('#include <common>', '#include <common>\nuniform sampler2D markMap;\nuniform sampler2D shadeMap;\nvarying vec2 vMarkUv;')
+      .replace(
+        '#include <map_fragment>',
+        '#include <map_fragment>\nvec4 mk = texture2D(markMap, vMarkUv);\ndiffuseColor.rgb = mix(diffuseColor.rgb, mk.rgb, mk.a);\ndiffuseColor.rgb *= texture2D(shadeMap, vMarkUv).r;',
+      );
   };
   mat.customProgramCacheKey = () => 'floorMarks';
   return mat;
+}
+
+// 1층 바닥의 실내 그늘 지도 (지붕 아래·2층 바닥 아래는 어둡게)
+function buildFloorShade(map, museum) {
+  const shade = shadeFn(map, museum);
+  const c = document.createElement('canvas');
+  c.width = map.cols;
+  c.height = map.rows;
+  const g = c.getContext('2d');
+  for (let r = 0; r < map.rows; r++) {
+    for (let col = 0; col < map.cols; col++) {
+      const v = Math.round(Math.min(1, shade(col, r, 0.1)) * 255);
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(col, r, 1, 1);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.minFilter = THREE.LinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = false;
+  return t;
 }
 
 // 빛 웅덩이·후광용 방사형 그라데이션
@@ -277,11 +278,16 @@ function addLamps(group, map) {
   };
   for (const lamp of map.def.decor?.lamps ?? []) {
     const st = LAMP_STYLE[lamp.kind];
-    // 가장 가까운 벽 방향 찾기
+    // 등 높이: 2층(f: 1)은 2층 바닥 위, 1층은 위에 2층 바닥이 있으면 그 아래
+    const floorY = lamp.f ? STORY : 0;
+    let y = floorY + 3.7;
+    for (const [y0] of map.spansAt(lamp.c, lamp.r)) if (y0 > floorY + 0.5 && y0 - 0.35 < y) y = y0 - 0.35;
+    // 그 높이에 벽이 있는 가장 가까운 칸 쪽으로
+    const solidAt = (c, r) => map.spansAt(c, r).some(([y0, y1, k]) => (k === KIND.wall || k === KIND.lintel) && y0 <= y + 0.2 && y1 >= y + 0.2);
     let dir = null;
     for (let d = 1; d <= 3 && !dir; d++) {
       for (const [dc, dr] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-        if (map.heightAt(lamp.c + dc * d, lamp.r + dr * d) >= 4) {
+        if (solidAt(lamp.c + dc * d, lamp.r + dr * d)) {
           dir = { dc, dr, d };
           break;
         }
@@ -291,7 +297,6 @@ function addLamps(group, map) {
     const cx = map.cellX(lamp.c), cz = map.cellZ(lamp.r);
     // 벽면 위치 = 셀 중심에서 벽 쪽으로 (d-0.5)칸
     const wx = cx + dir.dc * (dir.d - 0.5) * CELL, wz = cz + dir.dr * (dir.d - 0.5) * CELL;
-    const y = 3.7;
     // 등 몸체·렌즈는 모든 등을 합쳐 재질별로 한 번씩 그림
     fixM.compose(new THREE.Vector3(wx - dir.dc * 0.12, y, wz - dir.dr * 0.12), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-dir.dc, -dir.dr)), new THREE.Vector3(1, 1, 1));
     housings.push(new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.3 : 0.5, 0.22, 0.24).applyMatrix4(fixM));
@@ -303,8 +308,8 @@ function addLamps(group, map) {
     const out = new THREE.Vector3(-dir.dc, 0, -dir.dr);
     const side = new THREE.Vector3(-out.z, 0, out.x);
     const k = lamp.kind === 'fluo' ? 0.2 : 0.34;
-    quad(new THREE.Vector3(wx + out.x * 2.2, 0.025, wz + out.z * 2.2), side, out, 10, 10, color.clone().multiplyScalar(k));
-    quad(new THREE.Vector3(wx + out.x * 0.04, 2.9, wz + out.z * 0.04), side, new THREE.Vector3(0, 1, 0), 6, 5.6, color.clone().multiplyScalar(k * 0.8));
+    quad(new THREE.Vector3(wx + out.x * 2.2, floorY + 0.025, wz + out.z * 2.2), side, out, 10, 10, color.clone().multiplyScalar(k));
+    quad(new THREE.Vector3(wx + out.x * 0.04, y - 0.8, wz + out.z * 0.04), side, new THREE.Vector3(0, 1, 0), 6, 5.6, color.clone().multiplyScalar(k * 0.8));
     src.poolEnd = pool.col.length;
     const lc = new THREE.Color(st.lens);
     halo.pos.push(wx - dir.dc * 0.18, y - 0.13, wz - dir.dr * 0.18);
@@ -592,10 +597,10 @@ function addDecor(group, map, museum = false) {
   const posters = decor.posters;
   if (posters) posters.topics.forEach((topic, i) => list.push({ c: posters.cols[i], r: posters.faceRow, rotY: 0, topic }));
   for (const p of decor.posterList ?? []) list.push(p);
-  list.forEach(({ c, r, rotY, topic }, i) => {
+  list.forEach(({ c, r, rotY, topic, f }, i) => {
     const p = { no: i + 1, ...POSTER_TOPICS[topic], museum };
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
-    m.position.set(map.originX + c * CELL + Math.sin(rotY) * 0.03, 1.9, map.originZ + r * CELL + Math.cos(rotY) * 0.03);
+    m.position.set(map.originX + c * CELL + Math.sin(rotY) * 0.03, (f ? STORY : 0) + 1.9, map.originZ + r * CELL + Math.cos(rotY) * 0.03);
     m.rotation.y = rotY;
     m.receiveShadow = true;
     group.add(m);
@@ -606,7 +611,7 @@ function addDecor(group, map, museum = false) {
       new THREE.MeshStandardMaterial({ map: sprayTexture(s.text, s.sub), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
     );
     const off = 0.03;
-    m.position.set(map.originX + s.x * CELL + Math.sin(s.rotY) * off, 2.4, map.originZ + s.z * CELL + Math.cos(s.rotY) * off);
+    m.position.set(map.originX + s.x * CELL + Math.sin(s.rotY) * off, (s.f ? STORY : 0) + 2.4, map.originZ + s.z * CELL + Math.cos(s.rotY) * off);
     m.rotation.y = s.rotY;
     m.receiveShadow = true;
     group.add(m);

@@ -219,7 +219,7 @@ class BombView {
   constructor(bomb) {
     this.bomb = bomb;
     const g = new THREE.Group();
-    g.position.set(bomb.x, 0, bomb.z);
+    g.position.set(bomb.x, bomb.y ?? 0, bomb.z);
     this.group = g;
     this.liquid = new THREE.MeshStandardMaterial({ color: '#b2281f', emissive: '#b2281f', emissiveIntensity: 0.7 });
     const glass = new THREE.MeshStandardMaterial({ color: '#9fb6c2', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2 });
@@ -259,7 +259,7 @@ class BombView {
     this.lamp = mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: '#ff2a2a', emissive: '#ff2a2a', emissiveIntensity: 3 }), false);
     this.lamp.position.set(0.34, 0.62, 0.2);
     // 경고등 (실제 점광원은 LightRig가 가까울 때만 배정)
-    this.light = { pos: new THREE.Vector3(bomb.x, 1.0, bomb.z + 0.3), color: new THREE.Color('#ff3020'), intensity: 3, distance: 5, priority: 0.5 };
+    this.light = { pos: new THREE.Vector3(bomb.x, (bomb.y ?? 0) + 1.0, bomb.z + 0.3), color: new THREE.Color('#ff3020'), intensity: 3, distance: 5, priority: 0.5 };
     // 해체 진행 표시: 바닥 고리 16칸 (한 메시, 칸마다 정점 색)
     const segs = [];
     for (let i = 0; i < 16; i++) {
@@ -302,9 +302,10 @@ class BombView {
   update(dt, time, timeLeft) {
     const b = this.bomb;
     // 라운드마다 놓이는 자리가 바뀜
-    if (this.group.position.x !== b.x || this.group.position.z !== b.z) {
-      this.group.position.set(b.x, 0, b.z);
-      this.light.pos.set(b.x, 1.0, b.z + 0.3);
+    const by = b.y ?? 0;
+    if (this.group.position.x !== b.x || this.group.position.z !== b.z || this.group.position.y !== by) {
+      this.group.position.set(b.x, by, b.z);
+      this.light.pos.set(b.x, by + 1.0, b.z + 0.3);
     }
     let text, color, sub;
     if (b.state === 'defused') {
@@ -507,6 +508,7 @@ export class Effects {
       c.r.set(0, Math.atan2(right.x, right.z), 0);
       c.life = 2.2;
       c.bounced = false;
+      c.floor = this.match.map.dropToGround(portPos.x, portPos.z, portPos.y) + 0.01;
     }
   }
 
@@ -685,8 +687,8 @@ export class Effects {
         c.p.addScaledVector(c.v, dt);
         c.r.x += c.w.x * dt;
         c.r.z += c.w.z * dt;
-        if (c.p.y < 0.01) {
-          c.p.y = 0.01;
+        if (c.p.y < (c.floor ?? 0.01)) {
+          c.p.y = c.floor ?? 0.01;
           if (Math.abs(c.v.y) > 0.6 && !c.bounced) this.onCasingBounce?.(c.p);
           c.bounced = true;
           c.v.y *= -0.35;
