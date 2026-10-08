@@ -6,7 +6,7 @@ import { TeamDraft } from '../src/sim/draft.js';
 import { attachBots } from '../src/ai/bot.js';
 import { DT, TEAMS } from '../src/sim/constants.js';
 import { emptyIntent } from '../src/sim/agent.js';
-import { PATCHES, WEAPONS } from '../src/sim/data.js';
+import { ARMOR, PATCHES, WEAPONS } from '../src/sim/data.js';
 
 function draftAll(seed, playerTeam = null) {
   const rng = createRng(seed);
@@ -54,26 +54,36 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
   assert.ok(patchUses > 0, '봇이 포스 패치를 써야 함');
 });
 
-test('합력 강화장치: 소총 31 → 34, 몸통 4발 → 3발', () => {
+test('합력 강화장치: 소총 40 → 46, 경량 방탄 상대 몸통 4발 → 3발', () => {
   const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const p = match.player;
   const victim = match.agents.find((a) => a.team === TEAMS.FORCE);
-  assert.equal(WEAPONS.rifle.damage * 3 < 100, true, '평소에는 3발로 쓰러지지 않음');
+  victim.armor = victim.armorMax = ARMOR.light.value;
+  for (let i = 0; i < 3; i++) match.applyDamage(victim, WEAPONS.rifle.damage, p);
+  assert.ok(victim.alive, '평소에는 3발로 쓰러지지 않음 (120 < 125)');
+  assert.equal(victim.armor, 0, '방탄이 먼저 깎임');
+  victim.hp = 100;
+  victim.armor = ARMOR.light.value;
   assert.ok(match.usePatch(p, 0));
   assert.equal(p.ampT, 5);
-  const amped = WEAPONS.rifle.damage + PATCHES.resultantAmp.bonus;
+  const amped = WEAPONS.rifle.damage + WEAPONS.rifle.ampBonus;
+  assert.equal(amped, 46);
   for (let i = 0; i < 2; i++) match.applyDamage(victim, amped, p);
   assert.ok(victim.alive);
   match.applyDamage(victim, amped, p);
   assert.ok(!victim.alive);
 });
 
-test('한 발의 위력: 머리는 1발, 몸통은 소총·권총 모두 4발', () => {
-  for (const w of [WEAPONS.rifle, WEAPONS.pistol]) {
-    assert.ok(w.damage * w.headMult >= 100, `${w.id} 머리 1발`);
-    assert.ok(w.damage * 3 < 100 && w.damage * 4 >= 100, `${w.id} 몸통 4발`);
-  }
+test('한 발의 위력: 소총 머리 1발 · 몸통 3발(중량 방탄 4발), 권총 머리 78, 저격총 몸통 1발', () => {
+  const r = WEAPONS.rifle;
+  assert.ok(r.damage * r.headMult >= 100 + ARMOR.heavy.value, '소총 머리 1발 (방탄 포함)');
+  assert.ok(r.damage * 2 < 100 && r.damage * 3 >= 100, '방탄 없으면 몸통 3발');
+  assert.ok(r.damage * 3 < 150 && r.damage * 4 >= 150, '중량 방탄이면 몸통 4발');
+  assert.equal(Math.round(WEAPONS.pistol.damage * WEAPONS.pistol.headMult), 78);
+  assert.ok(WEAPONS.sniper.damage >= 100 + ARMOR.heavy.value, '저격총 몸통 1발');
+  assert.ok(WEAPONS.sheriff.damage * WEAPONS.sheriff.headMult >= 150, '리볼버 머리 1발');
+  for (const id of ['pistol', 'sheriff', 'smg', 'shotgun', 'rifle', 'sniper']) assert.ok(WEAPONS[id].price >= 0 && WEAPONS[id].slot, id);
 });
 
 test('중력 강화장막: 날아오던 투사체가 서서히 멈추고 피해를 주지 않음, 끝나면 떨어짐', () => {

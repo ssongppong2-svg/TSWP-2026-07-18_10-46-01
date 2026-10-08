@@ -3,13 +3,28 @@ import { LOADOUT_SLOTS, WEAPONS } from './data.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// 새 총 한 자루의 탄 (탄창 가득 + 예비탄)
+export const freshAmmo = (id) => ({ mag: WEAPONS[id].magSize ?? 0, reserve: WEAPONS[id].reserve ?? 0 });
+
+// 총을 손에 넣음: 같은 칸(주무기·보조무기)에 있던 총은 버림
+export function giveWeapon(a, id) {
+  const w = WEAPONS[id];
+  const old = a[w.slot];
+  if (old && old !== id) delete a.weapons[old];
+  a[w.slot] = id;
+  a.weapons[id] = freshAmmo(id);
+}
+
 // 플레이어와 봇이 똑같이 쓰는 "요원" 데이터. 조종은 controller(사람 입력 / 봇 AI / 나중엔 네트워크)가 한다.
-export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, loadout = [] }) {
+// kit: 'full' 소총+권총으로 시작 (한 판짜리 규칙) / 'pistol' 권총만 (라운드제: 상점에서 삼)
+export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, loadout = [], kit = 'full' }) {
   const pos = { x: spawn.x, y: 0, z: spawn.z };
+  const full = kit === 'full';
   return {
     id,
     name,
-    team,
+    team, // 지금 맡은 쪽 (해체/포스) — 전반이 끝나면 바뀜
+    squad: team, // 소속 분대 (끝까지 그대로, 점수·색은 이것으로)
     isPlayer,
     alive: true,
     hp: PLAYER.maxHp,
@@ -24,12 +39,13 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     leanOffset: 0, // 벽에 막힌 것까지 반영한 실제 옆 이동(m)
     ads: false,
     adsT: 0,
-    weapons: {
-      rifle: { mag: WEAPONS.rifle.magSize, reserve: WEAPONS.rifle.reserve },
-      pistol: { mag: WEAPONS.pistol.magSize, reserve: WEAPONS.pistol.reserve },
-      knife: { mag: 0, reserve: 0 },
-    },
-    weapon: 'rifle',
+    weapons: full ? { rifle: freshAmmo('rifle'), pistol: freshAmmo('pistol'), knife: { mag: 0, reserve: 0 } } : { pistol: freshAmmo('pistol'), knife: { mag: 0, reserve: 0 } },
+    primary: full ? 'rifle' : null,
+    secondary: 'pistol',
+    weapon: full ? 'rifle' : 'pistol',
+    armor: 0, // 방탄 (체력보다 먼저 깎임)
+    armorMax: 0,
+    credits: 0,
     fireCd: 0,
     reloadT: 0,
     swapT: 0,
@@ -56,7 +72,8 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     lastHurtBy: null,
     deadT: 0,
     spottedT: -99,
-    stats: { kills: 0, deaths: 0, damage: 0, defuses: 0, patchUses: 0, headshots: 0 },
+    stats: { kills: 0, deaths: 0, damage: 0, defuses: 0, patchUses: 0, headshots: 0, assists: 0 },
+    round: { kills: 0, damage: 0, by: {} }, // 이번 라운드 기록 (by: 나에게 피해를 준 요원별 피해량)
   };
 }
 
@@ -74,6 +91,7 @@ export function emptyIntent(agent) {
     fire: false,
     reload: false,
     switchTo: null,
+    buy: null, // 상점: 무기 id 또는 'light'·'heavy' (같은 것을 다시 사면 이번 구매 시간 안에서 환불)
     patch: [false, false, false, false],
     interact: false,
     card: -1,
@@ -97,10 +115,12 @@ export const bodyTop = (a) => lerp(PLAYER.bodyTopStand, PLAYER.bodyTopCrouch, a.
 
 export function moveSpeed(a, intent) {
   const P = PLAYER;
+  const w = WEAPONS[a.weapon];
   let s = intent.walk ? P.walkSpeed : P.runSpeed;
   if (a.crouch > 0.5) s = Math.min(s, P.crouchSpeed);
-  if (a.adsT > 0.5) s *= P.adsSpeedMult;
+  if (a.adsT > 0.5) s *= w?.adsMoveMult ?? P.adsSpeedMult;
   if (a.weapon === 'knife') s *= P.knifeSpeedMult;
+  else s *= w?.moveMult ?? 1;
   if (Math.abs(a.lean) > 0.3) s *= P.leanSpeedMult;
   if (a.tagT > 0) s *= P.tagSlow;
   if (a.mired) s *= P.miredMult;

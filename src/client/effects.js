@@ -301,6 +301,11 @@ class BombView {
 
   update(dt, time, timeLeft) {
     const b = this.bomb;
+    // 라운드마다 놓이는 자리가 바뀜
+    if (this.group.position.x !== b.x || this.group.position.z !== b.z) {
+      this.group.position.set(b.x, 0, b.z);
+      this.light.pos.set(b.x, 1.0, b.z + 0.3);
+    }
     let text, color, sub;
     if (b.state === 'defused') {
       text = 'SAFE';

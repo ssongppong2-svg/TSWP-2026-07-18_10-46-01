@@ -1,11 +1,11 @@
 import { Emitter } from '../core/events.js';
 import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
-import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, stepMovement } from './agent.js';
+import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, TEAM_SIZE, TEAMS, ULT,
+  BOMB, BOT_NAMES, ECON, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
-import { PATCHES, WEAPONS } from './data.js';
+import { ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { CONCEPTS } from './concepts.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap } from './map.js';
@@ -57,11 +57,15 @@ export function segmentShield(a, b, sh) {
   return t;
 }
 
+// 총을 쏠 때 움직이는 빠르기에 따른 빗나감 (0 = 멈춤, 1 = 달리기). 걷기는 절반쯤
+const moveFactor = (a) => clamp((Math.hypot(a.vel.x, a.vel.z) - 0.8) / (PLAYER.runSpeed - 0.8), 0, 1);
+
 export class Match {
+  // rules: 'rounds' 발로란트식 라운드제 (구매 시간·상점·7선승·공수 교대) / 'single' 한 판으로 끝 (시험·연습용)
   // conceptIds: 개념 카드로 먼저 놓을 개념 (아직 도감에 없는 것 등). conceptCount: 맵에 놓을 카드 수
   // roster: 직접 정한 명단 (온라인: 사람 여러 명 + 봇). client: 온라인 참가자 화면용 — 규칙 계산은 방장이 하고
   //         여기서는 자기 요원의 이동·사격 연출만 미리 보여 줌 (피해·패치·해체는 방장 결과를 받아 씀)
-  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false } = {}) {
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false, rules = 'single' } = {}) {
     this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
@@ -79,40 +83,265 @@ export class Match {
     this.intel = { defuse: [], force: [] }; // 무전으로 공유된 소리 정보
     this.nextId = 1;
     this.time = 0;
+    this.rules = rules;
     this.liveAt = PRE_ROUND_TIME;
-    this.phase = 'prestart';
+    this.phase = 'buy'; // buy 시작 전(구매) → live 진행 → roundEnd 라운드 결과 → (다음 라운드 buy) … → ended
     this.phaseT = PRE_ROUND_TIME;
     this.timeLeft = ROUND_TIME;
-    this.winner = null;
+    this.winner = null; // 경기에서 이긴 분대 (분대 이름 = 처음 맡은 쪽)
     this.reason = '';
     this.endT = 0;
     this.visT = 0;
     this.warned = new Set();
     this.forceWipedSent = false;
+    // 라운드제 기록
+    this.round = 1;
+    this.score = { defuse: 0, force: 0 }; // 분대별 이긴 라운드 수
+    this.lossStreak = { defuse: 0, force: 0 };
+    this.history = []; // 라운드마다 { round, squad(이긴 분대), side(이긴 쪽), reason }
+    this.roundWinner = null; // 방금 끝난 라운드에서 이긴 쪽 (해체/포스)
+    this.roundReason = '';
+    this.swapped = false; // 공수 교대 후
     this.bombs = this.map.bombs.map((b) => ({ id: b.id, x: b.x, y: 0, z: b.z, state: 'armed', picker: null, progress: 0, alertT: -99 }));
     this.client = client;
     this.localAgent = null; // client 모드에서 이 화면의 요원
+    this.barriers = this.makeBarriers();
 
     roster ??= makeRoster(playerTeam, playerName);
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
-      const members = roster.filter((m) => m.team === team);
-      const spawns = this.map.spawns[team];
-      members.forEach((m, i) => {
-        const s = spawns[Math.round((i * (spawns.length - 1)) / Math.max(1, members.length - 1))];
-        const spawn = { x: s.x + this.rng.range(-0.3, 0.3), z: s.z + this.rng.range(-0.3, 0.3) };
-        this.agents.push(
-          createAgent({
-            ...m,
-            spawn,
-            yaw: team === TEAMS.FORCE ? Math.PI : 0,
-            loadout: loadouts.get(m.id) ?? [],
-          }),
-        );
+      for (const m of roster.filter((x) => x.team === team)) {
+        this.agents.push(createAgent({ ...m, spawn: { x: 0, z: 0 }, loadout: loadouts.get(m.id) ?? [], kit: rules === 'rounds' ? 'pistol' : 'full' }));
         this.agents.at(-1).human = !!m.human; // 온라인으로 들어온 다른 사람 (봇이 조종하지 않음)
-      });
+      }
     }
     this.byId = new Map(this.agents.map((a) => [a.id, a]));
+    this.placeAgents();
+    if (rules === 'rounds') {
+      for (const a of this.agents) a.credits = ECON.start;
+      this.startRound();
+    }
     this.concepts = this.placeConcepts(conceptIds, conceptCount);
+  }
+
+  get rounds() {
+    return this.rules === 'rounds';
+  }
+
+  // 지금 그 쪽(해체/포스)을 맡은 분대
+  squadOf(side) {
+    return this.agents.find((a) => a.team === side)?.squad ?? side;
+  }
+
+  // 시작 위치에 세움 (팀마다 시작 칸을 고르게 나눠 씀)
+  placeAgents() {
+    for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
+      const members = this.agents.filter((a) => a.team === team);
+      const spawns = this.map.spawns[team];
+      members.forEach((a, i) => {
+        const s = spawns[Math.round((i * (spawns.length - 1)) / Math.max(1, members.length - 1))];
+        a.pos.x = a.prev.x = s.x + this.rng.range(-0.3, 0.3);
+        a.pos.z = a.prev.z = s.z + this.rng.range(-0.3, 0.3);
+        a.pos.y = a.prev.y = 0;
+        a.vel.x = a.vel.y = a.vel.z = 0;
+        a.yaw = team === TEAMS.FORCE ? Math.PI : 0;
+        a.pitch = 0;
+      });
+    }
+  }
+
+  // 구매 시간에 나갈 수 없는 시작 구역 (시작 칸들을 둘러싼 사각형)
+  makeBarriers() {
+    const out = {};
+    for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
+      const sp = this.map.spawns[team];
+      if (!sp.length) continue;
+      const xs = sp.map((s) => s.x), zs = sp.map((s) => s.z);
+      const hx = 8, hz = 5; // 가로 ±8m, 세로 ±5m 정도 여유
+      out[team] = {
+        x0: Math.max(this.map.originX, Math.min(...xs) - hx),
+        x1: Math.min(this.map.originX + this.map.width, Math.max(...xs) + hx),
+        z0: Math.max(this.map.originZ, Math.min(...zs) - hz),
+        z1: Math.min(this.map.originZ + this.map.depth, Math.max(...zs) + hz),
+      };
+    }
+    return out;
+  }
+
+  // ───────────────────────── 라운드 ─────────────────────────
+  // 폭탄 2기를 A·B 구역 안 무작위 칸에 놓음 (모두에게 위치가 보임)
+  placeBombs() {
+    const map = this.map;
+    for (const b of this.bombs) {
+      const cells = (map.siteCells[b.id] ?? []).filter(({ c, r }) =>
+        [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].every(([dc, dr]) => map.walkable(c + dc, r + dr)));
+      const cell = cells.length ? cells[Math.floor(this.rng.next() * cells.length)] : map.toCell(b.x, b.z);
+      Object.assign(b, { x: map.cellX(cell.c), z: map.cellZ(cell.r), y: 0, state: 'armed', picker: null, progress: 0, alertT: -99 });
+    }
+  }
+
+  // 새 라운드 준비: 모두 되살려 시작 구역에, 살아남았던 요원은 총·방탄 유지, 포스 패치는 다시 충전
+  startRound() {
+    this.projectiles = [];
+    this.veils = [];
+    this.zones = [];
+    this.shields = [];
+    this.noises = [];
+    this.scans = [];
+    this.orders = { defuse: null, force: null };
+    this.intel = { defuse: [], force: [] };
+    this.warned = new Set();
+    this.forceWipedSent = false;
+    this.timeLeft = ROUND_TIME;
+    this.roundWinner = null;
+    this.roundReason = '';
+    this.placeBombs();
+    const firstOfHalf = this.round === 1 || this.round === ROUNDS.half + 1;
+    for (const a of this.agents) {
+      if (!a.alive || firstOfHalf) {
+        // 쓰러졌던 요원: 산 총·방탄을 잃고 기본 권총만
+        a.weapons = { pistol: freshAmmo('pistol'), knife: { mag: 0, reserve: 0 } };
+        a.primary = null;
+        a.secondary = 'pistol';
+        a.armor = a.armorMax = 0;
+      } else {
+        for (const id of Object.keys(a.weapons)) a.weapons[id] = freshAmmo(id);
+      }
+      a.weapon = a.primary ?? a.secondary;
+      a.alive = true;
+      a.hp = PLAYER.maxHp;
+      a.deadT = 0;
+      a.held = null;
+      a.lockpick = null;
+      a.slippery = a.mired = false;
+      a.ads = false;
+      a.adsT = 0;
+      a.reloadT = a.swapT = a.fireCd = a.meleeCd = 0;
+      a.bloom = a.recoil = a.recoilYaw = a.punch = 0;
+      a.sprayIndex = 0;
+      a.ampT = a.bounceT = a.tagT = 0;
+      a.crouch = a.lean = a.leanOffset = 0;
+      a.onGround = true;
+      a.revealedUntil = a.lastHurtT = a.spottedT = -99;
+      a.lastHurtBy = null;
+      a.visibleEnemies = [];
+      a.bought = []; // 이번 구매 시간에 산 것 (다시 누르면 환불)
+      a.round = { kills: 0, damage: 0, by: {} };
+      for (const p of a.patches) if (p) p.cd = p.activeT = 0;
+    }
+    this.placeAgents();
+    this.phase = 'buy';
+    this.phaseT = firstOfHalf ? ROUNDS.buyTimeFirst : ROUNDS.buyTime;
+    this.emit('roundPrep', { round: this.round });
+  }
+
+  // 라운드 승패: 점수·크레딧을 주고 결과를 잠깐 보여 준 뒤 다음 라운드 (7승이면 경기 끝)
+  endRound(side, reason) {
+    const squad = this.squadOf(side);
+    const loser = this.squadOf(otherTeam(side));
+    this.score[squad]++;
+    this.roundWinner = side;
+    this.roundReason = reason;
+    this.history.push({ round: this.round, squad, side, reason });
+    for (const a of this.agents) if (a.lockpick) this.cancelLockpick(a, 'end');
+    const lossPay = ECON.loss[Math.min(this.lossStreak[loser], ECON.loss.length - 1)];
+    this.lossStreak[squad] = 0;
+    this.lossStreak[loser]++;
+    for (const a of this.agents) this.pay(a, a.squad === squad ? ECON.win : lossPay);
+    const halftime = this.round === ROUNDS.half;
+    this.phase = 'roundEnd';
+    this.phaseT = halftime ? ROUNDS.halftimeTime : ROUNDS.endTime;
+    this.emit('roundEnd', { round: this.round, side, squad, reason, score: { ...this.score }, halftime });
+    if (this.score[squad] >= ROUNDS.winTo) this.end(squad, reason);
+    return side;
+  }
+
+  nextRound() {
+    this.round++;
+    if (this.round === ROUNDS.half + 1) {
+      // 공수 교대: 맡은 쪽을 바꾸고 크레딧·장비를 처음처럼
+      this.swapped = true;
+      for (const a of this.agents) {
+        a.team = otherTeam(a.team);
+        a.credits = ECON.start;
+      }
+      this.lossStreak = { defuse: 0, force: 0 };
+      this.emit('halftime', { score: { ...this.score } });
+    }
+    this.startRound();
+  }
+
+  pay(a, amount) {
+    a.credits = Math.min(ECON.max, (a.credits ?? 0) + amount);
+  }
+
+  // 상점 (구매 시간에만). 이번 구매 시간에 산 것을 다시 누르면 환불
+  buy(a, item) {
+    if (!this.rounds || this.phase !== 'buy' || !a.alive) return false;
+    a.bought ??= [];
+    const refund = (match) => {
+      const i = a.bought.findIndex(match);
+      if (i < 0) return 0;
+      const [b] = a.bought.splice(i, 1);
+      a.credits += b.price;
+      return b.price;
+    };
+    const armor = ARMOR[item];
+    if (armor) {
+      const mine = a.bought.find((b) => ARMOR[b.item]);
+      const before = mine ? a.bought.prevArmor : { v: a.armor, max: a.armorMax };
+      if (mine?.item === item) {
+        // 같은 방탄을 다시 누르면 환불하고 원래 방탄으로
+        refund((b) => b === mine);
+        a.armor = before.v;
+        a.armorMax = before.max;
+        this.emit('buy', { agent: a, item, sold: true });
+        return true;
+      }
+      if (before.v >= armor.value || a.credits + (mine?.price ?? 0) < armor.price) {
+        this.emit('buyDenied', { agent: a, item, reason: before.v >= armor.value ? 'have' : 'money' });
+        return false;
+      }
+      if (mine) refund((b) => b === mine);
+      else a.bought.prevArmor = before;
+      a.credits -= armor.price;
+      a.armor = a.armorMax = armor.value;
+      a.bought.push({ item, price: armor.price });
+      this.emit('buy', { agent: a, item });
+      return true;
+    }
+    const w = WEAPONS[item];
+    if (!w || w.melee) return false;
+    if (a[w.slot] === item) {
+      // 이번에 산 총이면 환불 (전 라운드부터 가진 총은 그대로)
+      if (!a.bought.some((b) => b.item === item)) return false;
+      refund((b) => b.item === item);
+      const prev = a.bought.prevWeapon?.[w.slot];
+      delete a.weapons[item];
+      a[w.slot] = prev ?? (w.slot === 'secondary' ? 'pistol' : null);
+      if (a[w.slot]) a.weapons[a[w.slot]] = freshAmmo(a[w.slot]);
+      if (a.weapon === item) a.weapon = a.primary ?? a.secondary;
+      this.emit('buy', { agent: a, item, sold: true });
+      return true;
+    }
+    const sameSlot = (b) => WEAPONS[b.item]?.slot === w.slot;
+    const back = a.bought.find(sameSlot);
+    if (a.credits + (back?.price ?? 0) < w.price) {
+      this.emit('buyDenied', { agent: a, item, reason: 'money' });
+      return false;
+    }
+    if (back) refund(sameSlot);
+    else (a.bought.prevWeapon ??= {})[w.slot] = a[w.slot];
+    a.credits -= w.price;
+    giveWeapon(a, item);
+    a.bought.push({ item, price: w.price });
+    // 산 총을 바로 손에
+    if (a.weapon !== item) {
+      a.weapon = item;
+      a.swapT = Math.min(0.4, w.draw);
+      a.reloadT = 0;
+    }
+    this.emit('buy', { agent: a, item });
+    return true;
   }
 
   // 개념 카드: 맵이 정한 자리 중 몇 곳에 무작위로 (사람만 주울 수 있음, 각자 따로)
@@ -165,6 +394,11 @@ export class Match {
   }
 
   // ───────────────────────── 한 틱 진행 ─────────────────────────
+  // 움직일 수 있는 때: 진행 중, 라운드 결과 화면, 라운드제의 구매 시간(시작 구역 안에서만)
+  get mobile() {
+    return this.phase === 'live' || this.phase === 'roundEnd' || (this.phase === 'buy' && this.rounds);
+  }
+
   tick(dt) {
     if (this.client) return this.clientTick(dt);
     this.time += dt;
@@ -175,15 +409,19 @@ export class Match {
       this.updateProjectiles(dt);
       return;
     }
-    if (this.phase === 'prestart') {
+    if (this.phase === 'buy') {
       this.phaseT -= dt;
       if (this.phaseT <= 0) {
         this.phase = 'live';
         this.liveAt = this.time;
-        this.emit('roundStart', {});
+        this.emit('roundStart', { round: this.round });
       }
+    } else if (this.phase === 'roundEnd') {
+      this.phaseT -= dt;
+      if (this.phaseT <= 0) return this.nextRound();
     }
     const live = this.phase === 'live';
+    const mobile = this.mobile;
 
     this.updateZones(dt);
     for (const a of this.agents) {
@@ -194,7 +432,8 @@ export class Match {
       }
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
-      this.stepAgent(a, intent, dt, live);
+      if (intent.buy) this.buy(a, intent.buy);
+      this.stepAgent(a, intent, dt, live, mobile);
     }
     this.separateAgents();
     this.updateConcepts();
@@ -218,7 +457,7 @@ export class Match {
     }
   }
 
-  stepAgent(a, intent, dt, live) {
+  stepAgent(a, intent, dt, live, mobile = live) {
     a.yaw = intent.yaw;
     a.pitch = clamp(intent.pitch, -1.45, 1.45);
     for (const p of a.patches) {
@@ -247,16 +486,17 @@ export class Match {
     // 정조준: 총을 들고 있고 재장전·교체 중이 아닐 때만
     const w = WEAPONS[a.weapon];
     a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
-    a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * 7, 0, 1);
+    a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
     this.stepWeapon(a, intent, dt, live && !a.lockpick);
-    this.moveAgent(a, intent, dt, live);
+    this.moveAgent(a, intent, dt, live, mobile);
   }
 
   // 이동 + 착지 소리 + 발걸음 (방장·참가자 화면이 같이 씀)
-  moveAgent(a, intent, dt, live) {
+  moveAgent(a, intent, dt, live, mobile = live) {
     const wasGround = a.onGround;
     const vy = a.vel.y;
-    stepMovement(a, intent, this.map, dt, live && !a.lockpick);
+    stepMovement(a, intent, this.map, dt, mobile && !a.lockpick);
+    if (this.phase === 'buy' && this.rounds) this.keepInBarrier(a);
     if (wasGround && !a.onGround && a.vel.y > 1) this.emit('jump', { agent: a });
     if (!wasGround && a.onGround && vy < -4) {
       this.emit('land', { agent: a, speed: -vy });
@@ -277,11 +517,22 @@ export class Match {
     }
   }
 
+  // 구매 시간: 시작 구역 밖으로 나가지 못함
+  keepInBarrier(a) {
+    const b = this.barriers[a.team];
+    if (!b) return;
+    const r = PLAYER.radius;
+    if (a.pos.x < b.x0 + r) { a.pos.x = b.x0 + r; a.vel.x = Math.max(0, a.vel.x); }
+    if (a.pos.x > b.x1 - r) { a.pos.x = b.x1 - r; a.vel.x = Math.min(0, a.vel.x); }
+    if (a.pos.z < b.z0 + r) { a.pos.z = b.z0 + r; a.vel.z = Math.max(0, a.vel.z); }
+    if (a.pos.z > b.z1 - r) { a.pos.z = b.z1 - r; a.vel.z = Math.min(0, a.vel.z); }
+  }
+
   // ───────────────────────── 소리 ─────────────────────────
   // 소리를 남김: 적 봇은 들을 수 있는 거리 안이면 듣고, 무게 감지기는 발걸음·총성을 탐지
   makeNoise(a, kind, at = null) {
     if (this.client) return null; // 소리 판정(봇 청각·무게 감지기)은 방장만
-    const loudKinds = kind === 'rifle' || kind === 'pistol';
+    const loudKinds = !!WEAPONS[kind] && !WEAPONS[kind].melee;
     const radius = (NOISE[kind] ?? 10) * (this.map.weather === 'rain' && !loudKinds ? NOISE.rainMult : 1);
     const p = at ?? a.pos;
     const n = { id: this.nextId++, kind, x: p.x, y: p.y ?? 0, z: p.z, team: a.team, agentId: a.id, radius, t: this.time };
@@ -391,7 +642,7 @@ export class Match {
       a.recoilYaw = 0;
     }
 
-    if (intent.switchTo && intent.switchTo !== a.weapon && WEAPONS[intent.switchTo] && !a.lockpick) {
+    if (intent.switchTo && intent.switchTo !== a.weapon && WEAPONS[intent.switchTo] && a.weapons[intent.switchTo] && !a.lockpick) {
       a.weapon = intent.switchTo;
       a.swapT = WEAPONS[a.weapon].draw;
       a.reloadT = 0;
@@ -459,30 +710,38 @@ export class Match {
     a.fireCd = 60 / w.rpm;
     if (a.sinceShot > 0.4) a.sprayIndex = 0;
     a.sinceShot = 0;
-    const moving = Math.hypot(a.vel.x, a.vel.z) > 1.2;
-    let spread = w.spreadBase + a.bloom + (moving ? w.spreadMove : 0) + (!a.onGround ? w.spreadAir : 0);
+    // 빗나감: 움직이는 빠르기만큼 커짐 (멈춰 서서 쏘면 정확) · 공중에서는 크게
+    let spread = w.spreadBase + a.bloom + w.spreadMove * moveFactor(a) + (!a.onGround ? w.spreadAir : 0);
     spread *= (1 + (w.adsSpread - 1) * a.adsT) * (1 + (w.crouchSpread - 1) * a.crouch);
     if (a.held) spread += w.spreadMove * 0.5;
-    const dir = spreadDir(dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch), spread, this.rng);
-    const amp = w.id === 'rifle' && a.ampT > 0;
-    const damage = w.damage + (amp ? PATCHES.resultantAmp.bonus : 0);
+    const aim = dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch);
+    const amp = a.ampT > 0 && (w.ampBonus ?? 0) > 0;
+    const damage = w.damage + (amp ? w.ampBonus : 0);
     const origin = eyePos(a);
-    const p = {
-      id: this.nextId++,
-      ownerId: a.id,
-      team: a.team,
-      weapon: w.id,
-      damage,
-      amp,
-      bounces: a.bounceT > 0 ? 1 : 0,
-      pos: origin,
-      prev: copy(origin),
-      vel: scale(dir, w.speed),
-      life: PROJECTILE.life,
-      harmless: false,
-      inVeil: false,
-    };
-    this.projectiles.push(p);
+    const pellets = w.pellets ?? 1;
+    let first = null;
+    for (let k = 0; k < pellets; k++) {
+      const dir = spreadDir(pellets > 1 ? spreadDir(aim, w.pelletSpread, this.rng) : aim, spread, this.rng);
+      const p = {
+        id: this.nextId++,
+        ownerId: a.id,
+        team: a.team,
+        weapon: w.id,
+        damage,
+        amp,
+        bounces: a.bounceT > 0 ? 1 : 0,
+        pos: copy(origin),
+        prev: copy(origin),
+        from: copy(origin), // 거리별 피해 계산용
+        vel: scale(dir, w.speed),
+        life: w.life ?? PROJECTILE.life,
+        harmless: false,
+        inVeil: false,
+        pellet: pellets > 1,
+      };
+      this.projectiles.push(p);
+      first ??= { p, dir };
+    }
     // 연사 반동 패턴 (정조준·앉기 중에는 줄어듦)
     const i = a.sprayIndex++;
     const rm = (1 + (w.adsRecoil - 1) * a.adsT) * (a.crouch > 0.5 ? 0.85 : 1);
@@ -491,7 +750,7 @@ export class Match {
     a.recoilYaw = clamp(a.recoilYaw + yawKick * rm, -w.recoilYawMax, w.recoilYawMax);
     a.bloom = Math.min(w.bloomMax, a.bloom + w.bloomPerShot);
     this.makeNoise(a, w.id);
-    this.emit('shot', { agent: a, weapon: w.id, origin, dir, amp, projectile: p });
+    this.emit('shot', { agent: a, weapon: w.id, origin, dir: first.dir, amp, projectile: first.p, pellets });
   }
 
   melee(a, heavy) {
@@ -545,9 +804,9 @@ export class Match {
       a.punch *= Math.exp(-dt * 8);
       const w = WEAPONS[a.weapon];
       a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
-      a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * 7, 0, 1);
+      a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
       this.stepWeapon(a, intent, dt, live && !a.lockpick && !a.held);
-      if (!a.held) this.moveAgent(a, intent, dt, live && !a.lockpick);
+      if (!a.held) this.moveAgent(a, intent, dt, live, this.mobile);
     }
     // 다른 요원의 총알 궤적 (화면용)
     const keep = [];
@@ -636,9 +895,10 @@ export class Match {
       if (target) {
         const hitPos = at(tHit);
         const owner = this.agentById(p.ownerId);
-        const mult = head ? WEAPONS[p.weapon].headMult : 1;
+        const w = WEAPONS[p.weapon];
+        const mult = (head ? w.headMult : 1) * falloffAt(w, p.from ? dist(p.from, hitPos) : 0);
         this.emit('impact', { ...hitPos, kind: 'flesh', projectile: p, headshot: head });
-        this.applyDamage(target, p.damage * mult, owner, { headshot: head, weapon: p.weapon, pos: hitPos });
+        this.applyDamage(target, p.damage * mult, owner, { headshot: head, weapon: p.weapon, pos: hitPos, pellet: p.pellet });
         continue;
       }
       if (shield) {
@@ -677,30 +937,36 @@ export class Match {
     this.projectiles = keep;
   }
 
-  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false } = {}) {
-    if (!t.alive || this.phase === 'ended') return;
+  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false, pellet = false } = {}) {
+    if (!t.alive || this.phase !== 'live') return;
     amount = Math.round(amount);
-    const dealt = Math.min(t.hp, amount);
-    t.hp -= amount;
+    // 방탄이 먼저 받음
+    const toArmor = Math.min(t.armor ?? 0, amount);
+    t.armor = (t.armor ?? 0) - toArmor;
+    const dealt = toArmor + Math.min(t.hp, amount - toArmor);
+    t.hp -= amount - toArmor;
     t.lastHurtT = this.time;
     t.lastHurtBy = attacker?.id ?? null;
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
     t.tagT = PLAYER.tagTime;
-    t.punch = Math.min(0.12, t.punch + (headshot ? 0.06 : 0.035));
+    t.punch = Math.min(0.08, t.punch + (pellet ? 0.006 : headshot ? 0.04 : 0.022));
     if (t.lockpick) this.cancelLockpick(t, 'hit');
     if (attacker) {
       attacker.stats.damage += dealt;
+      if (attacker.round) attacker.round.damage += dealt;
       attacker.ult = Math.min(ULT.max, attacker.ult + dealt * ULT.perDamage);
       if (headshot) attacker.stats.headshots++;
+      if (t.round && attacker.team !== t.team) t.round.by[attacker.id] = (t.round.by[attacker.id] ?? 0) + dealt;
     }
     const killed = t.hp <= 0;
-    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos, backstab });
+    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos, backstab, armor: toArmor > 0 });
     if (killed) this.kill(t, attacker, { headshot, weapon });
   }
 
   kill(t, attacker, { headshot = false, weapon = null } = {}) {
     t.alive = false;
     t.hp = 0;
+    t.armor = 0;
     t.deadT = 0;
     t.held = null;
     t.slippery = false;
@@ -710,9 +976,14 @@ export class Match {
     if (t.lockpick) this.cancelLockpick(t, 'dead');
     if (attacker && attacker !== t) {
       attacker.stats.kills++;
+      if (attacker.round) attacker.round.kills++;
       attacker.ult = Math.min(ULT.max, attacker.ult + ULT.perKill);
+      this.pay(attacker, ECON.kill);
     }
-    this.emit('kill', { victim: t, killer: attacker, headshot, weapon });
+    // 도움: 이번 라운드에 이 요원에게 피해를 준 다른 적
+    const assists = Object.keys(t.round?.by ?? {}).filter((id) => id !== attacker?.id).map((id) => this.agentById(id)).filter(Boolean);
+    for (const x of assists) x.stats.assists = (x.stats.assists ?? 0) + 1;
+    this.emit('kill', { victim: t, killer: attacker, headshot, weapon, assists, streak: attacker?.round?.kills ?? 0 });
     if (!this.forceWipedSent && this.alive(TEAMS.FORCE).length === 0 && this.alive(TEAMS.DEFUSE).length > 0) {
       this.forceWipedSent = true;
       this.emit('forceWiped', {});
@@ -825,7 +1096,7 @@ export class Match {
         this.scans.push(scan);
         const revealed = [];
         for (const n of this.noises) {
-          if (n.team === a.team || this.time - n.t > 1 || !['step', 'land', 'rifle', 'pistol'].includes(n.kind)) continue;
+          if (n.team === a.team || this.time - n.t > 1 || !(n.kind === 'step' || n.kind === 'land' || (WEAPONS[n.kind] && !WEAPONS[n.kind].melee))) continue;
           if (Math.hypot(n.x - scan.x, n.z - scan.z) > def.radius) continue;
           const e = this.agentById(n.agentId);
           if (!e?.alive || revealed.includes(e.id)) continue;
@@ -1114,6 +1385,7 @@ export class Match {
     a.lockpick = null;
     a.stats.defuses++;
     a.ult = Math.min(ULT.max, a.ult + ULT.perDefuse);
+    this.pay(a, ECON.defuse);
     this.emit('lockpickEnd', { agent: a, bomb, reason: 'done' });
     this.emit('bombDefused', { agent: a, bomb });
   }
@@ -1148,13 +1420,15 @@ export class Match {
 
   // ───────────────────────── 승패 ─────────────────────────
   checkEnd() {
-    if (this.bombs.every((b) => b.state === 'defused')) return this.end(TEAMS.DEFUSE, '폭탄 2기 해체 완료.');
-    if (this.alive(TEAMS.DEFUSE).length === 0) return this.end(TEAMS.FORCE, '해체팀 전원 제압.');
+    const done = (side, reason) => (this.rounds ? this.endRound(side, reason) : this.end(this.squadOf(side), reason));
+    if (this.bombs.every((b) => b.state === 'defused')) return done(TEAMS.DEFUSE, '폭탄 2기 해체 완료');
+    if (this.alive(TEAMS.DEFUSE).length === 0) return done(TEAMS.FORCE, '해체팀 전원 제압');
+    if (this.rounds && this.alive(TEAMS.FORCE).length === 0) return done(TEAMS.DEFUSE, '포스팀 전원 제압');
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       for (const b of this.bombs) if (b.state === 'armed') b.state = 'exploded';
       this.emit('explode', { bombs: this.bombs.filter((b) => b.state === 'exploded') });
-      return this.end(TEAMS.FORCE, '제한 시간 종료 — 폭탄 폭발.');
+      return done(TEAMS.FORCE, '제한 시간 종료 — 폭탄 폭발');
     }
     return null;
   }
@@ -1165,7 +1439,7 @@ export class Match {
     this.reason = reason;
     this.endT = 0;
     for (const a of this.agents) if (a.lockpick) this.cancelLockpick(a, 'end');
-    this.emit('matchEnd', { winner, reason });
+    this.emit('matchEnd', { winner, reason, score: { ...this.score } });
     return winner;
   }
 }

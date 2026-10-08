@@ -1,7 +1,7 @@
 import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
 import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
 import { TEAMS } from '../sim/constants.js';
-import { PATCHES, WEAPONS } from '../sim/data.js';
+import { ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 
 export const DIFFICULTY = {
   easy: { name: '신병', reaction: 0.65, aimError: 0.08, turnSpeed: 4.5, headChance: 0.06, burst: [2, 3], lead: 0.3, recoilComp: 0.4, patchSkill: 0.45, holdFireVeil: false, hearing: 0.75 },
@@ -14,8 +14,8 @@ const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 // 무전 문구
 const NOISE_TEXT = {
-  step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', reload: '재장전 소리',
-  knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
+  step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
+  smg: '기관단총 사격음', sniper: '저격총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
 };
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 const compass = (dx, dz) => COMPASS[Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
@@ -199,11 +199,14 @@ export class BotBrain {
       const tol = Math.max(0.025, 0.5 / Math.max(d, 1));
       if (!holdFire && this.reactLeft <= 0 && aimDiff < tol) this.shoot(a, intent, dt);
       else this.burstLeft = 0;
-      // 먼 거리는 정조준, 연사할 때는 가끔 앉아서 쏨
-      intent.ads = a.weapon === 'rifle' && d > 12;
-      if (intent.fire && d > 8 && this.crouchShooter) intent.crouch = true;
-      // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 조금 움직임
-      if (!intent.fire || a.weapon === 'pistol') {
+      // 먼 거리는 정조준 (저격총은 항상 조준경), 연사할 때는 가끔 앉아서 쏨
+      const wpn = WEAPONS[a.weapon];
+      intent.ads = wpn.scope || (a.weapon === 'rifle' && d > 14);
+      if (wpn.scope && a.adsT < 0.9) intent.fire = false;
+      if (intent.fire && d > 8 && this.crouchShooter && wpn.auto) intent.crouch = true;
+      // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 조금 움직임 (권총·기관단총·산탄총은 움직이며 쏨)
+      const runAndGun = a.weapon === 'pistol' || a.weapon === 'smg' || a.weapon === 'shotgun';
+      if (!intent.fire || runAndGun) {
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
           this.strafeT = this.rng.range(0.35, 0.8);
@@ -225,10 +228,13 @@ export class BotBrain {
     if (!engaging && !wish && this.goal?.crouchAtGoal && !a.lockpick) intent.crouch = true;
 
     // ── 무기 관리
-    const rifle = a.weapons.rifle;
-    if (a.weapon === 'knife') intent.switchTo = rifle.mag + rifle.reserve > 0 ? 'rifle' : 'pistol';
-    else if (a.weapon === 'rifle' && rifle.mag + rifle.reserve === 0) intent.switchTo = 'pistol';
-    else if (a.weapon === 'pistol' && rifle.mag + rifle.reserve > 0 && !engaging) intent.switchTo = 'rifle';
+    const prim = a.primary ? a.weapons[a.primary] : null;
+    const primAmmo = prim ? prim.mag + prim.reserve : 0;
+    const far = target && dist2(target.pos, a.pos) > 18;
+    if (a.weapon === 'knife') intent.switchTo = primAmmo > 0 ? a.primary : a.secondary;
+    else if (a.weapon === a.primary && primAmmo === 0) intent.switchTo = a.secondary;
+    else if (a.weapon === 'shotgun' && engaging && far && a.weapons[a.secondary]?.mag > 0) intent.switchTo = a.secondary;
+    else if (a.weapon === a.secondary && primAmmo > 0 && !engaging) intent.switchTo = a.primary;
     if (!engaging && !WEAPONS[a.weapon].melee && a.weapons[a.weapon].mag < WEAPONS[a.weapon].magSize * 0.4 && this.pauseT <= 0) intent.reload = true;
 
     // ── 락픽
@@ -310,7 +316,11 @@ export class BotBrain {
       if (best.id !== this.targetId) {
         // 새 적 발견: 반응 시간(멀수록 알아보기 늦음) + 큰 조준 오차에서 시작
         this.targetId = best.id;
-        this.reactLeft = this.d.reaction * this.rng.range(0.8, 1.3) * (1 + bestD / 45);
+        // 멈춰서 그쪽을 미리 겨누고 있었으면 빨리, 움직이던 중이면 늦게 반응 (각 잡기의 이점)
+        const off = Math.abs(wrapAngle(anglesTo(eyePos(a), chestPos(best)).yaw - this.aimYaw));
+        const still = Math.hypot(a.vel.x, a.vel.z) < 0.6;
+        const k = still && off < 0.45 ? 0.6 : still ? 0.9 : 1.15;
+        this.reactLeft = this.d.reaction * this.rng.range(0.8, 1.3) * (1 + bestD / 45) * k;
         const e = this.d.aimError * 3;
         this.err.y = this.rng.range(-e, e);
         this.err.p = this.rng.range(-e, e) * 0.5;
@@ -359,6 +369,13 @@ export class BotBrain {
         .filter((i) => match.time - i.t < 5 && i.reporterId !== a.id && dist2(i, a.pos) < 30)
         .sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos))[0];
       if (intel) this.alertLook = { point: { x: intel.x, y: 1.4, z: intel.z }, until: match.time + 1.5 };
+    }
+    // 아군이 지금 보고 있는 적 (미니맵에 뜨는 적과 같음)
+    if (!visible && !(this.alertLook?.until > match.time)) {
+      const spotted = match.agents
+        .filter((e) => e.alive && e.team !== a.team && match.time - e.spottedT < 0.4 && dist2(e.pos, a.pos) < 35)
+        .sort((p, q) => dist2(p.pos, a.pos) - dist2(q.pos, a.pos))[0];
+      if (spotted) this.alertLook = { point: { x: spotted.pos.x, y: spotted.pos.y + 1.2, z: spotted.pos.z }, until: match.time + 0.8 };
     }
     // 무게 감지기에 잡힌 적 (아군 장비가 알려 줌)
     if (!visible && !(this.alertLook?.until > match.time)) {
@@ -604,7 +621,7 @@ export class BotBrain {
       hold = { ...hold, x: hold.x + ((this.index % 3) - 1) * 1.4 };
     }
     // 중앙 담당: 시간이 지나면 소리·무전으로 알게 된 적을 조용히 사냥
-    if (this.homeSite === 'mid' && match.timeLeft < 80) {
+    if (this.homeSite === 'mid' && match.timeLeft < 90) {
       const info = [this.heard, ...match.intel[a.team]]
         .filter((i) => i && match.time - i.t < 6 && dist2(i, a.pos) < 32)
         .sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos))[0];
@@ -647,7 +664,7 @@ export class BotBrain {
           break;
         case 'resultantAmp':
         case 'reactionRounds':
-          if (visible && a.weapon === 'rifle' && this.reactLeft <= 0.1 && td < 45) this.nowPatch = slot;
+          if (visible && !WEAPONS[a.weapon].melee && this.reactLeft <= 0.1 && td < 45) this.nowPatch = slot;
           break;
         case 'buoyShield':
           // 맞고 있거나 락픽을 시작하기 직전이면 위협 방향으로 방패 전개
@@ -674,7 +691,7 @@ export class BotBrain {
           break;
         case 'weightScanner':
           // 소리 정보가 없을 때 가끔 탐지
-          if (!visible && match.time > 20 && !this.heardRecently(match, 8) && this.rng.chance(0.12)) this.nowPatch = slot;
+          if (!visible && match.time - (match.liveAt ?? 0) > 12 && !this.heardRecently(match, 8) && this.rng.chance(0.12)) this.nowPatch = slot;
           break;
         case 'resultantSurge':
           if (visible && match.alive(a.team).length >= 2 && td < 40) this.nowPatch = slot;
@@ -735,24 +752,67 @@ export class BotBrain {
   }
 }
 
-// 팀별로 봇 두뇌 붙이기 + 경기 단위 작전 계획(해체팀 진입 시각·방식)
-export function attachBots(match, difficulty) {
-  const rng = match.rng;
-  // 해체팀이 집결 후 진입을 시작하는 시각 (맵마다 다를 수 있음 — 평균 교전 1분 30초 안팎이 되도록)
-  const [p0, p1] = match.map.def.push ?? [28, 46];
-  match.botPlan = {
-    defuse: { pushAt: rng.range(p0, p1), style: rng.pick(['split', 'split', 'stackA', 'stackB']) },
+// 구매 (라운드 시작 때 한 번): 팀 평균 크레딧으로 정함 — 넉넉하면 풀 구매, 모자라면 아끼고(에코), 그 사이는 반만
+export function botBuy(match, a, plan, rng) {
+  if (!match.rounds || match.phase !== 'buy') return;
+  const pistolRound = match.round === 1 || match.round === 7;
+  const buy = (id) => match.buy(a, id);
+  const armorTo = (want) => {
+    if (a.armor >= ARMOR[want].value) return;
+    if (a.credits >= ARMOR[want].price) buy(want);
   };
-  match.radioClock = {
-    defuse: { t: -99, bySource: new Map() },
-    force: { t: -99, bySource: new Map() },
-  };
-  const counters = { defuse: 0, force: 0 };
-  for (const a of match.agents) {
-    if (a.isPlayer || a.human) {
-      counters[a.team]++;
-      continue;
-    }
-    match.setController(a.id, new BotBrain(a, match, difficulty, counters[a.team]++));
+  if (pistolRound) {
+    if (rng.chance(0.5)) buy('sheriff');
+    else armorTo('light');
+    return;
   }
+  if (!a.primary) {
+    if (plan === 'full' || a.credits >= 3900) {
+      const sniper = a.credits >= 5700 && rng.chance(plan === 'full' ? 0.18 : 0.1);
+      if (sniper) buy('sniper');
+      else if (a.credits >= 2900) buy('rifle');
+      else if (a.credits >= 1600) buy('smg');
+    } else if (plan === 'half') {
+      buy(a.credits >= 2000 && rng.chance(0.7) ? 'smg' : 'shotgun');
+    } else if (a.credits >= 1400 && rng.chance(0.4)) {
+      buy('sheriff');
+    }
+  }
+  if (a.credits >= ARMOR.heavy.price + (plan === 'eco' ? 1500 : 0)) armorTo('heavy');
+  else if (plan !== 'eco' || a.credits >= 1800) armorTo('light');
+}
+
+// 팀별로 봇 두뇌 붙이기 + 라운드 단위 작전 계획(해체팀 진입 시각·방식, 구매)
+// 라운드제에서는 라운드가 새로 준비될 때마다 다시 붙임 (공수 교대하면 맡은 역할도 바뀜)
+export function attachBots(match, difficulty) {
+  const setup = () => {
+    const rng = match.rng;
+    // 해체팀이 집결 후 진입을 시작하는 시각 (맵마다 다를 수 있음)
+    const [p0, p1] = match.map.def.push ?? [12, 26];
+    match.botPlan = {
+      defuse: { pushAt: rng.range(p0, p1), style: rng.pick(['split', 'split', 'stackA', 'stackB']) },
+    };
+    match.radioClock = {
+      defuse: { t: -99, bySource: new Map() },
+      force: { t: -99, bySource: new Map() },
+    };
+    const counters = { defuse: 0, force: 0 };
+    for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
+      const mates = match.agents.filter((a) => a.team === team);
+      const avg = mates.reduce((s, a) => s + (a.credits ?? 0), 0) / Math.max(1, mates.length);
+      const plan = avg >= 3600 ? 'full' : avg >= 2300 ? 'half' : 'eco';
+      for (const a of mates) {
+        if (a.isPlayer || a.human) {
+          counters[team]++;
+          continue;
+        }
+        match.setController(a.id, new BotBrain(a, match, difficulty, counters[team]++));
+        botBuy(match, a, plan, rng);
+      }
+    }
+  };
+  match.botDifficulty = difficulty;
+  match.botsOff?.();
+  match.botsOff = match.events.on('roundPrep', setup);
+  setup();
 }

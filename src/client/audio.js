@@ -265,6 +265,42 @@ const SOUNDS = {
     a.noise(o, t, 0.15, { type: 'lowpass', freq: 1100, gain: 0.6, sweepTo: 250 });
     a.tone(o, t, 0.13, { type: 'sine', freq: 95, to: 48, gain: 0.7 });
   },
+  // 리볼버: 크고 둔탁한 한 방
+  sheriff(a, t, pos, vol) {
+    const o = a.out(pos, 0.75 * vol, 0.6, 0.45);
+    a.noise(o, t, 0.012, { type: 'highpass', freq: 2200, gain: 1.3, attack: 0.0008 });
+    a.noise(o, t, 0.09, { type: 'bandpass', freq: 1300, q: 0.6, gain: 1.1 });
+    a.noise(o, t, 0.28, { type: 'lowpass', freq: 700, gain: 1.0, sweepTo: 120 });
+    a.tone(o, t, 0.26, { type: 'sine', freq: 64, to: 30, gain: 1.1, attack: 0.002 });
+  },
+  // 산탄총: 넓게 퍼지는 폭음 + 펌프 소리
+  shotgun(a, t, pos, vol) {
+    const o = a.out(pos, 0.85 * vol, 0.9, 0.5);
+    a.noise(o, t, 0.02, { type: 'highpass', freq: 1800, gain: 1.3, attack: 0.0008 });
+    a.noise(o, t, 0.16, { type: 'bandpass', freq: 900, q: 0.5, gain: 1.2 });
+    a.noise(o, t, 0.35, { type: 'lowpass', freq: 520, gain: 1.1, sweepTo: 90 });
+    a.tone(o, t, 0.3, { type: 'sine', freq: 52, to: 26, gain: 1.2, attack: 0.002 });
+    a.noise(o, t + 0.32, 0.05, { type: 'bandpass', freq: 1700, q: 3, gain: 0.5 });
+    a.noise(o, t + 0.46, 0.05, { type: 'bandpass', freq: 2300, q: 3, gain: 0.55 });
+  },
+  // 기관단총: 짧고 가벼운 소음기 연사음
+  smg(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 0.25, 0.25);
+    a.noise(o, t, 0.01, { type: 'highpass', freq: 3200, gain: 0.9, attack: 0.0008 });
+    a.noise(o, t, 0.05, { type: 'bandpass', freq: 2100, q: 0.9, gain: 0.8 });
+    a.noise(o, t, 0.1, { type: 'lowpass', freq: 900, gain: 0.5, sweepTo: 260 });
+    a.tone(o, t, 0.08, { type: 'sine', freq: 110, to: 60, gain: 0.5 });
+  },
+  // 저격총: 날카로운 균열음 + 긴 울림 + 노리쇠 소리
+  sniper(a, t, pos, vol) {
+    const o = a.out(pos, 0.95 * vol, 1.6, 0.7);
+    a.noise(o, t, 0.008, { type: 'highpass', freq: 3500, gain: 1.5, attack: 0.0006 });
+    a.noise(o, t, 0.12, { type: 'bandpass', freq: 1500, q: 0.5, gain: 1.3 });
+    a.noise(o, t, 0.6, { type: 'lowpass', freq: 600, gain: 1.1, sweepTo: 70 });
+    a.tone(o, t, 0.45, { type: 'sine', freq: 48, to: 22, gain: 1.3, attack: 0.002 });
+    a.noise(o, t + 0.55, 0.04, { type: 'bandpass', freq: 2600, q: 4, gain: 0.5 });
+    a.noise(o, t + 0.72, 0.05, { type: 'bandpass', freq: 1900, q: 4, gain: 0.55 });
+  },
   ampShot(a, t) {
     const o = a.out(null, 0.15, 0.2, 0);
     a.tone(o, t, 0.08, { type: 'sawtooth', freq: 520, to: 780, gain: 0.12 });
@@ -360,9 +396,16 @@ const SOUNDS = {
     a.noise(o, t + 0.03, 0.08, { type: 'bandpass', freq: 1800, q: 2, gain: 0.25 });
     if (a.wet) a.noise(o, t + 0.02, 0.18, { type: 'bandpass', freq: 2600, q: 1.4, gain: 0.45, sweepTo: 1200 });
   },
+  // 내가 맞혔을 때: 몸통은 짧은 둔탁음, 머리는 맑은 금속음
   hit(a, t) {
-    const o = a.out(null, 0.4, 0.1, 0);
-    a.noise(o, t, 0.04, { type: 'bandpass', freq: 1300, q: 1.5, gain: 0.9 });
+    const o = a.out(null, 0.32, 0.1, 0);
+    a.noise(o, t, 0.035, { type: 'bandpass', freq: 1500, q: 1.6, gain: 0.9 });
+    a.tone(o, t, 0.04, { type: 'sine', freq: 620, to: 480, gain: 0.25 });
+  },
+  armorHit(a, t) {
+    const o = a.out(null, 0.25, 0.1, 0);
+    a.tone(o, t, 0.05, { type: 'triangle', freq: 1900, to: 1500, gain: 0.25 });
+    a.noise(o, t, 0.03, { type: 'bandpass', freq: 3000, q: 3, gain: 0.5 });
   },
   headshot(a, t) {
     const o = a.out(null, 0.42, 0.3, 0.05);
@@ -374,6 +417,31 @@ const SOUNDS = {
     const o = a.out(null, 0.4, 0.3, 0);
     a.tone(o, t, 0.12, { type: 'sine', freq: 180, to: 120, gain: 0.5 });
     a.noise(o, t, 0.05, { type: 'bandpass', freq: 900, q: 2, gain: 0.4 });
+  },
+  // 라운드 승리·패배 (짧은 신호)
+  roundWin(a, t) {
+    const o = a.out(null, 0.45, 1.6, 0.35);
+    [262, 330, 392, 523].forEach((f, i) => a.tone(o, t + i * 0.09, 0.9 - i * 0.1, { type: 'triangle', freq: f, gain: 0.22, attack: 0.01 }));
+  },
+  roundLose(a, t) {
+    const o = a.out(null, 0.45, 1.6, 0.35);
+    [392, 311, 262].forEach((f, i) => a.tone(o, t + i * 0.16, 0.8, { type: 'triangle', freq: f, gain: 0.2, attack: 0.02 }));
+  },
+  // 구매 시간 시작 / 상점에서 사기·되팔기
+  roundPrep(a, t) {
+    const o = a.out(null, 0.35, 1, 0.2);
+    a.noise(o, t, 0.5, { type: 'bandpass', freq: 400, q: 0.7, gain: 0.5, sweepTo: 1600 });
+    a.tone(o, t + 0.45, 0.25, { type: 'triangle', freq: 880, gain: 0.18 });
+  },
+  buy(a, t) {
+    const o = a.out(null, 0.35, 0.3, 0.05);
+    a.tone(o, t, 0.06, { type: 'triangle', freq: 1320, gain: 0.25 });
+    a.tone(o, t + 0.05, 0.1, { type: 'triangle', freq: 1760, gain: 0.22 });
+    a.noise(o, t, 0.04, { type: 'bandpass', freq: 2600, q: 3, gain: 0.4 });
+  },
+  sell(a, t) {
+    const o = a.out(null, 0.3, 0.3, 0.05);
+    a.tone(o, t, 0.08, { type: 'triangle', freq: 1320, to: 880, gain: 0.22 });
   },
   hurt(a, t) {
     const o = a.out(null, 0.55, 0.3, 0);
@@ -552,3 +620,16 @@ const SOUNDS = {
     a.tone(o, t, 0.12, { type: 'sine', freq: 420, to: 330, gain: 0.2 });
   },
 };
+
+// 처치 확인음: 연속으로 처치할수록 음이 올라가고 겹이 늘어남 (kill1 ~ kill5)
+for (let n = 1; n <= 5; n++) {
+  SOUNDS[`kill${n}`] = (a, t) => {
+    const o = a.out(null, 0.42, 0.8, 0.15);
+    const base = 520 * Math.pow(1.122, n - 1);
+    a.noise(o, t, 0.05, { type: 'highpass', freq: 3000, gain: 0.5 });
+    a.tone(o, t, 0.16, { type: 'triangle', freq: base, gain: 0.3 });
+    a.tone(o, t + 0.07, 0.3 + n * 0.04, { type: 'triangle', freq: base * 1.5, gain: 0.26 });
+    if (n >= 3) a.tone(o, t + 0.14, 0.4, { type: 'sine', freq: base * 2, gain: 0.16 });
+    if (n === 5) a.tone(o, t + 0.21, 0.7, { type: 'sine', freq: base * 3, gain: 0.12, vibrato: 6 });
+  };
+}

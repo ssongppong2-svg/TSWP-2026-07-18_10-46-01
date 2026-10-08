@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
-import { BOT_NAMES, DT, NOISE, TEAMS } from '../sim/constants.js';
+import { BOT_NAMES, DT, NOISE, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { PATCHES, PATCH_ORDER, WEAPONS } from '../sim/data.js';
 import { ClientSync, HostSync, InputRecorder, RemoteController, rosterFor, unpackPlan } from '../net/protocol.js';
 import { Match } from '../sim/match.js';
 import { Hud } from '../ui/hud.js';
+import { Shop } from '../ui/shop.js';
 import { LockpickUI } from '../ui/lockpick-ui.js';
 import { AgentView } from './agent-view.js';
 import { Effects } from './effects.js';
@@ -44,9 +45,8 @@ export class GameClient {
       const roster = rosterFor(plan, net.myKey);
       this.keys = new Map(plan.roster.filter((r) => r.key).map((r) => [r.id, r.key]));
       // 개념 카드는 모두에게 같은 것이 놓이도록 시드로만 정함
-      this.match = new Match({ map: stage.map, roster, loadouts: new Map(plan.loadouts), seed: net.start.seed, client: net.role === 'client' });
+      this.match = new Match({ map: stage.map, roster, loadouts: new Map(plan.loadouts), seed: net.start.seed, client: net.role === 'client', rules: 'rounds' });
       this.player = this.match.player;
-      team = this.player.team;
       if (net.role === 'host') {
         attachBots(this.match, net.start.diff);
         this.hostSync = new HostSync(this.match, { maxBytes: 3300 });
@@ -64,12 +64,10 @@ export class GameClient {
       this.netCheckT = 0;
     } else {
       stage.setMap(mapId ?? stage.map.id);
-      this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh });
+      this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh, rules: 'rounds' });
       attachBots(this.match, difficulty);
       this.player = this.match.player;
     }
-    this.team = team;
-
     this.input = new Input(stage.container);
     this.input.enabled = true;
     this.controller = new PlayerController(this.input, settings);
@@ -85,11 +83,11 @@ export class GameClient {
 
     this.views = new Map();
     for (const a of this.match.agents) {
-      const v = new AgentView(a, { showTag: a.team === team && !a.isPlayer });
+      const v = new AgentView(a, { showTag: a.squad === this.player.squad && !a.isPlayer });
       stage.scene.add(v.root);
       this.views.set(a.id, v);
     }
-    this.viewmodel = new ViewModel(team, { detail: stage.qualityKey === 'low' ? 1 : 2 });
+    this.viewmodel = new ViewModel(this.player.squad, { detail: stage.qualityKey === 'low' ? 1 : 2 });
     stage.overlay = this.viewmodel;
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
@@ -100,6 +98,9 @@ export class GameClient {
     this.hud = new Hud(uiRoot, this.match, this.player.id, settings);
     this.lockpickUI = new LockpickUI(uiRoot);
     this.lockpickUI.onCard = (i) => this.controller.queue.cards.push(i);
+    // 상점 (구매 시간에 B)
+    this.shop = new Shop(uiRoot, this.match, this.player.id, { onBuy: (item) => this.controller.buy(item) });
+    this.controller.shop = this.shop;
 
     this.started = false;
     this.paused = false;
@@ -162,6 +163,11 @@ export class GameClient {
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
+  // 지금 맡은 쪽 (공수 교대하면 바뀜) — 아군 판별은 같은 쪽인지로 (분대 전체가 함께 바뀜)
+  get team() {
+    return this.player.team;
+  }
+
   // ───────────── 시작·일시정지 ─────────────
   requestStart() {
     this.audio.unlock();
@@ -193,6 +199,7 @@ export class GameClient {
 
   pause() {
     if (this.ended) return;
+    this.shop.close();
     this.paused = true;
     this.input.enabled = false; // 메뉴에서 누른 키가 다시 시작할 때 패치로 나가지 않게
     this.input.exitLock();
@@ -228,12 +235,12 @@ export class GameClient {
       this.effects.onShot(e, muzzle.clone(), local, port?.clone(), cam);
       if (local) {
         this.viewmodel.shot(e.agent.adsT > 0.5);
-        // 발사마다 카메라에 강한 충격 (어깨를 치는 반동)
-        const heavy = e.weapon === 'pistol' ? 1.3 : 1;
-        this.kickVel.x += (Math.random() - 0.5) * 0.05 * heavy;
-        this.kickVel.y += (0.06 + Math.random() * 0.03) * heavy;
-        this.rollKick += (Math.random() - 0.5) * 0.03 * heavy;
-        this.shake = Math.min(1, this.shake + 0.08);
+        // 발사 충격: 화면은 조금만 흔들림 (무기마다 세기)
+        const heavy = { pistol: 1, sheriff: 1.8, shotgun: 2.2, sniper: 2.6, smg: 0.55 }[e.weapon] ?? 0.8;
+        this.kickVel.x += (Math.random() - 0.5) * 0.025 * heavy;
+        this.kickVel.y += (0.03 + Math.random() * 0.015) * heavy;
+        this.rollKick += (Math.random() - 0.5) * 0.012 * heavy;
+        this.shake = Math.min(1, this.shake + 0.025 * heavy);
       }
       A.play(e.weapon, { pos: local ? null : e.origin });
       if (e.amp && local) A.play('ampShot');
@@ -256,21 +263,37 @@ export class GameClient {
     });
     ev.on('hit', (e) => {
       this.views.get(e.target.id)?.hit();
-      // 정보 0: 명중·처치 표시 없음. 맞은 사람만 충격을 느낌
+      // 내가 맞힘: 조준점 명중 표시 + 명중음 (산탄은 한 번만)
+      if (e.attacker && viewing(e.attacker) && e.attacker.team !== e.target.team && (this.hitSoundT <= 0 || e.killed)) {
+        this.hitSoundT = 0.03;
+        this.hud.hitmark(e.killed ? 'kill' : e.headshot ? 'head' : 'hit');
+        if (!e.killed) A.play(e.headshot ? 'headshot' : e.armor ? 'armorHit' : 'hit');
+      }
+      // 내가 맞음: 맞은 방향 표시 + 짧은 충격
       if (viewing(e.target)) {
         if (isMe(e.target)) A.play('hurt');
-        this.shake = Math.min(1, this.shake + (e.headshot ? 0.6 : 0.35));
-        this.blur = Math.min(1, this.blur + e.amount / 50);
-        if (e.headshot && isMe(e.target)) A.play('ring');
+        this.shake = Math.min(1, this.shake + (e.headshot ? 0.3 : 0.15));
+        this.blur = Math.min(1, this.blur + e.amount / 90);
+        if (e.attacker) {
+          const dx = e.attacker.pos.x - e.target.pos.x, dz = e.attacker.pos.z - e.target.pos.z;
+          const ang = Math.atan2(-dx, -dz);
+          let rel = this.camYaw - ang;
+          while (rel > Math.PI) rel -= Math.PI * 2;
+          while (rel < -Math.PI) rel += Math.PI * 2;
+          this.hud.damageFrom(rel);
+        }
       }
     });
     ev.on('kill', (e) => {
+      this.hud.killFeed(e);
+      if (isMe(e.killer) && e.victim.team !== e.killer.team) {
+        this.hud.killStreak(e.streak, e.headshot);
+        A.play(`kill${Math.max(1, Math.min(5, e.streak))}`);
+        if (e.headshot) A.play('headshot');
+      }
       if (isMe(e.victim)) {
         A.play('death');
-        this.hud.banner('전투 불능', '아군 시점으로 전환', 'bad');
-      } else if (e.victim.team === this.team) {
-        // 아군의 무전이 끊김 (누구에게 당했는지는 모름)
-        this.hud.radio({ name: '본부', text: `${e.victim.name} 응답 없음.`, kind: 'lost' });
+        this.hud.banner('전투 불능', `${e.killer?.name ?? ''} · 아군 시점으로 전환`, 'bad');
       }
     });
     ev.on('footstep', (e) => {
@@ -306,7 +329,7 @@ export class GameClient {
       A.play(PATCH_SOUNDS[e.patchId], { pos: isMe(e.agent) && !e.zone ? null : pos });
       if (isMe(e.agent)) this.hud.concept(e.patchId);
       if (e.patchId === 'weightScanner' && e.agent.team === this.team) this.hud.banner('무게 감지 작동', '4초간 달리기·사격·착지 진동 탐지', 'warn');
-      if (e.patchId === 'resultantSurge' && e.agent.team === this.team) this.hud.banner('합력 폭주', '분대 전원 소총 공격력 +3 · 8초', 'good');
+      if (e.patchId === 'resultantSurge' && e.agent.team === this.team) this.hud.banner('합력 폭주', '분대 전원 공격력 +15% · 8초', 'good');
     });
     ev.on('patchDenied', (e) => {
       if (isMe(e.agent)) {
@@ -360,7 +383,40 @@ export class GameClient {
     });
     ev.on('roundStart', () => {
       A.play('roundStart');
-      this.hud.banner('작전 개시', this.team === TEAMS.DEFUSE ? '목표: 폭탄 2기 해체' : '목표: 폭탄 방어 · 해체팀 제압', 'good');
+      this.shop.close();
+      this.hud.banner('교전 개시', this.team === TEAMS.DEFUSE ? '폭탄 2기 해체 또는 적 전원 제압' : '폭탄 방어 · 해체팀 제압', 'good');
+    });
+    // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
+    ev.on('roundPrep', (e) => {
+      this.controller.syncFrom(this.player);
+      this.camYaw = this.player.yaw;
+      this.camPitch = 0;
+      this.specIndex = 0;
+      this.blur = this.shake = this.landDip = 0;
+      this.lockpickUI.update(null);
+      A.play('roundPrep');
+      const m = this.match;
+      const mine = m.score[this.player.squad] ?? 0;
+      const theirs = Object.entries(m.score).find(([k]) => k !== this.player.squad)?.[1] ?? 0;
+      const point = Math.max(mine, theirs) === ROUNDS.winTo - 1 ? ' · 매치 포인트' : '';
+      const side = this.team === TEAMS.DEFUSE ? '공격' : '수비';
+      const swap = e.round === ROUNDS.half + 1;
+      this.hud.roundBanner(swap ? '후반 시작 · 공수 교대' : `라운드 ${e.round}${point}`, `${side} · ${TEAM_INFO[this.team].name}`, TEAM_INFO[this.team].goal, swap ? 'swap' : 'info', 3);
+    });
+    ev.on('roundEnd', (e) => {
+      const win = e.squad === this.player.squad;
+      const mine = e.score[this.player.squad] ?? 0;
+      const theirs = Object.entries(e.score).find(([k]) => k !== this.player.squad)?.[1] ?? 0;
+      this.shop.close();
+      this.lockpickUI.update(null);
+      A.play(win ? 'roundWin' : 'roundLose');
+      this.hud.roundBanner(`라운드 ${e.round} · ${mine} : ${theirs}`, win ? '라운드 승리' : '라운드 패배', e.halftime ? `${e.reason} · 전반 종료` : e.reason, win ? 'win' : 'lose', 3.6);
+    });
+    ev.on('buy', (e) => isMe(e.agent) && A.play(e.sold ? 'sell' : 'buy'));
+    ev.on('buyDenied', (e) => {
+      if (!isMe(e.agent)) return;
+      A.play('denied');
+      this.shop.deny(e.item);
     });
     ev.on('reload', (e) => {
       if (viewing(e.agent)) return A.play('reload');
@@ -379,7 +435,8 @@ export class GameClient {
     });
     ev.on('matchEnd', (e) => {
       this.ended = true;
-      A.play(e.winner === this.team ? 'win' : 'lose');
+      this.shop.close();
+      A.play(e.winner === this.player.squad ? 'win' : 'lose');
       this.lockpickUI.update(null);
       setTimeout(() => {
         if (this.disposed) return;
@@ -391,7 +448,7 @@ export class GameClient {
 
   result() {
     const m = this.match;
-    return { match: m, winner: m.winner, reason: m.reason, team: this.team, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts } };
+    return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts } };
   }
 
   // ───────────── 매 프레임 ─────────────
@@ -405,6 +462,13 @@ export class GameClient {
     const m = this.match;
 
     const pressed = this.input.pressed.slice();
+    // 상점: 구매 시간에 B로 열고 닫음 (구매 시간이 끝나거나 쓰러지면 닫힘)
+    const canShop = m.rounds && m.phase === 'buy' && this.player.alive && this.started && !this.paused && !this.ended;
+    if (pressed.includes('KeyB') && canShop && this.input.active) {
+      this.shop.toggle();
+      this.audio.play('ui');
+    }
+    if (!canShop && this.shop.isOpen) this.shop.close();
     this.controller.frame(this.player);
     // 온라인 경기는 일시정지해도 멈추지 않음 (다른 사람이 계속 싸우는 중)
     const running = this.net ? !this.netOver : this.started && !this.paused;
@@ -422,6 +486,7 @@ export class GameClient {
       if (this.clientSync) this.clientSync.smooth(dt, now / 1000);
       if (this.net) this.netSend(dt);
       this.caughtT -= dt;
+      this.hitSoundT = (this.hitSoundT ?? 0) - dt;
       this.sounds(dt);
       this.updateInspect(dt);
       this.watchPerformance(dt);
@@ -440,8 +505,9 @@ export class GameClient {
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
+    const scoped = WEAPONS[va.weapon].scope && va.adsT > 0.85;
     this.viewmodel.update(dt, {
-      visible: va.alive && !this.ended,
+      visible: va.alive && !this.ended && !scoped,
       weapon: va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
@@ -453,16 +519,18 @@ export class GameClient {
       reloadT: va.reloadT,
       swapT: va.swapT,
       lockpick: !!va.lockpick,
-      amp: va.ampT > 0 && va.weapon === 'rifle',
+      amp: va.ampT > 0 && !WEAPONS[va.weapon].melee,
       inspect: va === this.player ? this.inspectT : 0,
       light: this.stage.bolt,
+      day: this.stage.dayLight,
     });
+    this.shop.update();
     this.hud.update(dt, {
       viewAgent: va,
       spectating: va !== this.player,
-      inspect: va === this.player ? this.inspectT : 0,
       showMap: this.started && !this.paused && this.input.isDown('KeyM'),
       wheel: this.controller.wheelOpen ? this.controller.wheelSel : null,
+      shopOpen: this.shop.isOpen,
     });
     const lp = this.player.lockpick;
     this.lockpickUI.update(this.player, lp ? m.bombById(lp.bombId) : null);
@@ -686,6 +754,7 @@ export class GameClient {
     this.stage.setLens({});
     this.audio.setMuffle(0);
     this.hud.dispose();
+    this.shop.dispose();
     this.lockpickUI.dispose();
   }
 }

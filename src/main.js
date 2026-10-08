@@ -127,7 +127,7 @@ function startNetGame({ start, myKey, role }) {
         board?.remove();
         board = null;
         if (show) {
-          board = S.scoreboard(match, { onlyTeam: game?.team });
+          board = S.scoreboard(match, { me: game?.player });
           board.classList.add('floating');
           ui.appendChild(board);
         }
@@ -253,7 +253,7 @@ function startGame(team, loadouts, byClick) {
         board?.remove();
         board = null;
         if (show) {
-          board = S.scoreboard(match, { onlyTeam: team });
+          board = S.scoreboard(match, { me: game?.player });
           board.classList.add('floating');
           ui.appendChild(board);
         }
@@ -316,7 +316,8 @@ function exposeDebug() {
     },
     showTeam,
     showDraft,
-    quickStart(team = TEAMS.DEFUSE, seed = 1) {
+    quickStart(team = TEAMS.DEFUSE, seed = 1, mapId = null) {
+      if (mapId) settings.mapId = mapId;
       const rng = createRng(seed);
       const roster = makeRoster(team, settings.name);
       const loadouts = new Map();

@@ -43,6 +43,19 @@ export const WEAPON_ICONS = {
   rifle: `<svg viewBox="0 0 120 36" fill="currentColor"><path d="M4 14h20l4-4h46v-2h8v2h22v4h12v4h-12v3H76l-4 3h-8v9h-9l-3-9H40l-6 9H22l4-9H4z"/></svg>`,
   pistol: `<svg viewBox="0 0 60 40" fill="currentColor"><path d="M4 6h50v10H30l-3 4h-5l-6 16H6l5-17-7-3z"/></svg>`,
   knife: `<svg viewBox="0 0 80 28" fill="currentColor"><path d="M2 15 34 7h10v12H34z"/><path d="M44 5h4v18h-4z"/><path d="M48 10h28v8H48z"/></svg>`,
+  sheriff: `<svg viewBox="0 0 64 40" fill="currentColor"><path d="M2 8h38V5h6v3h14v7H46l-3 5h-7l-4 3-6 14H14l6-14-4-4H2z"/><path d="M29 11h12v8H29z" fill-opacity=".45"/></svg>`,
+  shotgun: `<svg viewBox="0 0 120 30" fill="currentColor"><path d="M2 10h70V8h44v6H76v3h-8l-2 4H50v-3H36l-8 9H16l5-9H2z"/><path d="M78 16h24v5H78z"/></svg>`,
+  smg: `<svg viewBox="0 0 90 40" fill="currentColor"><path d="M4 10h22l4-4h40v4h16v6H70l-2 3H54v16h-8l-2-16H34l-6 8H18l3-8H4z"/><path d="M70 19h6v9h-6z"/></svg>`,
+  sniper: `<svg viewBox="0 0 140 36" fill="currentColor"><path d="M2 16h30l4-4h50v4h38v3h22v4h-22v2H82l-4 3h-8v7h-8l-2-7H44l-8 7H26l3-7H2z"/><path d="M44 5h34v6H44z"/><path d="M39 4h5v8h-5zM78 4h5v8h-5z"/></svg>`,
+};
+
+// 방탄·처치 표시 아이콘
+export const GEAR_ICONS = {
+  light: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5.5v6c0 5 3.4 8.6 8 10.5 4.6-1.9 8-5.5 8-10.5v-6z"/><path d="M12 2v20" opacity=".5"/></svg>`,
+  heavy: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5.5v6c0 5 3.4 8.6 8 10.5 4.6-1.9 8-5.5 8-10.5v-6z"/></svg>`,
+  head: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg>`,
+  credit: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 22 12 12 22 2 12z"/><path d="M12 7l5 5-5 5-5-5z" fill="#000" fill-opacity=".35"/></svg>`,
+  spike: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 16 9h-3v6h3l-4 8-4-8h3V9H8z"/></svg>`,
 };
 
 export const UI_ICONS = {

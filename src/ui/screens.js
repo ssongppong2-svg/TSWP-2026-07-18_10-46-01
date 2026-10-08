@@ -1,6 +1,6 @@
 import { createRng } from '../core/rng.js';
-import { DRAFT_TIME, TEAM_INFO, TEAMS } from '../sim/constants.js';
-import { LOADOUT_SLOTS, LOCKPICK_CONCEPT, PATCHES, PATCH_TIERS, WEAPONS, patchesOfTier } from '../sim/data.js';
+import { DRAFT_TIME, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { LOADOUT_SLOTS, LOCKPICK_CONCEPT, PATCHES, PATCH_TIERS, SHOP_WEAPONS, WEAPONS, patchesOfTier } from '../sim/data.js';
 import { COPIES_PER_TEAM, SLOTS_PER_PLAYER, TIER_SLOTS, TeamDraft } from '../sim/draft.js';
 import { makeRoster } from '../sim/match.js';
 import { MAP_ORDER, getMapDef } from '../sim/maps/index.js';
@@ -26,10 +26,10 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
   const el = h(`
     <section class="screen title-screen">
       <div class="title-center">
-        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 5 대 5 전술 작전</div>
+        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 5 대 5 라운드 전술 슈팅</div>
         <h1 class="logo">FORCE</h1>
         <div class="logo-ko">포스</div>
-        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>정보는 없다. 소리를 듣고, 분대를 지휘하고, 합력으로 기폭 장치를 해제하라.</p>
+        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>상점에서 총을 사고, 포스 패치로 힘을 다뤄 7라운드를 먼저 이겨라.</p>
         <div class="menu">
           <div class="menu-main">
             <button class="btn primary big" data-act="start">작전 개시 <small>봇 9명</small></button>
@@ -44,7 +44,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         </div>
       </div>
       <footer class="title-foot">
-        <span>작전 지역 ${MAP_ORDER.length}곳</span><span>해체팀 vs 포스팀</span><span>폭탄 2기 · 제한 시간 2:00</span>
+        <span>작전 지역 ${MAP_ORDER.length}곳</span><span>7라운드 선승 · 6라운드 뒤 공수 교대</span><span>폭탄 2기 · 라운드 2:00</span>
       </footer>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -86,7 +86,7 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
   let team = settings.lastTeam ?? null;
   let difficulty = settings.difficulty ?? 'normal';
   let mapId = MAP_ORDER.includes(settings.mapId) ? settings.mapId : MAP_ORDER[0];
-  const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음' };
+  const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음', wet: '주간 · 비 갠 뒤' };
   const mapCard = (id) => {
     const d = getMapDef(id);
     return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-en">${d.nameEn ?? ''}</span><span class="mc-desc">${d.desc ?? ''}</span><span class="mc-wx">${d.mood ?? WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
@@ -102,10 +102,10 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
       <header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>작전 브리핑</h2><span></span></header>
       <h3 class="brief-label">작전 지역</h3>
       <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
-      <h3 class="brief-label">소속</h3>
+      <h3 class="brief-label">첫 진영 <small>6라운드가 끝나면 서로 바꿈</small></h3>
       <div class="team-cards">
-        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['폭탄 A·B 2기 사전 설치 확인', '폭탄 앞 <kbd>F</kbd> → <b>합력 잠금 해제</b>로 해체', '해체 중 피격 시 처음부터 재시도', '적 위치 정보 없음 — <b>소리</b>로만 파악'])}
-        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['해체팀 <b>전원 제압</b> 시 작전 성공', '<b>2분</b> 경과 시 폭탄 폭발 → 작전 성공', '해체 시도 감지 시 경보 수신', '적 위치 정보 없음 — <b>소리</b>로만 파악'])}
+        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b>', '폭탄 앞 <kbd>F</kbd> → <b>합력 잠금 해제</b>로 해체', '포스팀을 <b>전원 제압</b>해도 라운드 승리', '구매 시간에 <kbd>B</kbd> 상점'])}
+        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 라운드 승리', '해체 시도 감지 시 경보 수신', '구매 시간에 <kbd>B</kbd> 상점'])}
       </div>
       <div class="team-options">
         <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '나')}"></label>
@@ -201,10 +201,8 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
           <div class="tier-row">${section('special')}${section('ultimate')}</div>
           <div class="patch-detail"></div>
           <div class="side-block weapons">
-            <h3>기본 화기</h3>
-            <div class="wpn">${WEAPON_ICONS.rifle}<div><b>${WEAPONS.rifle.name}</b><small>소총 · 몸통 ${WEAPONS.rifle.damage} · 머리 즉사 · ${WEAPONS.rifle.rpm}RPM</small></div></div>
-            <div class="wpn">${WEAPON_ICONS.pistol}<div><b>${WEAPONS.pistol.name}</b><small>권총 · 몸통 ${WEAPONS.pistol.damage} · 머리 즉사 · 반자동</small></div></div>
-            <div class="wpn">${WEAPON_ICONS.knife}<div><b>${WEAPONS.knife.name}</b><small>근접 · ${WEAPONS.knife.light.damage}/${WEAPONS.knife.heavy.damage} · 후방 ×${WEAPONS.knife.backstabMult}</small></div></div>
+            <h3>상점 화기 <small>구매 시간에 <kbd>B</kbd></small></h3>
+            ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `◆ ${w.price.toLocaleString('en-US')}` : '기본'}</em></b><small>${w.kind} · 몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${Math.round(w.damage * w.headMult)}</small></div></div>`; }).join('')}
           </div>
         </div>
         <aside class="draft-side">
@@ -409,16 +407,17 @@ export function clickToStart({ team, loadout, mapId, onClick, online = false }) 
         <div class="sc-team"><small>${TEAM_INFO[team].code}</small>${TEAM_INFO[team].name} · ${map.name}</div>
         <h2>${TEAM_INFO[team].goal}</h2>
         <ul class="sc-rules">
-          <li><b>정보 0</b> — 적 위치·처치 표시 없음. 발소리·총성·무전으로만 파악</li>
-          <li><b>한 발</b> — 머리 1발, 몸통 4발. 반동이 강하니 짧게 끊어 쏠 것</li>
-          <li><kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>T</kbd> 탄창·상태 확인 · <kbd>M</kbd> 작전 지도 · <kbd>Shift</kbd> 보행(무음)</li>
+          <li><b>라운드제</b> — ${ROUNDS.winTo}라운드 먼저 이기면 승리 · ${ROUNDS.half}라운드 뒤 공수 교대 · 한쪽 전멸 시 라운드 종료</li>
+          <li><b>상점</b> — 구매 시간(시작 구역)에 <kbd>B</kbd> · 처치·해체·라운드 결과로 크레딧 · 살아남으면 총·방탄 유지</li>
+          <li><b>사격</b> — 멈춰 서서 쏘면 정확, 달리며 쏘면 빗나감 · 소총은 머리 1발</li>
+          <li><kbd>1·2·3</kbd> 무기 · <kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>M</kbd> 지도 · <kbd>Tab</kbd> 점수 · <kbd>Shift</kbd> 보행(무음)</li>
         </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
           const id = loadout[i];
           return `<div class="${id ? '' : 'empty'}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${s.key}</kbd>${id ? `${PATCH_ICONS[id]}<b>${PATCHES[id].name}</b>` : '<b>미장착</b>'}</div>`;
         }).join('')}</div>
         <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 작전 개시'}</button>
-        ${online ? '<p class="sc-online">온라인 경기 · 카운트다운은 이미 진행 중입니다</p>' : ''}
+        ${online ? '<p class="sc-online">온라인 경기 · 구매 시간은 이미 진행 중입니다</p>' : ''}
         <p>마우스 고정 · <kbd>Esc</kbd> ${online ? '메뉴(경기는 계속)' : '일시 중지'} · <kbd>Ctrl</kbd> 앉기 사용 시 전체 화면 권장(브라우저 단축키 충돌 방지)</p>
       </div>
     </section>`);
@@ -463,7 +462,7 @@ export function controlsModal({ onClose }) {
       ['좌클릭', '사격 · 칼: 베기'],
       ['우클릭', '정조준 · 칼: 찌르기'],
       ['R', '재장전'],
-      ['1 / 2 / 3 · 휠', '소총 / 권총 / 칼'],
+      ['1 / 2 / 3 · 휠', '주무기 / 보조무기 / 칼'],
     ]],
     ['포스 패치', [
       ['C / Q', '일반 패치'],
@@ -473,11 +472,12 @@ export function controlsModal({ onClose }) {
     ['지휘 · 정보', [
       ['G (누른 채 마우스)', '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
       ['휠 클릭 / H', '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
-      ['T (누른 채)', '탄창 확인 · 몸 상태 확인'],
-      ['M (누른 채)', '작전 지도 (지형 · 아군 · 무전 보고)'],
-      ['Tab', '아군 현황'],
+      ['T (누른 채)', '총 살펴보기'],
+      ['M (누른 채)', '큰 지도 (지형 · 아군 · 아군이 본 적 · 무전 보고)'],
+      ['Tab', '점수판'],
     ]],
     ['임무', [
+      ['B', '상점 (구매 시간) · 숫자 1~8로 바로 구매'],
       ['F', '폭탄 해체 개시 · 중단'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
       ['Esc', '일시 중지'],
@@ -489,7 +489,8 @@ export function controlsModal({ onClose }) {
         <header><h2>조작 교범</h2><button class="btn ghost small" data-act="close">닫기</button></header>
         <div class="key-groups">${groups.map(([title, rows]) => `<div class="key-group"><h4>${title}</h4>${rows.map(([k, v]) => `<div class="key-row"><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>`).join('')}</div>
         <div class="tip"><b>합력 잠금 해제</b> 요구 합력과 일치하도록 힘 카드를 선택. 우(→) +, 좌(←) − 로 계산. 해체 중 피격 시 초기화.</div>
-        <div class="tip"><b>정보 0</b> 적 위치·명중·처치 표시 없음. 달리는 발소리·사격·착지는 적에게 들리고, 분대원이 들은 소리는 무전으로 보고됨.</div>
+        <div class="tip"><b>라운드제</b> ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대 · 구매 시간 ${ROUNDS.buyTime}초(전·후반 첫 라운드 ${ROUNDS.buyTimeFirst}초) · 라운드 2분 · 한쪽이 전멸하면 바로 끝남.</div>
+        <div class="tip"><b>크레딧</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더). 살아남으면 산 총·방탄이 다음 라운드까지 남음. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
         <div class="tip"><b>참고</b> 브라우저 특성상 <kbd>Ctrl</kbd>+<kbd>W</kbd>는 탭 닫기로 처리될 수 있음. 전체 화면에서 플레이 권장.</div>
       </div>
     </section>`);
@@ -510,8 +511,8 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
         <label class="slider"><span>화면 흔들림</span><input type="range" min="0" max="1.5" step="0.05" data-key="shake"><output></output></label>
         <div class="field"><span>그래픽 품질</span><div class="seg"><button data-quality="auto">자동</button>${Object.entries(QUALITY).map(([k, q]) => `<button data-quality="${k}">${q.name}</button>`).join('')}</div></div>
         <p class="field-note" data-quality-note></p>
-        <div class="field"><span>조준점</span><div class="seg"><button data-cross="dot">작은 점</button><button data-cross="off">없음</button></div></div>
-        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · 빗방울 · 비네팅)</span></label>
+        <div class="field"><span>조준점</span><div class="seg"><button data-cross="cross">점 + 선</button><button data-cross="dot">점만</button><button data-cross="off">없음</button></div></div>
+        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · REC 표시)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
       </div>
     </section>`);
@@ -528,7 +529,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
   });
   el.querySelectorAll('input[type=checkbox]').forEach((inp) => {
     const k = inp.dataset.key;
-    inp.checked = k === 'bodycam' ? settings[k] !== false : !!settings[k];
+    inp.checked = !!settings[k];
     inp.addEventListener('change', () => {
       settings[k] = inp.checked;
       onChange(k);
@@ -541,7 +542,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
     note.textContent = settings.quality === 'auto'
       ? `자동: 이 기기에서는 '${QUALITY[cur]?.name ?? '보통'}'. 프레임이 모자라면 해상도부터 자동으로 낮춥니다.`
       : '프레임이 모자라면 해상도를 자동으로 낮춥니다.';
-    el.querySelectorAll('[data-cross]').forEach((b) => b.classList.toggle('on', b.dataset.cross === (settings.crosshair ?? 'dot')));
+    el.querySelectorAll('[data-cross]').forEach((b) => b.classList.toggle('on', b.dataset.cross === (settings.crosshair ?? 'cross')));
   };
   segs();
   el.addEventListener('click', (e) => {
@@ -563,28 +564,42 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
 }
 
 // ───────────────────────── 전황판 (Tab) ─────────────────────────
-export function scoreboard(match, { onlyTeam = null } = {}) {
-  const table = (team) => `
-    <div class="sb-team t-${team}">
-      <h3><small>${TEAM_INFO[team].code}</small>${TEAM_INFO[team].name}</h3>
+// 점수판: 내 분대(위)와 상대 분대(아래). 크레딧은 내 분대만 보임
+export function scoreboard(match, { me = match.player } = {}) {
+  const squad = me?.squad ?? TEAMS.DEFUSE;
+  const enemy = match.agents.find((a) => a.squad !== squad)?.squad ?? TEAMS.FORCE;
+  const mine = match.score?.[squad] ?? 0, theirs = match.score?.[enemy] ?? 0;
+  const table = (sq, ally) => `
+    <div class="sb-team ${ally ? 'ally' : 'enemy'}">
+      <h3><b>${ally ? mine : theirs}</b>${ally ? '아군 분대' : '상대 분대'}<small>${TEAM_INFO[match.agents.find((a) => a.squad === sq)?.team ?? sq].name}</small></h3>
       <table>
-        <tr><th>콜사인</th><th>처치</th><th>전사</th><th>피해</th><th>해체</th><th>장착 패치</th></tr>
+        <tr><th>요원</th><th>무기</th><th>처치</th><th>죽음</th><th>도움</th><th>피해</th>${ally ? '<th>크레딧</th>' : ''}<th>포스 패치</th></tr>
         ${match.agents
-          .filter((a) => a.team === team)
-          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.isPlayer ? 'me' : ''}"><td>${esc(a.name)}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.damage}</td><td>${a.stats.defuses}</td><td class="sb-patches">${a.patches
+          .filter((a) => a.squad === sq)
+          .sort((p, q) => q.stats.kills - p.stats.kills || q.stats.damage - p.stats.damage)
+          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.id === me?.id ? 'me' : ''}"><td>${esc(a.name)}</td><td class="sb-w">${WEAPON_ICONS[a.primary ?? a.secondary ?? 'pistol'] ?? ''}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.assists ?? 0}</td><td>${a.stats.damage}</td>${ally ? `<td class="sb-c">${(a.credits ?? 0).toLocaleString('en-US')}</td>` : ''}<td class="sb-patches">${a.patches
             .map((p) => (p ? `<i style="--tier:${tierColor(p.id)}" title="${PATCHES[p.id].name}">${PATCH_ICONS[p.id]}</i>` : '<i class="empty"></i>'))
             .join('')}</td></tr>`)
           .join('')}
       </table>
     </div>`;
-  if (onlyTeam) return h(`<section class="scoreboard single">${table(onlyTeam)}<p class="sb-note">경기 중에는 아군 현황만 표시 · 적 정보 없음</p></section>`);
-  return h(`<section class="scoreboard">${table(TEAMS.DEFUSE)}${table(TEAMS.FORCE)}</section>`);
+  const head = match.rules === 'rounds' ? `<div class="sb-head"><span>라운드 ${match.round}</span><b><i class="ally">${mine}</i> : <i class="enemy">${theirs}</i></b><span>${ROUNDS.winTo}라운드 선승</span></div>` : '';
+  return h(`<section class="scoreboard">${head}${table(squad, true)}${table(enemy, false)}</section>`);
+}
+
+// 라운드 기록 띠 (이긴 분대 색 · 끝난 방식 아이콘)
+function roundStrip(match, squad) {
+  const icon = (r) => (r.reason.includes('해체 완료') ? '✓' : r.reason.includes('폭발') ? '✸' : '✕');
+  return `<div class="round-strip">${(match.history ?? []).map((r) => `<i class="${r.squad === squad ? 'ally' : 'enemy'} ${r.round === ROUNDS.half ? 'half' : ''}" title="라운드 ${r.round} · ${esc(r.reason)}"><small>${r.round}</small>${icon(r)}</i>`).join('')}</div>`;
 }
 
 // ───────────────────────── 작전 결과 ─────────────────────────
 export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }) {
   const { match, winner, reason, team, player } = result;
   const won = winner === team;
+  const enemy = match.agents.find((a) => a.squad !== team)?.squad;
+  const mine = match.score?.[team] ?? 0, theirs = match.score?.[enemy] ?? 0;
+  const rounds = match.rules === 'rounds';
   const used = [...new Set(player.patches.filter(Boolean).map((p) => p.id))];
   const concepts = [
     ...used.map((id) => ({ title: `${PATCHES[id].concept} · ${PATCHES[id].name}`, text: PATCHES[id].conceptText, color: tierColor(id), icon: PATCH_ICONS[id] })),
@@ -596,17 +611,19 @@ export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }
   const quiz = pickQuiz(picked, used, 3);
   const prog = loadProgress();
   const el = h(`
-    <section class="screen result-screen ${won ? 'win' : 'lose'} t-${winner}">
+    <section class="screen result-screen ${won ? 'win' : 'lose'}">
       <div class="result-head">
-        <div class="rh-kicker">작전 결과 · ${TEAM_INFO[winner].name} 목표 달성</div>
-        <h1>${won ? '작전 성공' : '작전 실패'}</h1>
-        <p>${reason}</p>
+        <div class="rh-kicker">${rounds ? `최종 점수 · ${match.history.length}라운드` : '작전 결과'}</div>
+        <h1>${won ? '승리' : '패배'}${rounds ? ` <span class="rh-score"><i class="ally">${mine}</i> : <i class="enemy">${theirs}</i></span>` : ''}</h1>
+        <p>마지막 라운드 · ${esc(reason)}</p>
+        ${rounds ? roundStrip(match, team) : ''}
         <div class="my-stats">
           <div><b>${s.kills}</b><span>처치</span></div>
+          <div><b>${s.deaths}</b><span>죽음</span></div>
+          <div><b>${s.assists ?? 0}</b><span>도움</span></div>
           <div><b>${s.damage}</b><span>피해량</span></div>
           <div><b>${s.headshots}</b><span>헤드샷</span></div>
           <div><b>${s.defuses}</b><span>해체</span></div>
-          <div><b>${s.patchUses}</b><span>패치 사용</span></div>
         </div>
       </div>
       <div class="result-body"></div>
@@ -631,7 +648,7 @@ export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }
         <button class="btn primary big" data-act="again">${online ? '대기실로' : '재출격 · 같은 소속'}</button>
       </footer>
     </section>`);
-  el.querySelector('.result-body').appendChild(scoreboard(match));
+  el.querySelector('.result-body').appendChild(scoreboard(match, { me: player }));
   // 점검 문제: 한 번만 고를 수 있음, 고르면 정답·해설 표시
   let answered = 0, right = 0;
   el.addEventListener('click', (e) => {

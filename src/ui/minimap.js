@@ -1,15 +1,20 @@
-import { TEAM_INFO } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
 
 const SITE = { A: '#d9a441', B: '#9b8ac4' };
 const ZONE_FILL = { friction: 'rgba(150,200,215,0.22)', storm: 'rgba(196,150,90,0.26)', net: 'rgba(181,154,223,0.3)', collapse: 'rgba(181,154,223,0.32)' };
 
-// 작전 지도 (M을 누르고 있는 동안): 지형·구역 이름·폭탄·아군·지휘 지점·무전 보고(? 소리, ! 목격)만 표시. 적 위치는 없음.
+const ALLY = '#4fe0c0';
+const ENEMY = '#ff4655';
+
+// 지도: 지형·폭탄·아군·아군이 보고 있는 적(붉은 점)·지휘 지점·무전 보고(? 소리, ! 목격).
+// mini = 왼쪽 위 미니맵 (구역 이름 없이 작게), 아니면 M을 누르고 있는 동안 보는 큰 작전 지도
 export class TacticalMap {
-  constructor(canvas, match, localId, { scale = 9 } = {}) {
+  constructor(canvas, match, localId, { scale = 9, mini = false } = {}) {
     this.canvas = canvas;
     this.match = match;
     this.localId = localId;
+    this.mini = mini;
+    this.lastSeen = new Map(); // 적별 마지막으로 보인 곳 { x, z, t }
     const map = match.map;
     this.S = scale;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -29,15 +34,17 @@ export class TacticalMap {
       for (let c = 0; c < map.cols; c++) {
         const ch = map.charAt(c, r);
         const kind = TILES[ch]?.kind;
-        if (kind === 'wall') b.fillStyle = 'rgba(8,10,12,0.96)';
-        else if (kind) b.fillStyle = 'rgba(112,118,124,0.85)';
-        else if ('aA'.includes(ch)) b.fillStyle = 'rgba(217,164,65,0.22)';
-        else if ('bB'.includes(ch)) b.fillStyle = 'rgba(155,138,196,0.22)';
-        else if (ch === 'F') b.fillStyle = 'rgba(224,138,60,0.2)';
-        else if (ch === 'D') b.fillStyle = 'rgba(94,196,214,0.2)';
-        else b.fillStyle = 'rgba(52,57,63,0.82)';
+        if (kind === 'wall') b.fillStyle = mini ? 'rgba(10,14,18,0.55)' : 'rgba(8,10,12,0.96)';
+        else if (kind) b.fillStyle = 'rgba(150,160,170,0.75)';
+        else if ('aA'.includes(ch)) b.fillStyle = 'rgba(217,164,65,0.3)';
+        else if ('bB'.includes(ch)) b.fillStyle = 'rgba(155,138,196,0.3)';
+        else b.fillStyle = 'rgba(78,88,98,0.78)';
         b.fillRect(c * S, r * S, S, S);
       }
+    }
+    if (mini) {
+      this.t = 0;
+      return;
     }
     // 구역 이름 (무전 보고에 쓰는 이름)
     b.font = `600 ${Math.max(9, S * 1.05)}px "IBM Plex Sans KR", sans-serif`;
@@ -74,6 +81,8 @@ export class TacticalMap {
     g.drawImage(this.base, 0, 0);
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const myTeam = m.agentById(this.localId).team;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
 
     // 아군이 만든 패치 구역
     for (const z of m.zones) {
@@ -111,7 +120,7 @@ export class TacticalMap {
       if (o.type === 'regroup') p = m.agentById(o.issuerId)?.pos;
       if (p) {
         const [x, y] = this.toPx(p.x, p.z);
-        g.strokeStyle = TEAM_INFO[myTeam].color;
+        g.strokeStyle = ALLY;
         g.lineWidth = 2;
         g.setLineDash([3, 3]);
         g.beginPath();
@@ -138,11 +147,62 @@ export class TacticalMap {
       g.fillText(b.id, x, y + 0.5);
     }
 
+    // 적: 아군 누군가가 지금 보고 있거나 무게 감지기에 잡히면 붉은 점, 놓친 뒤 잠시 ? 표시
+    for (const e of m.agents) {
+      if (e.team === myTeam) continue;
+      const seenNow = e.alive && (m.time - (e.spottedT ?? -99) < 0.35 || e.revealedUntil > m.time);
+      if (seenNow) this.lastSeen.set(e.id, { x: e.pos.x, z: e.pos.z, t: m.time });
+      if (!e.alive) this.lastSeen.delete(e.id);
+      const last = this.lastSeen.get(e.id);
+      if (!last) continue;
+      const age = m.time - last.t;
+      if (age > 3) {
+        this.lastSeen.delete(e.id);
+        continue;
+      }
+      const [x, y] = this.toPx(seenNow ? e.pos.x : last.x, seenNow ? e.pos.z : last.z);
+      if (seenNow) {
+        g.save();
+        g.translate(x, y);
+        g.rotate(-e.yaw);
+        g.beginPath();
+        g.moveTo(0, -S * 0.85);
+        g.lineTo(S * 0.6, S * 0.55);
+        g.lineTo(-S * 0.6, S * 0.55);
+        g.closePath();
+        g.fillStyle = ENEMY;
+        g.fill();
+        g.restore();
+      } else {
+        g.globalAlpha = 1 - age / 3;
+        g.fillStyle = ENEMY;
+        g.font = `700 ${S * 1.5}px Rajdhani, sans-serif`;
+        g.fillText('?', x, y);
+        g.globalAlpha = 1;
+      }
+    }
+
     // 아군 (서로 무전으로 위치를 앎)
     for (const a of m.agents) {
       if (!a.alive || a.team !== myTeam) continue;
       const [x, y] = this.toPx(a.pos.x, a.pos.z);
-      const col = TEAM_INFO[a.team].color;
+      const col = ALLY;
+      // 내 시야 방향
+      if (a.id === viewAgent.id) {
+        g.save();
+        g.translate(x, y);
+        g.rotate(-a.yaw - Math.PI / 2);
+        const grad = g.createRadialGradient(0, 0, 0, 0, 0, S * 7);
+        grad.addColorStop(0, 'rgba(255,255,255,0.28)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = grad;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.arc(0, 0, S * 7, -0.6, 0.6);
+        g.closePath();
+        g.fill();
+        g.restore();
+      }
       g.save();
       g.translate(x, y);
       g.rotate(-a.yaw);
@@ -161,7 +221,7 @@ export class TacticalMap {
         g.stroke();
       }
       g.restore();
-      if (!me) {
+      if (!me && !this.mini) {
         g.fillStyle = 'rgba(215,220,226,0.85)';
         g.font = `500 ${Math.max(9, S)}px "IBM Plex Sans KR", sans-serif`;
         g.fillText(a.name, x, y - S * 1.3);

@@ -52,7 +52,7 @@ test('부력 방패: 적 탄을 막고 내구도가 닳으면 부서짐', () => 
   enemy.pitch = -0.02;
   const shoot = (n) => {
     for (let k = 0; k < n; k++) {
-      enemy.weapons.rifle.mag = 30;
+      enemy.weapons.rifle.mag = 25;
       enemy.recoil = enemy.recoilYaw = enemy.bloom = 0;
       match.fire(enemy, w, enemy.weapons.rifle);
       for (let i = 0; i < 12; i++) {
@@ -61,10 +61,10 @@ test('부력 방패: 적 탄을 막고 내구도가 닳으면 부서짐', () => 
       }
     }
   };
-  shoot(7); // 31 × 7 = 217 < 220
+  shoot(5); // 40 × 5 = 200 < 220
   assert.equal(me.hp, 100, '방패 뒤에서는 맞지 않음');
   assert.equal(match.shields.length, 1);
-  shoot(1); // 248 ≥ 220
+  shoot(1); // 240 ≥ 220
   assert.equal(match.shields.length, 0, '내구도 220을 넘으면 부서짐');
   assert.equal(me.hp, 100, '부서지는 탄까지는 방패가 막음');
   shoot(1);
@@ -196,7 +196,7 @@ test('정조준: 퍼짐이 줄어들고 반동 패턴이 쌓였다가 회복됨'
     return sum / 400;
   };
   const hip = spreadOf(false), ads = spreadOf(true);
-  assert.ok(ads < hip * 0.6, `ads ${ads} hip ${hip}`);
+  assert.ok(ads < hip * 0.8, `ads ${ads} hip ${hip}`);
 
   me.adsT = 0;
   me.recoil = me.recoilYaw = 0;

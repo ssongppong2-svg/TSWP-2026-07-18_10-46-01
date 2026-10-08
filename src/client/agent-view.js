@@ -691,6 +691,114 @@ function buildPistolMag() {
   return P;
 }
 
+// 3인칭 권총 손잡이 (소총과 같은 모양 · 오른손 파지 위치가 같도록)
+function gripTP(P) {
+  P.add('furn', profile([[-0.002, -0.004], [0.012, -0.03], [-0.02, -0.105], [-0.058, -0.112], [-0.066, -0.1], [-0.046, -0.01], [-0.034, 0.004]], 0.032, 0.005));
+  P.add('metal', profile([[0.0, 0.0], [0.045, 0.0], [0.04, -0.034], [0.002, -0.036]], 0.012, 0.002, [[[0.006, -0.008], [0.034, -0.008], [0.032, -0.026], [0.008, -0.027]]]));
+}
+
+// 기관단총: 짧은 몸통 · 소음기 · 곧은 탄창 · 접이식 철사 개머리판 · 도트 조준경
+const SMG = { bore: 0.045, butt: new V3(0, 0.0, 0.25), muzzle: new V3(0, 0.045, -0.4), magPos: new V3(0, -0.03, -0.07) };
+function buildSmg() {
+  const P = new Parts();
+  gripTP(P);
+  P.add('poly', rbox(0.036, 0.062, 0.26, 0.008), [0, 0.033, -0.06]);
+  P.add('metal', rbox(0.02, 0.008, 0.2, 0.002), [0, 0.068, -0.05]);
+  P.add('metal', cylG(0.017, 0.017, 0.17, 10), [0, SMG.bore, -0.27], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 4; i++) P.add('poly', rbox(0.004, 0.008, 0.022, 0.002), [0.0175, SMG.bore, -0.21 - i * 0.035]);
+  P.add('metal', cylG(0.009, 0.009, 0.05, 8), [0.012, 0.056, 0.02], [Math.PI / 2, 0, 0]);
+  // 도트 조준경
+  P.add('poly', rbox(0.026, 0.014, 0.03, 0.003), [0, 0.078, -0.04]);
+  P.add('metal', cylG(0.014, 0.014, 0.045, 12), [0, 0.096, -0.04], [Math.PI / 2, 0, 0]);
+  P.add('lens', cylG(0.011, 0.011, 0.002, 12), [0, 0.096, -0.063], [Math.PI / 2, 0, 0]);
+  // 철사 개머리판
+  for (const y of [0.042, -0.012]) P.add('metal', cylG(0.0045, 0.0045, 0.18, 6), [0, y, 0.16], [Math.PI / 2, 0, 0]);
+  P.add('rubber', rbox(0.03, 0.08, 0.014, 0.004), [0, 0.014, 0.25]);
+  P.add('accent', rbox(0.037, 0.063, 0.008, 0.004), [0, 0.033, -0.16]);
+  return P;
+}
+function buildSmgMag() {
+  const P = new Parts();
+  P.add('poly', rbox(0.022, 0.15, 0.034, 0.004), [0, -0.075, 0], [0.08, 0, 0]);
+  return P;
+}
+
+// 산탄총 (펌프식): 긴 총열 + 아래 탄창관 + 움직이는 펌프 + 옆 탄띠
+const SHOTGUN = { bore: 0.054, butt: new V3(0, 0.0, 0.35), muzzle: new V3(0, 0.054, -0.66), magPos: new V3(0, 0.025, -0.31) };
+function buildShotgun() {
+  const P = new Parts();
+  gripTP(P);
+  P.add('metal', rbox(0.038, 0.064, 0.2, 0.008), [0, 0.03, -0.03]);
+  P.add('metal', cylG(0.011, 0.011, 0.53, 10), [0, SHOTGUN.bore, -0.39], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.012, 0.012, 0.44, 10), [0, 0.025, -0.35], [Math.PI / 2, 0, 0]);
+  P.add('steel', rbox(0.006, 0.008, 0.006, 0.002), [0, 0.07, -0.64]);
+  for (let i = 0; i < 4; i++) P.add('accent', cylG(0.0075, 0.0075, 0.04, 8), [-0.022, 0.03, -0.01 - i * 0.017], [0, 0, 0]);
+  P.add('furn', profile([[-0.12, 0.06], [-0.34, 0.03], [-0.35, 0.02], [-0.35, -0.085], [-0.33, -0.09], [-0.2, -0.04], [-0.12, 0.0]], 0.04, 0.006));
+  P.add('rubber', rbox(0.042, 0.11, 0.016, 0.005), [0, -0.03, 0.352]);
+  return P;
+}
+// 펌프 (탄창관을 감싸고 앞뒤로 움직임)
+function buildShotgunPump() {
+  const P = new Parts();
+  P.add('furn', rbox(0.044, 0.04, 0.16, 0.012), [0, 0, 0]);
+  for (let i = 0; i < 5; i++) P.add('poly', rbox(0.046, 0.034, 0.006, 0.002), [0, 0, -0.06 + i * 0.03]);
+  return P;
+}
+
+// 저격총 (노리쇠식): 굵은 총열 · 큰 조준경 · 접힌 양각대 · 상자 탄창 · 볼 받침이 있는 개머리판
+const SNIPER = { bore: 0.045, butt: new V3(0, 0.0, 0.36), muzzle: new V3(0, 0.045, -0.92), magPos: new V3(0, -0.02, -0.08) };
+function buildSniper() {
+  const P = new Parts();
+  gripTP(P);
+  P.add('metal', rbox(0.042, 0.05, 0.3, 0.006), [0, 0.04, -0.05]);
+  P.add('poly', rbox(0.052, 0.05, 0.32, 0.01), [0, 0.03, -0.35]);
+  P.add('metal', cylG(0.0145, 0.012, 0.6, 10), [0, SNIPER.bore, -0.6], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.034, 0.03, 0.05, 0.004), [0, SNIPER.bore, -0.9]);
+  // 조준경 (경통 · 대물렌즈 · 접안부 · 다이얼 · 고정 링)
+  P.add('metal', cylG(0.016, 0.016, 0.3, 12), [0, 0.118, -0.08], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.029, 0.017, 0.08, 12), [0, 0.118, -0.27], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.021, 0.016, 0.06, 12), [0, 0.118, 0.09], [Math.PI / 2, 0, 0]);
+  P.add('lens', cylG(0.026, 0.026, 0.003, 12), [0, 0.118, -0.311], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.011, 0.011, 0.024, 8), [0, 0.142, -0.07]);
+  P.add('metal', cylG(0.011, 0.011, 0.024, 8), [0.026, 0.118, -0.07], [0, 0, Math.PI / 2]);
+  for (const z of [-0.16, 0.0]) P.add('metal', rbox(0.04, 0.05, 0.02, 0.004), [0, 0.09, z]);
+  // 노리쇠 손잡이
+  P.add('metal', cylG(0.004, 0.004, 0.05, 6), [0.03, 0.05, 0.06], [0, 0, Math.PI / 2 - 0.4]);
+  P.add('metal', new THREE.SphereGeometry(0.009, 8, 6), [0.052, 0.04, 0.06]);
+  // 개머리판 (볼 받침)
+  P.add('furn', profile([[-0.1, 0.07], [-0.36, 0.07], [-0.37, 0.06], [-0.37, -0.09], [-0.34, -0.095], [-0.24, -0.04], [-0.1, -0.02]], 0.046, 0.006));
+  P.add('furn', rbox(0.04, 0.03, 0.12, 0.008), [0, 0.095, 0.22]);
+  // 접힌 양각대
+  for (const s of [-1, 1]) P.add('metal', cylG(0.0045, 0.0045, 0.17, 6), [s * 0.016, 0.0, -0.47], [Math.PI / 2, 0, 0]);
+  P.add('accent', rbox(0.054, 0.052, 0.01, 0.004), [0, 0.03, -0.22]);
+  return P;
+}
+function buildSniperMag() {
+  const P = new Parts();
+  P.add('poly', rbox(0.03, 0.06, 0.08, 0.004), [0, -0.03, 0]);
+  return P;
+}
+
+// 리볼버: 각진 틀 · 원통형 약실 · 긴 총열 · 나무 손잡이
+const SHERIFF = { muzzle: new V3(0, 0.04, -0.2) };
+function buildSheriff() {
+  const P = new Parts();
+  P.add('steel', profile([[-0.03, 0.055], [0.04, 0.055], [0.045, 0.012], [0.03, -0.004], [-0.03, -0.004], [-0.042, 0.03]], 0.024, 0.003));
+  P.add('steel', rbox(0.018, 0.024, 0.15, 0.004), [0, 0.04, -0.12]);
+  P.add('steel', rbox(0.008, 0.008, 0.15, 0.002), [0, 0.056, -0.12]);
+  P.add('metal', cylG(0.009, 0.009, 0.11, 8), [0, 0.02, -0.1], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.021, 0.021, 0.045, 12), [0, 0.03, -0.02], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.006, 0.016, 0.012, 0.002), [0, 0.06, 0.03], [-0.5, 0, 0]);
+  P.add('furn', rbox(0.026, 0.09, 0.038, 0.01), [0, -0.036, 0.02], [-0.3, 0, 0]);
+  P.add('metal', profile([[-0.004, 0.0], [0.034, 0.0], [0.03, -0.024], [0.004, -0.024]], 0.008, 0.002, [[[0.008, -0.004], [0.026, -0.004], [0.024, -0.017], [0.01, -0.018]]]));
+  return P;
+}
+function buildEmpty() {
+  const P = new Parts();
+  P.add('metal', rbox(0.002, 0.002, 0.002, 0.0005), [0, 0, 0]);
+  return P;
+}
+
 const KNIFE = { tip: new V3(0, 0.012, -0.24) };
 function buildKnife() {
   const P = new Parts();
@@ -782,6 +890,20 @@ const GRIPS = {
     L: null,
   },
 };
+// 긴 총: 오른손은 소총과 같고, 왼손만 총마다 앞쪽 지지 위치가 다름
+const longGrip = (y, z) => ({ R: GRIPS.rifle.R, L: { p: new V3(-0.004, y, z), t: GRIPS.rifle.L.t, w: GRIPS.rifle.L.w } });
+
+// 3인칭 총 목록: 주무기(긴 총)는 소총 자세, 보조무기는 권총 자세
+const LONG = new Set(['rifle', 'smg', 'shotgun', 'sniper']);
+const GUN3P = {
+  rifle: { build: buildRifle, mag: buildRifleMag, magPos: RIFLE.magPos, muzzle: RIFLE.muzzle, butt: RIFLE.butt, grip: GRIPS.rifle },
+  smg: { build: buildSmg, mag: buildSmgMag, magPos: SMG.magPos, muzzle: SMG.muzzle, butt: SMG.butt, grip: longGrip(SMG.bore - 0.006, -0.22) },
+  shotgun: { build: buildShotgun, mag: buildShotgunPump, magPos: SHOTGUN.magPos, muzzle: SHOTGUN.muzzle, butt: SHOTGUN.butt, grip: longGrip(0.022, -0.31), pump: true },
+  sniper: { build: buildSniper, mag: buildSniperMag, magPos: SNIPER.magPos, muzzle: SNIPER.muzzle, butt: SNIPER.butt, grip: longGrip(SNIPER.bore - 0.012, -0.33) },
+  pistol: { build: buildPistol, mag: buildPistolMag, muzzle: PISTOL.muzzle, grip: GRIPS.pistol },
+  sheriff: { build: buildSheriff, mag: buildEmpty, muzzle: SHERIFF.muzzle, grip: GRIPS.pistol },
+};
+const slotOf = (W) => (W === 'knife' ? 'knife' : LONG.has(W) ? 'primary' : 'secondary');
 
 // 요원 한 명의 3D 모형 + 애니메이션 (걷기·앉기·기울이기·조준·재장전·락픽·피격 움찔·쓰러짐)
 // ───────── 요원 한 명 = 스킨 메시 몇 개 ─────────
@@ -867,7 +989,7 @@ export function hideableBone(g) {
 
 // 뼈대 목록(builds)으로 팀·세부 단계별 스킨 형상을 만듦 (같은 팀 요원끼리 공유)
 function skinGeometry(team, level, builds) {
-  const key = `${team}@${level}`;
+  const key = `${team}@${level}@${builds.map((b) => b.key).join(',')}`;
   if (skinCache.has(key)) return skinCache.get(key);
   const T = teamMaterials(team);
   const accent = new THREE.Color(TEAM_INFO[team].color);
@@ -888,7 +1010,7 @@ export class AgentView {
 
   constructor(agent, { showTag }) {
     this.agent = agent;
-    const team = agent.team;
+    const team = agent.squad ?? agent.team; // 색·무늬는 분대 기준 (공수 교대해도 그대로)
     const accent = TEAM_INFO[team].color;
     this.team = team;
     this.bones = [];
@@ -953,28 +1075,29 @@ export class AgentView {
     // 총 (루트 기준으로 자세를 계산)
     this.gun = new THREE.Group();
     root.add(this.gun);
+    // 손에 드는 총: 주무기·보조무기 칸 하나씩 (어떤 총인지는 가진 것에 따라 형상을 바꿔 끼움)
+    this.loadout = { primary: agent.primary ?? 'rifle', secondary: agent.secondary ?? 'pistol' };
+    const P0 = GUN3P[this.loadout.primary], S0 = GUN3P[this.loadout.secondary];
     this.weapons = {
-      rifle: this.mount(this.gun, 'rifle', buildRifle),
-      pistol: this.mount(this.gun, 'pistol', buildPistol),
+      primary: this.mount(this.gun, `gun:${this.loadout.primary}`, P0.build),
+      secondary: this.mount(this.gun, `gun:${this.loadout.secondary}`, S0.build),
       knife: this.mount(this.gun, 'knife', buildKnife),
     };
-    this.rifleMag = this.mount(this.weapons.rifle, 'rifleMag', buildRifleMag);
-    this.rifleMag.position.copy(RIFLE.magPos);
-    this.pistolMag = this.mount(this.weapons.pistol, 'pistolMag', buildPistolMag);
+    this.magP = this.mount(this.weapons.primary, `mag:${this.loadout.primary}`, P0.mag);
+    this.magS = this.mount(this.weapons.secondary, `mag:${this.loadout.secondary}`, S0.mag);
     this.pistolMagHome = new V3(0, 0.005, 0.004);
-    this.pistolMag.position.copy(this.pistolMagHome);
-    this.pistolMag.rotation.x = -0.3;
-    this.muzzles = { rifle: new THREE.Object3D(), pistol: new THREE.Object3D(), knife: new THREE.Object3D() };
-    this.muzzles.rifle.position.copy(RIFLE.muzzle);
-    this.muzzles.pistol.position.copy(PISTOL.muzzle);
+    this.magS.position.copy(this.pistolMagHome);
+    this.magS.rotation.x = -0.3;
+    this.muzzles = { primary: new THREE.Object3D(), secondary: new THREE.Object3D(), knife: new THREE.Object3D() };
     this.muzzles.knife.position.copy(KNIFE.tip);
     for (const [k, m] of Object.entries(this.muzzles)) this.weapons[k].add(m);
-    // 소총을 안 들 때: 등에 멘 소총
-    this.slung = this.mount(this.spine, 'rifle', buildRifle);
-    this.slungMag = this.mount(this.slung, 'rifleMag', buildRifleMag);
-    this.slungMag.position.copy(RIFLE.magPos);
+    // 주무기를 안 들 때: 등에 멘 주무기
+    this.slung = this.mount(this.spine, `gun:${this.loadout.primary}`, P0.build);
+    this.slungMag = this.mount(this.slung, `mag:${this.loadout.primary}`, P0.mag);
     this.slung.position.set(0.02, 0.22, 0.285);
     this.slung.rotation.set(0, Math.PI / 2, 0.95, 'ZYX');
+    this.dynBones = { primary: [this.weapons.primary, this.slung], secondary: [this.weapons.secondary], magP: [this.magP, this.slungMag], magS: [this.magS] };
+    this.applyLoadoutBones();
     this.buildSkin();
 
     // 상태 효과 고리
@@ -1057,9 +1180,44 @@ export class AgentView {
 
   setWeapon(id) {
     this.weaponShown = id;
-    for (const [k, g] of Object.entries(this.weapons)) g.visible = k === id;
-    this.slung.visible = id !== 'rifle';
-    this.holstered.visible = id !== 'pistol';
+    const slot = slotOf(id);
+    for (const [k, g] of Object.entries(this.weapons)) g.visible = k === slot;
+    this.slung.visible = !!this.agent.primary && slot !== 'primary';
+    this.holstered.visible = slot !== 'secondary';
+  }
+
+  // 가진 총에 맞춰 총 칸의 형상 키·총구·탄창 위치를 정함
+  applyLoadoutBones() {
+    const { primary, secondary } = this.loadout;
+    const set = (bones, key, build) => {
+      for (const b of bones) this.builds[this.bones.indexOf(b)] = { key, build };
+    };
+    set(this.dynBones.primary, `gun:${primary}`, GUN3P[primary].build);
+    set(this.dynBones.secondary, `gun:${secondary}`, GUN3P[secondary].build);
+    set(this.dynBones.magP, `mag:${primary}`, GUN3P[primary].mag);
+    set(this.dynBones.magS, `mag:${secondary}`, GUN3P[secondary].mag);
+    this.muzzles.primary.position.copy(GUN3P[primary].muzzle);
+    this.muzzles.secondary.position.copy(GUN3P[secondary].muzzle);
+    this.magP.position.copy(GUN3P[primary].magPos);
+    this.slungMag.position.copy(GUN3P[primary].magPos);
+  }
+
+  // 라운드마다 산 총이 바뀌면 스킨 형상을 바꿔 끼움 (같은 조합은 요원끼리 공유)
+  refreshLoadout() {
+    const a = this.agent;
+    const primary = a.primary ?? this.loadout.primary;
+    const secondary = a.secondary ?? 'pistol';
+    if (primary === this.loadout.primary && secondary === this.loadout.secondary) return;
+    this.loadout = { primary, secondary };
+    this.applyLoadoutBones();
+    [1, 0].forEach((level, i) => {
+      const geos = skinGeometry(this.team, level, this.builds);
+      for (const m of this.lods[i]) {
+        const cls = m.name.slice(6, m.name.indexOf('@'));
+        if (geos[cls]) m.geometry = geos[cls];
+      }
+    });
+    this.weaponShown = null;
   }
 
   // ───────── 매 프레임 ─────────
@@ -1078,7 +1236,9 @@ export class AgentView {
       for (const m of this.lods[1]) m.visible = far;
     }
     r.rotation.set(0, a.yaw, 0);
-    if (this.weaponShown !== a.weapon) {
+    if ((a.primary && a.primary !== this.loadout.primary) || (a.secondary && a.secondary !== this.loadout.secondary)) this.refreshLoadout();
+    if (this.weaponShown !== a.weapon || this.slungShown !== !!a.primary) {
+      this.slungShown = !!a.primary;
       this.setWeapon(a.weapon);
       this.swingT = 1;
     }
@@ -1088,9 +1248,10 @@ export class AgentView {
     // 발사·근접 공격 감지 → 반동 / 휘두르기
     const since = a.sinceShot ?? 99;
     if (a.alive && since < this.lastSince - 1e-4 && since < 0.2 && !melee) {
-      const pistol = W === 'pistol';
-      this.kick.v.x += pistol ? 9 : 6 + Math.random() * 2;
-      this.kick.v.z += pistol ? 2.2 : 2.8;
+      const pistol = !LONG.has(W);
+      const heavy = W === 'shotgun' || W === 'sniper' || W === 'sheriff' ? 1.6 : W === 'smg' ? 0.7 : 1;
+      this.kick.v.x += (pistol ? 9 : 6 + Math.random() * 2) * heavy;
+      this.kick.v.z += (pistol ? 2.2 : 2.8) * heavy;
       this.kick.v.y += (Math.random() - 0.5) * 3;
     }
     this.lastSince = since;
@@ -1112,7 +1273,7 @@ export class AgentView {
     st.ads = damp(st.ads, smooth(((a.adsT ?? 0) - 0.1) / 0.8), 16, dt);
     const leanTarget = dead ? 0 : a.leanOffset != null && Math.abs(a.lean ?? 0) > 0.01 ? a.leanOffset / 0.42 : (a.lean ?? 0);
     st.lean = damp(st.lean, leanTarget, 14, dt);
-    const bladeT = W === 'rifle' ? -0.3 : W === 'pistol' ? -0.06 : -0.18;
+    const bladeT = LONG.has(W) ? -0.3 : W === 'knife' ? -0.18 : -0.06;
     st.blade = damp(st.blade, bladeT * (1 - st.kneel), 8, dt);
     const drawFrac = a.swapT > 0 && WEAPONS[W] ? a.swapT / WEAPONS[W].draw : 0;
     st.draw = damp(st.draw, drawFrac, 20, dt);
@@ -1121,9 +1282,9 @@ export class AgentView {
     const c = st.crouch;
     const kn = st.kneel;
     // 락픽 중에는 권총·칼을 집어넣음
-    if (W !== 'rifle') {
-      this.weapons[W].visible = kn < 0.5;
-      this.holstered.visible = W !== 'pistol' || kn >= 0.5;
+    if (!LONG.has(W)) {
+      this.weapons[slotOf(W)].visible = kn < 0.5;
+      this.holstered.visible = slotOf(W) !== 'secondary' || kn >= 0.5;
     }
 
     // ── 걸음: 로컬 속도 → 발 궤적
@@ -1238,8 +1399,8 @@ export class AgentView {
     let roll = -st.lean * 0.35;
     const pivot = v.a;
     let butt = v.b.set(0, 0, 0);
-    if (W === 'rifle') {
-      butt.copy(RIFLE.butt);
+    if (LONG.has(W)) {
+      butt.copy(GUN3P[W].butt);
       pivot.set(0.112 - 0.006 * ads, 0.33 + 0.058 * ads, -0.06 - 0.03 * ads);
       pitch += -0.17 * (1 - ads);
       yaw += 0.03 * (1 - ads);
@@ -1250,7 +1411,7 @@ export class AgentView {
         pivot.y -= 0.03 * k;
         pivot.x -= 0.03 * k;
       }
-    } else if (W === 'pistol') {
+    } else if (W !== 'knife') {
       pivot.set(0.04 - 0.01 * ads, 0.3 + 0.2 * ads, -0.34 - 0.15 * ads);
       pitch += -0.45 * (1 - ads);
       yaw += -0.02;
@@ -1318,7 +1479,7 @@ export class AgentView {
 
   poseHands(W, reload, time) {
     const H = this.hands;
-    const grips = GRIPS[W] ?? GRIPS.rifle;
+    const grips = GUN3P[W]?.grip ?? GRIPS[W] ?? GRIPS.rifle;
     const v = this.v;
     this.gripTarget(H.R, grips.R);
     if (grips.L) this.gripTarget(H.L, grips.L);
@@ -1329,13 +1490,22 @@ export class AgentView {
       H.L.w.set(-0.3, -0.5, 0.8);
     }
     // 재장전: 왼손이 탄창을 빼고 가슴 주머니에서 새 탄창을 가져와 끼움
-    const mag = W === 'rifle' ? this.rifleMag : W === 'pistol' ? this.pistolMag : null;
-    if (mag) {
-      const home = W === 'rifle' ? RIFLE.magPos : this.pistolMagHome;
+    const long = LONG.has(W);
+    const pump = GUN3P[W]?.pump;
+    const mag = W === 'knife' || W === 'sheriff' ? null : long ? this.magP : this.magS;
+    if (mag && pump) {
+      // 산탄총 펌프: 쏜 뒤 뒤로 당겼다 밀기
+      const since = this.agent.sinceShot ?? 9;
+      const k = since < 0.45 ? Math.sin(clamp01((since - 0.1) / 0.35) * Math.PI) : 0;
+      mag.position.copy(GUN3P[W].magPos);
+      mag.position.z += 0.07 * k;
+      H.L.p.add(v.a.set(0, 0, 0.07 * k).applyQuaternion(this.gun.quaternion).applyQuaternion(this.invChestQ));
+    } else if (mag) {
+      const home = long ? GUN3P[W].magPos : this.pistolMagHome;
       mag.position.copy(home);
       mag.visible = true;
       if (reload > 0) {
-        const keys = W === 'rifle' ? RELOAD_RIFLE : RELOAD_PISTOL;
+        const keys = long ? RELOAD_RIFLE : RELOAD_PISTOL;
         let i = 0;
         while (i < keys.length - 2 && reload > keys[i + 1].u) i++;
         const k0 = keys[i], k1 = keys[i + 1];
@@ -1355,7 +1525,7 @@ export class AgentView {
           v.f.copy(handW).applyMatrix4(this.chest);
           this.m1.copy(this.gun.matrix).invert();
           v.f.applyMatrix4(this.m1);
-          mag.position.copy(v.f).add(v.e.set(0, W === 'rifle' ? 0.07 : 0.03, 0.0));
+          mag.position.copy(v.f).add(v.e.set(0, long ? 0.07 : 0.03, 0.0));
         } else if (state === 'none') mag.visible = false;
         else if (state === 'drop') {
           mag.position.y -= 0.25 * f;
@@ -1408,7 +1578,7 @@ export class AgentView {
   poseLegs(md, amp, lift, beta, backward, c, kn, dead) {
     const v = this.v;
     const st = this.st;
-    const rifleStance = this.weaponShown === 'rifle' ? 1 : 0.5;
+    const rifleStance = LONG.has(this.weaponShown) ? 1 : 0.5;
     this.hips.updateMatrix();
     for (const leg of this.legs) {
       const s = leg.side;
@@ -1483,7 +1653,7 @@ export class AgentView {
   }
 
   muzzleWorld(target) {
-    return this.muzzles[this.weaponShown ?? 'rifle'].getWorldPosition(target);
+    return this.muzzles[slotOf(this.weaponShown ?? 'rifle')].getWorldPosition(target);
   }
 
   dispose() {

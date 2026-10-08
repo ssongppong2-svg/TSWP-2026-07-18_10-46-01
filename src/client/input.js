@@ -163,7 +163,8 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [] };
+    this.shop = null; // 상점이 열려 있으면: 마우스는 상점 커서, 숫자 키는 구매
     this.lastDx = 0;
     this.lastDy = 0;
     this.wheelOpen = false;
@@ -195,6 +196,17 @@ export class PlayerController {
   // 렌더 프레임마다 호출
   frame(agent) {
     const { dx, dy } = this.input.takeMouse();
+    if (this.shop?.isOpen) {
+      // 상점: 시점은 고정, 마우스는 커서, 왼쪽 클릭 = 구매, 숫자 키 = 바로 구매
+      this.shop.move(dx, dy);
+      this.lastDx = this.lastDy = 0;
+      for (const code of this.input.takePressed()) {
+        if (code === 'Mouse0') this.shop.click();
+        else this.shop.key(code);
+      }
+      this.input.takeWheel();
+      return;
+    }
     // 지휘 휠: G를 누르고 있는 동안 시점은 고정, 마우스는 명령 선택에 사용
     const canCommand = agent?.alive && !agent.lockpick && this.input.active;
     const gDown = canCommand && this.input.isDown('KeyG');
@@ -252,15 +264,22 @@ export class PlayerController {
       else if (code === 'KeyF') this.queue.interact = true;
       else if (code === 'KeyR') this.queue.reload = true;
       else if (code === 'Mouse1' || code === 'KeyH') this.queue.report = true;
-      else if (digit === 1) this.queue.switchTo = 'rifle';
-      else if (digit === 2) this.queue.switchTo = 'pistol';
+      else if (digit === 1 && agent?.primary) this.queue.switchTo = agent.primary;
+      else if (digit === 2 && agent?.secondary) this.queue.switchTo = agent.secondary;
       else if (digit === 3) this.queue.switchTo = 'knife';
     }
     const w = this.input.takeWheel();
     if (w && agent && !agent.lockpick) {
-      const order = ['rifle', 'pistol', 'knife'];
-      this.queue.switchTo = order[(order.indexOf(agent.weapon) + (w > 0 ? 1 : 2)) % 3];
+      // 가진 무기만 돌아가며 (주무기 → 보조무기 → 칼)
+      const order = [agent.primary, agent.secondary, 'knife'].filter(Boolean);
+      const i = Math.max(0, order.indexOf(agent.weapon));
+      this.queue.switchTo = order[(i + (w > 0 ? 1 : order.length - 1)) % order.length];
     }
+  }
+
+  // 상점에서 고른 것 (틱마다 하나씩 시뮬레이션으로)
+  buy(item) {
+    this.queue.buys.push(item);
   }
 
   getIntent(match, agent) {
@@ -276,8 +295,8 @@ export class PlayerController {
       i.jump = inp.isDown('Space');
       i.crouch = inp.isDown('ControlLeft') || inp.isDown('ControlRight');
       i.lean = (inp.isDown('KeyV') ? 1 : 0) - (inp.isDown('KeyZ') ? 1 : 0);
-      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen;
-      i.ads = (inp.buttons & 4) !== 0;
+      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen && !this.shop?.isOpen;
+      i.ads = (inp.buttons & 4) !== 0 && !this.shop?.isOpen;
     }
     const q = this.queue;
     i.patch = q.patch;
@@ -287,7 +306,8 @@ export class PlayerController {
     i.card = q.cards.length ? q.cards.shift() : -1;
     i.command = q.command;
     i.report = q.report;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false };
+    i.buy = q.buys.length ? q.buys.shift() : null;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys };
     return i;
   }
 }

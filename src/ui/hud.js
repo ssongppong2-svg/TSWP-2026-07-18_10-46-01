@@ -1,8 +1,9 @@
 import { TEAM_INFO, TEAMS, BOMB, ULT } from '../sim/constants.js';
 import { LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
 import { COMMANDS } from '../client/input.js';
-import { PATCH_ICONS, WEAPON_ICONS } from './icons.js';
+import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
+import { money } from './shop.js';
 
 const el = (tag, cls, html = '') => {
   const e = document.createElement(tag);
@@ -18,13 +19,11 @@ const fmtTime = (s) => {
 const pad = (n) => String(n).padStart(2, '0');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// 탄창 무게로 느끼는 대략적인 양 / 몸 상태 (정확한 숫자는 보여 주지 않음)
-const magText = (f) => (f <= 0 ? '비었음' : f < 0.25 ? '거의 없음' : f < 0.55 ? '절반 이하' : f < 0.9 ? '절반 이상' : '가득');
-const hpText = (hp) => (hp >= 80 ? '이상 없음' : hp >= 50 ? '경상' : hp >= 25 ? '중상' : '위독');
-
 const ORDER_NAME = { regroup: '집결', hold: '위치 사수', move: '지정 지점 이동', A: 'A 목표', B: 'B 목표' };
+const STREAK_NAME = ['', '처치', '2연속 처치', '3연속 처치', '4연속 처치', '에이스'];
 
-// 경기 중 화면: 바디캠처럼 최소한만 표시 (적 정보 없음, 체력·탄약 숫자 없음)
+// 경기 중 화면 (발로란트식): 위 점수판·생존 인원, 왼쪽 위 미니맵, 오른쪽 위 처치 기록,
+// 아래 체력·방탄 / 포스 패치 / 탄약, 가운데 조준점·명중 표시
 export class Hud {
   constructor(root, match, localId, settings = {}) {
     this.match = match;
@@ -33,101 +32,126 @@ export class Hud {
     this.root = el('div', 'hud');
     root.appendChild(this.root);
     const me = match.agentById(localId);
-    this.myTeam = me.team;
-    const mates = match.agents.filter((a) => a.team === me.team);
-    const callsign = `${TEAM_INFO[me.team].code.slice(0, 1)}-${pad(mates.indexOf(me) + 1)}`;
+    this.squad = me.squad;
     const mapName = match.map.def.nameEn ?? match.map.name;
 
     this.root.innerHTML = `
       <div class="bodycam">
         <div class="bc-rec"><i></i>REC</div>
         <div class="bc-line bc-time"></div>
-        <div class="bc-line">AX-7 BODYCAM · ${callsign} · ${TEAM_INFO[me.team].name} · ${esc(mapName)}</div>
+        <div class="bc-line">AX-7 BODYCAM · ${esc(me.name)} · ${esc(mapName)}</div>
       </div>
-      <div class="hud-top">
-        <div class="tb-team tb-${me.team}"><span class="tb-name">${TEAM_INFO[me.team].name}</span><div class="pips"></div></div>
-        <div class="clock">
-          <div class="clock-time">2:00</div>
-          <div class="bombs">
-            <div class="bomb-pill" data-bomb="A"><b>A</b><i></i></div>
-            <div class="bomb-pill" data-bomb="B"><b>B</b><i></i></div>
+      <div class="vh-top">
+        <div class="vh-side ally"><div class="vh-roster"></div><b class="vh-score">0</b></div>
+        <div class="vh-mid">
+          <div class="vh-clock">2:00</div>
+          <div class="vh-sub"></div>
+          <div class="vh-spikes">
+            <div class="spike" data-bomb="A">${GEAR_ICONS.spike}<b>A</b><i></i></div>
+            <div class="spike" data-bomb="B">${GEAR_ICONS.spike}<b>B</b><i></i></div>
           </div>
         </div>
+        <div class="vh-side enemy"><b class="vh-score">0</b><div class="vh-roster"></div></div>
       </div>
-      <div class="objective"><small>임무</small><span></span></div>
-      <div class="crosshair"><b></b></div>
+      <div class="scope"><i class="sc-h"></i><i class="sc-v"></i><i class="sc-dot"></i></div>
+      <div class="vh-minimap"><canvas></canvas></div>
+      <div class="vh-feed"></div>
+      <div class="crosshair"><i class="ch-dot"></i><i class="ch-l"></i><i class="ch-r"></i><i class="ch-t"></i><i class="ch-b"></i></div>
+      <div class="hitmarker"><i></i><i></i><i></i><i></i></div>
+      <div class="vh-dmg"></div>
       <div class="center-prompt"></div>
       <div class="exposed">위치 노출 · 적 무게 감지기</div>
-      <div class="countdown"><small>교전 개시까지</small><b></b></div>
+      <div class="vh-round"><small class="vr-kicker"></small><div class="vr-title"></div><div class="vr-sub"></div></div>
       <div class="banner"><div class="banner-title"></div><div class="banner-sub"></div></div>
       <div class="comms">
         <div class="order"><small>현재 지시</small><b>자율 교전</b></div>
         <div class="radio-log"></div>
       </div>
-      <div class="hud-bottom">
-        <div class="patch-bar"></div>
+      <div class="vh-killbanner"><div class="kb-icons"></div><b class="kb-text"></b></div>
+      <div class="vh-buyhint"><kbd>B</kbd> 상점 열기 <span class="bh-money">${GEAR_ICONS.credit}<b></b></span></div>
+      <div class="vh-vitals">
+        <div class="vh-armor"><span class="va-icon"></span><b>0</b></div>
+        <div class="vh-hp"><b>100</b><div class="vh-hpbar"><i></i></div></div>
       </div>
-      <div class="weapon-box">
-        <div class="amp-badge">합력 강화 중</div>
-        <div class="wpn-flash"><span class="wname"></span></div>
-        <div class="inspect">
-          <div><small>탄창</small><b class="ins-mag"></b></div>
-          <div><small>예비</small><b class="ins-res"></b></div>
-          <div><small>상태</small><b class="ins-hp"></b></div>
-        </div>
+      <div class="hud-bottom"><div class="patch-bar"></div></div>
+      <div class="vh-ammo">
+        <div class="amp-badge">합력 강화</div>
+        <div class="vh-money">${GEAR_ICONS.credit}<b></b></div>
+        <div class="vh-mag"><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
+        <div class="vh-wname"></div>
       </div>
-      <div class="hint-keys"><kbd>G</kbd> 지휘 <kbd>휠 클릭</kbd> 적 보고 <kbd>T</kbd> 탄창 확인 <kbd>M</kbd> 작전 지도</div>
+      <div class="hint-keys"><kbd>B</kbd> 상점 <kbd>1·2·3</kbd> 무기 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 점수</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
       <div class="cmd-wheel"></div>
-      <div class="tac-map"><div class="tm-head"><b>작전 지도</b><span>${esc(match.map.name)} · 적 위치 정보 없음 · ? 소리 보고 · ! 목격 보고</span></div><canvas></canvas></div>
+      <div class="tac-map"><div class="tm-head"><b>작전 지도</b><span>${esc(match.map.name)} · 붉은 점: 아군이 보고 있는 적 · ? 소리 보고 · ! 목격 보고</span></div><canvas></canvas></div>
     `;
     const $ = (s) => this.root.querySelector(s);
     this.$ = $;
     this.els = {
+      bodycam: $('.bodycam'),
       bcTime: $('.bc-time'),
-      time: $('.clock-time'),
-      clock: $('.clock'),
-      pills: Object.fromEntries([...this.root.querySelectorAll('.bomb-pill')].map((p) => [p.dataset.bomb, p])),
-      pips: $('.tb-team .pips'),
-      objective: $('.objective span'),
+      top: $('.vh-top'),
+      allyRoster: $('.vh-side.ally .vh-roster'),
+      enemyRoster: $('.vh-side.enemy .vh-roster'),
+      allyScore: $('.vh-side.ally .vh-score'),
+      enemyScore: $('.vh-side.enemy .vh-score'),
+      clock: $('.vh-clock'),
+      sub: $('.vh-sub'),
+      spikes: Object.fromEntries([...this.root.querySelectorAll('.spike')].map((p) => [p.dataset.bomb, p])),
+      feed: $('.vh-feed'),
       crosshair: $('.crosshair'),
+      hitmarker: $('.hitmarker'),
+      dmg: $('.vh-dmg'),
       prompt: $('.center-prompt'),
       exposed: $('.exposed'),
-      countdown: $('.countdown'),
-      countNum: $('.countdown b'),
+      round: $('.vh-round'),
+      roundKicker: $('.vr-kicker'),
+      roundTitle: $('.vr-title'),
+      roundSub: $('.vr-sub'),
       banner: $('.banner'),
       bannerTitle: $('.banner-title'),
       bannerSub: $('.banner-sub'),
+      killbanner: $('.vh-killbanner'),
+      kbIcons: $('.kb-icons'),
+      kbText: $('.kb-text'),
+      buyhint: $('.vh-buyhint'),
+      buyMoney: $('.vh-buyhint .bh-money b'),
+      armor: $('.vh-armor'),
+      armorIcon: $('.va-icon'),
+      armorNum: $('.vh-armor b'),
+      hp: $('.vh-hp'),
+      hpNum: $('.vh-hp b'),
+      hpBar: $('.vh-hpbar i'),
       patchBar: $('.patch-bar'),
       order: $('.order'),
       orderText: $('.order b'),
       radioLog: $('.radio-log'),
-      wpnFlash: $('.wpn-flash'),
-      wname: $('.wname'),
-      inspect: $('.inspect'),
-      insMag: $('.ins-mag'),
-      insRes: $('.ins-res'),
-      insHp: $('.ins-hp'),
       amp: $('.amp-badge'),
+      money: $('.vh-money'),
+      moneyNum: $('.vh-money b'),
+      mag: $('.am-mag'),
+      res: $('.am-res'),
+      wname: $('.vh-wname'),
+      ammo: $('.vh-ammo'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
       wheel: $('.cmd-wheel'),
       tacMap: $('.tac-map'),
       hint: $('.hint-keys'),
+      scope: $('.scope'),
     };
-    this.els.objective.textContent = TEAM_INFO[this.myTeam].goal;
-    this.root.classList.add(`team-${this.myTeam}`);
 
-    // 아군 생존 표시 (적은 표시하지 않음)
-    for (const a of mates) {
-      const p = el('i', 'pip');
-      p.dataset.id = a.id;
+    // 위 점수판의 요원 칸 (내 분대 왼쪽, 상대 분대 오른쪽)
+    this.rosterEls = new Map();
+    for (const a of match.agents) {
+      const ally = a.squad === this.squad;
+      const p = el('i', `rp ${a.id === localId ? 'me' : ''}`, `<span>${esc(a.name.slice(0, 1))}</span>`);
       p.title = a.name;
-      if (a.id === localId) p.classList.add('me');
-      this.els.pips.appendChild(p);
+      (ally ? this.els.allyRoster : this.els.enemyRoster).appendChild(p);
+      this.rosterEls.set(a.id, p);
     }
 
     // C·Q(일반) E(특수) X(필살) 개인 장착 슬롯
@@ -158,14 +182,18 @@ export class Hud {
     }).join('')}`;
     this.wheelItems = [...this.els.wheel.querySelectorAll('.cw-item')];
 
+    this.miniMap = new TacticalMap(this.$('.vh-minimap canvas'), match, localId, { scale: 5, mini: true });
     this.tacMap = new TacticalMap(this.els.tacMap.querySelector('canvas'), match, localId, { scale: Math.max(7, Math.min(12, Math.floor((window.innerHeight - 180) / match.map.rows))) });
     this.cache = {};
     this.bannerT = 0;
     this.bannerQueue = [];
+    this.roundT = 0;
     this.toastT = 0;
     this.clockT = 0;
-    this.wpnT = 0;
-    this.hintT = 14;
+    this.miniT = 0;
+    this.hitT = 0;
+    this.killT = 0;
+    this.hintT = 16;
     this.shownConcepts = new Set();
   }
 
@@ -175,9 +203,68 @@ export class Hud {
     fn(value);
   }
 
+  // 작은 알림 (패치·경보 등)
   banner(title, sub = '', kind = '') {
     this.bannerQueue.push({ title, sub, kind });
     if (this.bannerQueue.length > 3) this.bannerQueue.shift();
+  }
+
+  // 화면 가운데 큰 알림 (라운드 시작·승리·패배·공수 교대)
+  roundBanner(kicker, title, sub = '', kind = 'info', time = 2.6) {
+    const E = this.els;
+    E.roundKicker.textContent = kicker;
+    E.roundTitle.textContent = title;
+    E.roundSub.textContent = sub;
+    E.round.dataset.kind = kind;
+    E.round.classList.remove('show');
+    void E.round.offsetWidth;
+    E.round.classList.add('show');
+    this.roundT = time;
+  }
+
+  // 처치 기록 (오른쪽 위)
+  killFeed({ killer, victim, weapon, headshot }) {
+    const me = this.match.agentById(this.localId);
+    const side = (a) => (a?.squad === this.squad ? 'ally' : 'enemy');
+    const row = el('div', `kf-row ${killer?.id === me.id || victim.id === me.id ? 'mine' : ''}`);
+    const wIcon = WEAPON_ICONS[weapon] ?? '';
+    row.innerHTML = `${killer ? `<b class="${side(killer)}">${esc(killer.name)}</b>` : ''}<span class="kf-w">${wIcon}</span>${headshot ? `<span class="kf-h">${GEAR_ICONS.head}</span>` : ''}<b class="${side(victim)}">${esc(victim.name)}</b>`;
+    this.els.feed.appendChild(row);
+    setTimeout(() => row.classList.add('out'), 6000);
+    setTimeout(() => row.remove(), 6500);
+    while (this.els.feed.children.length > 6) this.els.feed.firstChild.remove();
+  }
+
+  // 명중 표시: kind = hit / head / kill
+  hitmark(kind) {
+    const h = this.els.hitmarker;
+    h.dataset.kind = kind;
+    h.classList.remove('show');
+    void h.offsetWidth;
+    h.classList.add('show');
+    this.hitT = kind === 'kill' ? 0.45 : 0.22;
+  }
+
+  // 내가 처치했을 때 아래 가운데 처치 표시 (연속 처치일수록 칸이 늘어남)
+  killStreak(n, headshot) {
+    const E = this.els;
+    const k = Math.max(1, Math.min(5, n));
+    E.kbIcons.innerHTML = Array.from({ length: k }, (_, i) => `<i class="${i === k - 1 ? 'new' : ''}"></i>`).join('');
+    E.kbText.textContent = headshot && k === 1 ? '헤드샷' : STREAK_NAME[k];
+    E.killbanner.dataset.n = k;
+    E.killbanner.classList.remove('show');
+    void E.killbanner.offsetWidth;
+    E.killbanner.classList.add('show');
+    this.killT = 1.8;
+  }
+
+  // 맞은 방향 표시 (angle: 화면 기준, 0 = 정면, 시계 방향 +)
+  damageFrom(angle) {
+    const d = el('i', 'dmg-arc');
+    d.style.transform = `rotate(${angle}rad)`;
+    this.els.dmg.appendChild(d);
+    setTimeout(() => d.remove(), 1100);
+    while (this.els.dmg.children.length > 4) this.els.dmg.firstChild.remove();
   }
 
   // 무전 기록 (같은 팀만)
@@ -216,61 +303,81 @@ export class Hud {
     this.toastT = 7;
   }
 
-  update(dt, { viewAgent, spectating, inspect = 0, showMap = false, wheel = null }) {
+  update(dt, { viewAgent, spectating, showMap = false, wheel = null, shopOpen = false }) {
     const m = this.match;
     const me = m.agentById(this.localId);
     const a = viewAgent ?? me;
     const E = this.els;
+    const enemySquad = m.agents.find((x) => x.squad !== this.squad)?.squad;
 
-    // 바디캠 시각
-    this.clockT -= dt;
-    if (this.clockT <= 0) {
-      this.clockT = 0.5;
-      const d = new Date();
-      const sec = Math.floor(Math.max(0, m.time - (m.liveAt ?? 0)));
-      E.bcTime.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} · T+${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+    // 바디캠 시각 (설정에서 켰을 때만) · 조준점 모양 (설정은 경기 중에도 바꿀 수 있음)
+    this.set('bodycam', !!this.settings.bodycam, (v) => E.bodycam.classList.toggle('show', v));
+    this.set('chStyle', this.settings.crosshair ?? 'cross', (v) => (E.crosshair.dataset.style = v));
+    if (this.settings.bodycam) {
+      this.clockT -= dt;
+      if (this.clockT <= 0) {
+        this.clockT = 0.5;
+        const d = new Date();
+        const sec = Math.floor(Math.max(0, m.time - (m.liveAt ?? 0)));
+        E.bcTime.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} · T+${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+      }
     }
 
-    // 시간과 폭탄 (폭탄 상태는 경보음·무전으로 알 수 있는 정보)
-    this.set('time', fmtTime(m.timeLeft), (v) => (E.time.textContent = v));
-    this.set('count', m.phase === 'prestart' ? Math.ceil(m.phaseT) : 0, (v) => {
-      E.countNum.textContent = v;
-      E.countdown.classList.toggle('show', v > 0);
-    });
+    // 점수·시간
+    this.set('sA', m.score?.[this.squad] ?? 0, (v) => (E.allyScore.textContent = v));
+    this.set('sE', m.score?.[enemySquad] ?? 0, (v) => (E.enemyScore.textContent = v));
+    const buying = m.phase === 'buy';
+    const clock = fmtTime(buying ? m.phaseT : m.timeLeft);
+    this.set('clock', clock, (v) => (E.clock.textContent = v));
+    let sub;
+    if (buying) sub = m.rounds ? `구매 단계 · 라운드 ${m.round}` : '작전 개시 대기';
+    else if (m.phase === 'roundEnd') sub = `라운드 ${m.round} 종료`;
+    else if (m.phase === 'ended') sub = '경기 종료';
+    else sub = m.rounds ? `라운드 ${m.round} · ${a.team === TEAMS.DEFUSE ? '공격' : '수비'}` : TEAM_INFO[me.team].name;
+    this.set('sub', sub, (v) => (E.sub.textContent = v));
     this.set('urgent', m.phase === 'live' && m.timeLeft <= 30, (v) => E.clock.classList.toggle('urgent', v));
+    this.set('buying', buying, (v) => E.top.classList.toggle('buying', v));
     for (const b of m.bombs) {
       const state = b.state === 'armed' && b.picker ? 'picking' : b.state;
-      this.set(`bomb${b.id}`, state, (v) => (E.pills[b.id].dataset.state = v));
-      this.set(`bombp${b.id}`, Math.round(b.progress * 20), (v) => E.pills[b.id].style.setProperty('--p', v / 20));
+      this.set(`bomb${b.id}`, state, (v) => (E.spikes[b.id].dataset.state = v));
+      this.set(`bombp${b.id}`, Math.round(b.progress * 20), (v) => E.spikes[b.id].style.setProperty('--p', v / 20));
     }
     for (const ag of m.agents) {
-      if (ag.team !== this.myTeam) continue;
-      this.set(`pip${ag.id}`, ag.alive, (v) => this.root.querySelector(`.pip[data-id="${ag.id}"]`)?.classList.toggle('dead', !v));
+      this.set(`rp${ag.id}`, ag.alive, (v) => this.rosterEls.get(ag.id)?.classList.toggle('dead', !v));
     }
 
-    // 무기: 바꿀 때만 잠깐 이름 표시
-    const w = WEAPONS[a.weapon];
-    this.set('wsel', a.weapon, () => {
-      E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`;
-      this.wpnT = 1.6;
+    // 체력·방탄 (관전 중이면 보고 있는 요원)
+    const hp = a.alive ? Math.max(0, Math.round(a.hp)) : 0;
+    this.set('hp', hp, (v) => {
+      E.hpNum.textContent = v;
+      E.hpBar.style.transform = `scaleX(${v / 100})`;
+      E.hp.dataset.level = v > 50 ? 'ok' : v > 25 ? 'mid' : 'bad';
     });
-    this.wpnT -= dt;
-    this.set('wflash', this.wpnT > 0 || (a.reloadT > 0 && !w.melee), (v) => E.wpnFlash.classList.toggle('show', v));
-    this.set('wreload', a.reloadT > 0 && !w.melee, (v) => E.wpnFlash.classList.toggle('reloading', v));
-    this.set('amp', a.ampT > 0 && a.weapon === 'rifle', (v) => E.amp.classList.toggle('show', v));
+    const armor = a.alive ? Math.round(a.armor ?? 0) : 0;
+    this.set('armor', armor, (v) => {
+      E.armorNum.textContent = v;
+      E.armor.classList.toggle('none', v <= 0);
+    });
+    this.set('armorKind', (a.armorMax ?? 0) > 25 ? 'heavy' : (a.armorMax ?? 0) > 0 ? 'light' : 'none', (v) => (E.armorIcon.innerHTML = GEAR_ICONS[v] ?? GEAR_ICONS.light));
 
-    // 탄창 확인 (T): 대략적인 양과 몸 상태만
+    // 탄약·무기
+    const w = WEAPONS[a.weapon];
     const ws = a.weapons[a.weapon];
-    const insOn = inspect > 0.55 && a.alive;
-    this.set('insOn', insOn, (v) => E.inspect.classList.toggle('show', v));
-    if (insOn) {
-      this.set('insMag', w.melee ? '—' : magText(ws.mag / w.magSize), (v) => (E.insMag.textContent = v));
-      this.set('insRes', w.melee ? '—' : `${Math.ceil(ws.reserve / w.magSize)}개`, (v) => (E.insRes.textContent = v));
-      this.set('insHp', hpText(a.hp), (v) => {
-        E.insHp.textContent = v;
-        E.insHp.dataset.level = a.hp >= 80 ? 'ok' : a.hp >= 50 ? 'mid' : 'bad';
-      });
-    }
+    this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`));
+    this.set('mag', w.melee ? '—' : ws?.mag ?? 0, (v) => {
+      E.mag.textContent = v;
+      E.mag.classList.toggle('low', !w.melee && typeof v === 'number' && v <= Math.ceil(w.magSize * 0.25));
+    });
+    this.set('res', w.melee ? '' : `/ ${ws?.reserve ?? 0}`, (v) => (E.res.textContent = v));
+    this.set('reloading', a.reloadT > 0 && !w.melee, (v) => E.ammo.classList.toggle('reloading', v));
+    this.set('amp', a.ampT > 0 && !w.melee, (v) => E.amp.classList.toggle('show', v));
+    const credits = me.credits ?? 0;
+    this.set('money', m.rounds ? money(credits) : '', (v) => {
+      E.moneyNum.textContent = v;
+      E.buyMoney.textContent = v;
+      E.money.classList.toggle('show', !!v);
+    });
+    this.set('buyhint', buying && m.rounds && me.alive && !shopOpen && !spectating, (v) => E.buyhint.classList.toggle('show', v));
 
     // 포스 패치 재사용 대기·필살 게이지
     if (!spectating) {
@@ -296,9 +403,13 @@ export class Hud {
       });
     }
 
-    // 조준점: 작은 점 하나 (설정에서 끌 수 있음), 정조준·해체 중에는 숨김
+    // 조준점: 정조준(저격 조준경)·해체·상점 중에는 숨김
     const chOff = this.settings.crosshair === 'off';
-    this.set('chHide', chOff || !!a.lockpick || !a.alive || a.adsT > 0.5 || wheel !== null, (v) => E.crosshair.classList.toggle('hide', v));
+    const scoped = !!w.scope && a.adsT > 0.5;
+    this.set('scope', a.alive && !!w.scope && a.adsT > 0.85, (v) => E.scope.classList.toggle('show', v));
+    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen), (v) => E.crosshair.classList.toggle('hide', v));
+    this.hitT -= dt;
+    if (this.hitT <= 0) E.hitmarker.classList.remove('show');
 
     // 상호작용 안내
     let prompt = '';
@@ -306,7 +417,7 @@ export class Hud {
       const near = m.bombs.find((b) => b.state === 'armed' && Math.hypot(a.pos.x - b.x, a.pos.z - b.z) <= BOMB.interactRange);
       if (near) {
         if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `폭탄 ${near.id} · 아군 해체 진행 중. 엄호.` : `<kbd>F</kbd> 폭탄 ${near.id} 해체 개시`;
-        else prompt = `폭탄 ${near.id} 구역 · 방어 유지`;
+        else prompt = `폭탄 ${near.id} · 방어 유지`;
       }
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';
@@ -337,7 +448,12 @@ export class Hud {
     this.set('wheelOpen', wheel !== null, (v) => E.wheel.classList.toggle('show', v));
     this.set('wheelSel', wheel, (v) => this.wheelItems.forEach((it, i) => it.classList.toggle('on', i === v)));
 
-    // 작전 지도 (M)
+    // 미니맵 (초당 20번) · 작전 지도 (M)
+    this.miniT -= dt;
+    if (this.miniT <= 0) {
+      this.miniT = 0.05;
+      this.miniMap.update(dt, a);
+    }
     this.set('map', showMap, (v) => E.tacMap.classList.toggle('show', v));
     if (showMap) this.tacMap.update(dt, a);
 
@@ -345,7 +461,7 @@ export class Hud {
     this.hintT -= dt;
     this.set('hint', this.hintT > 0 && m.phase !== 'ended', (v) => E.hint.classList.toggle('show', v));
 
-    // 배너
+    // 알림
     this.bannerT -= dt;
     if (this.bannerT <= 0 && this.bannerQueue.length) {
       const b = this.bannerQueue.shift();
@@ -357,6 +473,10 @@ export class Hud {
       E.banner.classList.add('show');
       this.bannerT = 2.2;
     } else if (this.bannerT <= 0) E.banner.classList.remove('show');
+    this.roundT -= dt;
+    if (this.roundT <= 0) E.round.classList.remove('show');
+    this.killT -= dt;
+    if (this.killT <= 0) E.killbanner.classList.remove('show');
 
     this.toastT -= dt;
     if (this.toastT <= 0) E.toast.classList.remove('show');
@@ -366,3 +486,4 @@ export class Hud {
     this.root.remove();
   }
 }
+

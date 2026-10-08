@@ -23,7 +23,10 @@ export function buildWorld(map, baseTex) {
   const tex = museum ? { ...baseTex, ...museumTextures() } : baseTex;
 
   // 비가 오면 모든 표면이 젖어 어둡고 매끈해짐 (등불이 바닥에 번져 반사)
-  const wet = map.weather === 'rain';
+  const wet = map.weather === 'rain' || map.weather === 'wet';
+  // 밝은 낮 조명 맵: 질감은 그대로 두고 표면 색을 밝게 (색 값 1 이상 = 질감을 밝힘)
+  const day = map.def.light === 'day' || map.def.light === 'museum';
+  const bright = (r, g, b) => new THREE.Color().setRGB(r, g, b);
 
   // ── 바닥
   tex.floor.repeat.set(map.width / 4, map.depth / 4);
@@ -41,7 +44,7 @@ export function buildWorld(map, baseTex) {
     roughness: museum ? 0.4 : wet ? 0.7 : 0.9,
     roughnessMap: puddles,
     metalness: 0.02,
-    color: museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
+    color: day ? (museum ? bright(1.0, 0.98, 0.94) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
   });
   withFloorMarkings(floorMat, buildFloorMarkings(map));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
@@ -86,7 +89,7 @@ export function buildWorld(map, baseTex) {
     bumpScale: museum ? 0.8 : 2.0,
     roughness: museum ? 0.82 : wet ? 0.74 : 0.93,
     metalness: 0.02,
-    color: museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
+    color: day ? (museum ? bright(1.12, 1.1, 1.05) : bright(1.75, 1.7, 1.62)) : museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
   });
   const wallMesh = new THREE.Mesh(sides.build(), wallMat);
   wallMesh.castShadow = true;
@@ -119,7 +122,7 @@ export function buildWorld(map, baseTex) {
     const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
     geo.translate(0, h / 2, 0);
     const rough = wet ? style.rough * 0.6 : style.rough;
-    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: rough, metalness: style.metal, color: wet ? '#b3b7bc' : '#ffffff' });
+    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: rough, metalness: style.metal, color: day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
     const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
     const mesh = new THREE.InstancedMesh(geo, [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
@@ -148,7 +151,7 @@ export function buildWorld(map, baseTex) {
 
   const lamps = addLamps(group, map);
   addDecor(group, map, museum);
-  group.add(buildSkyline(map));
+  group.add(buildSkyline(map, day));
   group.userData.lamps = lamps;
   return group;
 }
@@ -611,7 +614,7 @@ function addDecor(group, map, museum = false) {
 }
 
 // 맵 밖: 어두운 공장 건물 실루엣
-function buildSkyline(map) {
+function buildSkyline(map, day = false) {
   const g = new THREE.Group();
   const geo = new THREE.BoxGeometry(1, 1, 1);
   geo.translate(0, 0.5, 0);
@@ -635,7 +638,10 @@ function buildSkyline(map) {
   winTex.colorSpace = THREE.SRGBColorSpace;
   winTex.wrapS = winTex.wrapT = THREE.RepeatWrapping;
   winTex.repeat.set(2, 3);
-  const mat = new THREE.MeshStandardMaterial({ color: '#111418', roughness: 0.95, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 0.6 });
+  // 낮에는 창문 불빛 없이 밝은 회색 건물
+  const mat = day
+    ? new THREE.MeshStandardMaterial({ color: '#9aa6b2', roughness: 0.9 })
+    : new THREE.MeshStandardMaterial({ color: '#111418', roughness: 0.95, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 0.6 });
   const count = 40;
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   const m = new THREE.Matrix4();
@@ -648,7 +654,7 @@ function buildSkyline(map) {
     mesh.setMatrixAt(i, m);
   }
   g.add(mesh);
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 48), new THREE.MeshStandardMaterial({ color: '#16181b', roughness: 1 }));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 48), new THREE.MeshStandardMaterial({ color: day ? '#6c6a64' : '#16181b', roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   g.add(ground);

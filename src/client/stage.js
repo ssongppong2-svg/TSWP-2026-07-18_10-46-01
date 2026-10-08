@@ -38,11 +38,21 @@ export function detectQuality(renderer) {
   return 'medium';
 }
 
-// 날씨별 하늘·안개·달빛
+// 조명 (맵의 light, 없으면 날씨로): 하늘·안개·해(달)·하늘빛·노출·등불 세기
+// day = 밝은 낮 (발로란트처럼 선명하게), museum = 밝은 실내 조명, night·rain = 예전 야간
 const WEATHER = {
-  clear: { fog: ['#0b0e13', 16, 92], top: '#05070a', horizon: '#1a1d22', glow: '#3d2b1c', overcast: 0, moon: 0.6, hemi: 0.55 },
+  night: { fog: ['#0b0e13', 16, 92], top: '#05070a', horizon: '#1a1d22', glow: '#3d2b1c', overcast: 0, moon: 0.6, hemi: 0.55 },
   rain: { fog: ['#0a0c0f', 9, 64], top: '#07080a', horizon: '#15181c', glow: '#2a241e', overcast: 1, moon: 0.32, hemi: 0.5 },
+  day: {
+    fog: ['#bcd3e6', 60, 220], top: '#3d7fd0', horizon: '#cfe2f1', glow: '#ffe3b0', overcast: 0, moon: 3.0, hemi: 1.6,
+    sun: '#fff0d8', sky: '#d6e8ff', ground: '#8a7860', exposure: 1.1, env: 0.55, lamps: 0.15, sunDir: [0.45, 0.82, 0.35],
+  },
+  museum: {
+    fog: ['#e3ddd0', 60, 200], top: '#7aa9de', horizon: '#efe8da', glow: '#fff0cc', overcast: 0, moon: 2.4, hemi: 1.7,
+    sun: '#fff3e2', sky: '#fff7ec', ground: '#a08f78', exposure: 1.0, env: 0.6, lamps: 0.45, sunDir: [0.3, 0.9, -0.3],
+  },
 };
+WEATHER.clear = WEATHER.night;
 
 const SKY_VERT = /* glsl */ `
   varying vec3 vDir;
@@ -251,8 +261,24 @@ export class Stage {
   }
 
   applyWeather() {
-    const w = WEATHER[this.map.weather] ?? WEATHER.clear;
+    const w = WEATHER[this.map.def.light] ?? WEATHER[this.map.weather] ?? WEATHER.night;
     this.weather = w;
+    // 낮 조명: 해 색·방향·하늘빛·노출, 등불은 약하게 (빛 웅덩이·후광도 줄임)
+    this.moon.color.set(w.sun ?? '#8fa6c8');
+    this.hemi.color.set(w.sky ?? '#2c3647');
+    this.hemi.groundColor.set(w.ground ?? '#0d0b09');
+    this.moon.position.set(...(w.sunDir ?? [0.35, 0.75, -0.55])).normalize().multiplyScalar(80);
+    this.sky.material.uniforms.moonDir.value.copy(this.moon.position).normalize();
+    this.scene.environmentIntensity = w.env ?? 0.12;
+    if (this.renderer) this.renderer.toneMappingExposure = w.exposure ?? 1.2;
+    const lamp = w.lamps ?? 1;
+    for (const src of this.lamps?.sources ?? []) {
+      src.baseIntensity ??= src.intensity;
+      src.intensity = src.baseIntensity * lamp;
+    }
+    const pools = this.world?.getObjectByName('lampPools');
+    if (pools) pools.material.opacity = lamp;
+    this.dayLight = lamp < 1;
     this.scene.fog.color.set(w.fog[0]);
     this.scene.fog.near = w.fog[1];
     this.scene.fog.far = w.fog[2];
@@ -289,7 +315,7 @@ export class Stage {
   createRenderer() {
     const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.2;
+    r.toneMappingExposure = this.weather?.exposure ?? 1.2;
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.domElement.className = 'game-canvas';
     r.domElement.tabIndex = 0;
@@ -323,7 +349,7 @@ export class Stage {
     }
     this.lightRig.setBudget(q.points, q.muzzles);
     // 블룸이 없을 때는 등 렌즈에 가벼운 후광을 붙임
-    if (this.lamps?.halos) this.lamps.halos.visible = !q.bloom;
+    if (this.lamps?.halos) this.lamps.halos.visible = !q.bloom && !this.dayLight;
     if (this.rain && this.rain.count !== q.rain) this.applyWeather();
     this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
@@ -437,7 +463,7 @@ export class Stage {
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
   setLens({ damage = 0, pulse = 0, flash = 0, blur = 0 } = {}) {
     const u = this.bodycam.uniforms;
-    const on = this.settings.bodycam !== false;
+    const on = !!this.settings.bodycam;
     u.distortion.value = on ? 0.16 : 0;
     u.chroma.value = on ? 0.0025 : 0;
     u.grain.value = on ? 0.03 : 0.01;

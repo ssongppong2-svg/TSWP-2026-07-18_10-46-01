@@ -4,13 +4,15 @@
 // 참가자 → 방장: 입력 (초당 30번). 계속 누르는 키는 상태로, 한 번 누르는 동작은 횟수(카운터)로 보내 빠지지 않게 함
 //
 // 이 파일은 화면·네트워크와 무관한 순수 변환 코드라서 Node 테스트로 검증한다.
-import { emptyIntent } from '../sim/agent.js';
+import { emptyIntent, freshAmmo } from '../sim/agent.js';
 import { PROJECTILE } from '../sim/constants.js';
 import { WEAPONS } from '../sim/data.js';
 
-export const PROTOCOL = 1;
-const WEAP = ['rifle', 'pistol', 'knife'];
-const PHASES = ['prestart', 'live', 'ended'];
+export const PROTOCOL = 2;
+const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
+const ITEMS = [...WEAP, 'light', 'heavy']; // 상점에서 사는 것
+const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
+const REASONS = ['폭탄 2기 해체 완료', '해체팀 전원 제압', '포스팀 전원 제압', '제한 시간 종료 — 폭탄 폭발'];
 const BOMB_STATES = ['armed', 'defused', 'exploded'];
 const TEAMS_ = ['defuse', 'force'];
 const IMPACT_KINDS = ['surface', 'flesh', 'shield', 'debris'];
@@ -109,20 +111,25 @@ export class HostSync {
     // 오래된 사건은 버림 (참가자는 여러 스냅숏 중 하나만 받아도 빠지지 않도록 keep초 동안 반복해서 보냄)
     this.events = this.events.filter((e) => m.time - e.t <= this.keep);
     const A = m.agents.map((a) => {
-      const flags = (a.alive ? 1 : 0) | (a.onGround ? 2 : 0) | (a.mired ? 4 : 0) | (a.slippery ? 8 : 0) | (a.ads ? 16 : 0);
+      const flags = (a.alive ? 1 : 0) | (a.onGround ? 2 : 0) | (a.mired ? 4 : 0) | (a.slippery ? 8 : 0) | (a.ads ? 16 : 0) | (a.team === 'force' ? 32 : 0);
       return [
         r2(a.pos.x), r2(a.pos.y), r2(a.pos.z), r1(a.vel.x), r1(a.vel.y), r1(a.vel.z), r3(a.yaw), r3(a.pitch),
         Math.max(0, Math.round(a.hp)), flags, WEAP.indexOf(a.weapon), r2(a.crouch), r2(a.lean ?? 0), r2(a.leanOffset ?? 0),
         r2(a.adsT), r2(a.reloadT), r2(a.swapT), r2(Math.min(9, a.sinceShot)), r2(a.meleeCd), r2(a.ampT),
         r2(Math.max(0, a.revealedUntil - m.time)), a.held?.zoneId ?? 0, a.lockpick ? (a.lockpick.bombId === 'A' ? 1 : 2) : 0,
+        Math.round(a.armor ?? 0), r2(Math.max(-1, Math.min(9, m.time - a.spottedT))),
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
     const H = {};
     m.agents.forEach((a, i) => {
       if (!a.isPlayer && !a.human) return;
+      const ammo = (id) => (id ? [WEAP.indexOf(id), a.weapons[id]?.mag ?? 0, a.weapons[id]?.reserve ?? 0] : [-1, 0, 0]);
       H[i] = {
-        m: [a.weapons.rifle.mag, a.weapons.rifle.reserve, a.weapons.pistol.mag, a.weapons.pistol.reserve],
+        m: [...ammo(a.primary), ...ammo(a.secondary)],
+        $: a.credits ?? 0,
+        am: a.armorMax ?? 0,
+        bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
         u: Math.round(a.ult),
         lp: a.lockpick?.kind === 'puzzle' ? { b: a.lockpick.bombId, z: a.lockpick.puzzle, s: a.lockpick.selected, t: r2(a.lockpick.turnT) } : 0,
@@ -132,10 +139,13 @@ export class HostSync {
     });
     const snap = {
       n: this.n,
-      M: [r2(m.time), PHASES.indexOf(m.phase), r2(m.phaseT), r2(m.timeLeft), r2(m.liveAt), m.winner ? TEAMS_.indexOf(m.winner) : -1],
+      M: [
+        r2(m.time), PHASES.indexOf(m.phase), r2(m.phaseT), r2(m.timeLeft), r2(m.liveAt), m.winner ? TEAMS_.indexOf(m.winner) : -1,
+        m.round ?? 1, m.score?.defuse ?? 0, m.score?.force ?? 0, m.roundWinner ? TEAMS_.indexOf(m.roundWinner) : -1, REASONS.indexOf(m.roundReason), m.swapped ? 1 : 0,
+      ],
       A,
       H,
-      B: m.bombs.map((b) => [BOMB_STATES.indexOf(b.state), b.picker ? this.idx.get(b.picker) : -1, r2(b.progress)]),
+      B: m.bombs.map((b) => [BOMB_STATES.indexOf(b.state), b.picker ? this.idx.get(b.picker) : -1, r2(b.progress), r2(b.x), r2(b.z)]),
       Z: m.zones.map((z) => this.enc(z, 1)),
       V: m.veils.map((v) => this.enc(v, 1)),
       S: m.shields.map((s) => this.enc(s, 1)),
@@ -145,7 +155,10 @@ export class HostSync {
       E: this.events.map((e) => [e.s, e.p]),
     };
     if (m.phase === 'ended') snap.R = m.reason;
-    if (withStats) snap.T = m.agents.map((a) => [a.stats.kills, a.stats.deaths, a.stats.damage, a.stats.defuses, a.stats.patchUses, a.stats.headshots]);
+    if (withStats) {
+      snap.T = m.agents.map((a) => [a.stats.kills, a.stats.deaths, a.stats.damage, a.stats.defuses, a.stats.patchUses, a.stats.headshots, a.stats.assists ?? 0, a.credits ?? 0]);
+      snap.Y = (m.history ?? []).map((h) => [TEAMS_.indexOf(h.squad), TEAMS_.indexOf(h.side), REASONS.indexOf(h.reason)]);
+    }
     // 크기 제한: 넘으면 오래된 사건부터 덜어냄
     while (snap.E.length && bytes(snap) > this.maxBytes) snap.E.shift();
     return snap;
@@ -169,7 +182,7 @@ export class ClientSync {
     const m = this.match;
     if (!snap || snap.n <= this.lastN) return false;
     this.lastN = snap.n;
-    const [time, ph, phaseT, timeLeft, liveAt, win] = snap.M;
+    const [time, ph, phaseT, timeLeft, liveAt, win, round, sd, sf, rw, rr, swapped] = snap.M;
     // 시계: 크게 어긋나면 맞추고, 작으면 조금씩 따라감
     if (Math.abs(time - m.time) > 0.3) m.time = time;
     else m.time += (time - m.time) * 0.2;
@@ -179,15 +192,25 @@ export class ClientSync {
     m.liveAt = liveAt;
     m.winner = win >= 0 ? TEAMS_[win] : null;
     if (snap.R) m.reason = snap.R;
+    if (round != null) {
+      m.round = round;
+      m.score = { defuse: sd, force: sf };
+      m.roundWinner = rw >= 0 ? TEAMS_[rw] : null;
+      m.roundReason = REASONS[rr] ?? '';
+      m.swapped = !!swapped;
+    }
 
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
       a.hp = hp;
+      a.armor = armor ?? 0;
+      a.team = flags & 32 ? 'force' : 'defuse';
+      a.spottedT = spotted >= 0 ? m.time - spotted : -99;
       a.mired = !!(flags & 4);
       a.slippery = !!(flags & 8);
       a.ampT = ampT;
@@ -224,14 +247,30 @@ export class ClientSync {
     const h = snap.H?.[this.localIdx];
     if (h) {
       const a = this.local;
-      const [rm, rr, pm, pr] = h.m;
-      // 탄약: 쏘는 중이 아니면 방장 값으로 맞춤 (미리 쏜 것과 1~2발 차이는 허용)
-      if (a.sinceShot > 0.35 && a.reloadT <= 0) {
-        a.weapons.rifle.mag = rm;
-        a.weapons.pistol.mag = pm;
+      const [pi, pm, pr, si, sm, sr] = h.m;
+      const prim = WEAP[pi] ?? null, sec = WEAP[si] ?? null;
+      // 가진 총이 바뀌었으면 (상점·새 라운드) 방장이 쥐여 준 총으로
+      if (prim !== a.primary || sec !== a.secondary) {
+        const keep = { knife: { mag: 0, reserve: 0 } };
+        for (const id of [prim, sec]) if (id) keep[id] = a.weapons[id] ?? freshAmmo(id);
+        a.weapons = keep;
+        a.primary = prim;
+        a.secondary = sec;
+        const hw = WEAP[snap.A[this.localIdx]?.[10]];
+        a.weapon = hw && a.weapons[hw] ? hw : prim ?? sec ?? 'knife';
+        a.reloadT = 0;
       }
-      a.weapons.rifle.reserve = rr;
-      a.weapons.pistol.reserve = pr;
+      // 탄약: 쏘는 중이 아니면 방장 값으로 맞춤 (미리 쏜 것과 1~2발 차이는 허용)
+      const setAmmo = (id, mag, reserve) => {
+        if (!id || !a.weapons[id]) return;
+        if (a.sinceShot > 0.35 && a.reloadT <= 0) a.weapons[id].mag = mag;
+        a.weapons[id].reserve = reserve;
+      };
+      setAmmo(prim, pm, pr);
+      setAmmo(sec, sm, sr);
+      a.credits = h.$ ?? 0;
+      a.armorMax = h.am ?? 0;
+      a.bought = (h.bt ?? []).map((k) => ({ item: ITEMS[k] }));
       h.pc.forEach((p, i) => {
         const mine = a.patches[i];
         if (!mine || !p) return;
@@ -245,9 +284,13 @@ export class ClientSync {
       } else if (a.lockpick) a.lockpick = null;
     }
 
-    snap.B.forEach(([st, pk, pr], i) => {
+    snap.B.forEach(([st, pk, pr, bx, bz], i) => {
       const b = m.bombs[i];
       if (!b) return;
+      if (bx != null) {
+        b.x = bx;
+        b.z = bz;
+      }
       b.state = BOMB_STATES[st];
       b.picker = pk >= 0 ? m.agents[pk]?.id ?? null : null;
       b.progress = pr;
@@ -264,8 +307,11 @@ export class ClientSync {
     });
     if (snap.T) snap.T.forEach((st, i) => {
       const a = m.agents[i];
-      if (a) [a.stats.kills, a.stats.deaths, a.stats.damage, a.stats.defuses, a.stats.patchUses, a.stats.headshots] = st;
+      if (!a) return;
+      [a.stats.kills, a.stats.deaths, a.stats.damage, a.stats.defuses, a.stats.patchUses, a.stats.headshots, a.stats.assists] = st;
+      if (a !== this.local && st[7] != null) a.credits = st[7];
     });
+    if (snap.Y) m.history = snap.Y.map(([q, sd2, rs], i) => ({ round: i + 1, squad: TEAMS_[q], side: TEAMS_[sd2], reason: REASONS[rs] ?? '' }));
 
     // 새 사건 재생 (이미 본 번호는 건너뜀)
     for (const [seq, p] of snap.E) {
@@ -280,7 +326,8 @@ export class ClientSync {
   reconcile(a, x, y, z, vx, vy, vz) {
     const dx = x - a.pos.x, dy = y - a.pos.y, dz = z - a.pos.z;
     const err = Math.hypot(dx, dy, dz);
-    if (!a.alive || err > 1.6 || a.held) {
+    if (!a.alive || err > 1.6 || a.held || this.snapLocal) {
+      this.snapLocal = false;
       a.pos.x = a.prev.x = x;
       a.pos.y = a.prev.y = y;
       a.pos.z = a.prev.z = z;
@@ -362,6 +409,16 @@ export class ClientSync {
         const e = this.dec(p[2]) ?? {};
         if (PREDICTED.has(type) && mine(e.agent)) return;
         if (type === 'kill' && e.victim) e.victim.alive = false;
+        if (type === 'roundPrep') {
+          // 새 라운드: 남아 있던 총알 궤적 등 지우고, 모두 살아남 (위치는 다음 스냅숏이 맞춰 줌)
+          m.projectiles = [];
+          for (const a of m.agents) {
+            a.alive = true;
+            a.deadT = 0;
+            a.lockpick = null;
+          }
+          this.snapLocal = true;
+        }
         m.emit(type, e);
         return;
       }
@@ -416,6 +473,8 @@ export class InputRecorder {
     this.c = Array(ACT_COUNT).fill(0);
     this.cards = [];
     this.cardN = 0;
+    this.buys = [];
+    this.buyN = 0;
     this.seq = 0;
     this.cmd = null;
     this.latest = null;
@@ -445,6 +504,11 @@ export class InputRecorder {
       if (a.lockpick?.kind === 'puzzle') a.lockpick.selected[i.card] = !a.lockpick.selected[i.card];
       this.onCard?.(this.seq + 1);
     }
+    if (i.buy) {
+      this.buyN++;
+      this.buys.push([this.buyN, ITEMS.indexOf(i.buy)]);
+      if (this.buys.length > 6) this.buys.shift();
+    }
     const weapon = i.switchTo ?? a.weapon;
     this.latest = {
       s: ++this.seq,
@@ -458,6 +522,7 @@ export class InputRecorder {
       a: [...this.c],
       cm: this.cmd,
       cd: this.cards.map((c) => [...c]),
+      by: this.buys.map((c) => [...c]),
     };
     // 이 화면에서는 이동·사격·재장전·무기 교체만 미리 보여 줌
     i.interact = false;
@@ -465,6 +530,7 @@ export class InputRecorder {
     i.command = null;
     i.report = false;
     i.card = -1;
+    i.buy = null; // 구매는 방장이 처리
     return i;
   }
 }
@@ -476,6 +542,7 @@ export class RemoteController {
     this.onAck = onAck;
     this.seen = null;
     this.cardSeen = 0;
+    this.buySeen = 0;
   }
 
   getIntent(match, a) {
@@ -493,12 +560,13 @@ export class RemoteController {
     i.crouch = !!(inp.b & 16);
     i.lean = Math.max(-1, Math.min(1, inp.l | 0));
     const w = WEAP[inp.w];
-    if (w && w !== a.weapon) i.switchTo = w;
+    if (w && w !== a.weapon && a.weapons[w]) i.switchTo = w;
     const c = inp.a;
     if (!this.seen) {
       // 처음 받은 입력: 그때까지의 횟수는 이미 지난 일
       this.seen = [...c];
       this.cardSeen = Math.max(0, ...((inp.cd ?? []).map((x) => x[0])));
+      this.buySeen = Math.max(0, ...((inp.by ?? []).map((x) => x[0])));
     }
     const fresh = (k) => (c[k] ?? 0) > (this.seen[k] ?? 0);
     if (fresh(ACT.reload)) i.reload = true;
@@ -514,6 +582,12 @@ export class RemoteController {
     if (next) {
       this.cardSeen = next[0];
       i.card = next[1];
+    }
+    // 구매: 한 틱에 하나씩
+    const nb = (inp.by ?? []).find(([n]) => n > this.buySeen);
+    if (nb) {
+      this.buySeen = nb[0];
+      i.buy = ITEMS[nb[1]] ?? null;
     }
     this.onAck?.(inp.s);
     return i;
