@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
-import { DT, TEAMS } from '../sim/constants.js';
+import { DT, NOISE, TEAMS } from '../sim/constants.js';
 import { PATCHES, WEAPONS } from '../sim/data.js';
 import { Match } from '../sim/match.js';
 import { Hud } from '../ui/hud.js';
@@ -67,6 +67,8 @@ export class GameClient {
     this.shake = 0;
     this.kickCam = new THREE.Vector2();
     this.kickVel = new THREE.Vector2();
+    this.tmpVel = new THREE.Vector3();
+    this.tmpQuat = new THREE.Quaternion();
     this.rollKick = 0;
     this.rollKickVel = 0;
     this.bobPhase = 0;
@@ -164,6 +166,14 @@ export class GameClient {
     const A = this.audio;
     const isMe = (a) => a?.id === this.player.id;
     const viewing = (a) => a?.id === this.viewAgent?.id;
+    // 작은 소리는 규칙상 들리는 거리(NOISE)까지만 — 봇이 듣는 범위와 사람이 듣는 범위를 같게
+    const rain = this.match.map.weather === 'rain' ? NOISE.rainMult : 1;
+    const audible = (pos, radius) => {
+      const c = this.stage.camera.position;
+      const r = radius * rain;
+      const d = Math.hypot(pos.x - c.x, pos.z - c.z);
+      return d >= r ? 0 : Math.min(1, (r - d) / (r * 0.4));
+    };
 
     ev.on('shot', (e) => {
       const local = viewing(e.agent) && e.agent.alive;
@@ -185,8 +195,9 @@ export class GameClient {
     });
     ev.on('melee', (e) => {
       if (viewing(e.agent)) this.viewmodel.swing(e.heavy);
-      A.play('knife', { pos: viewing(e.agent) ? null : e.agent.pos });
-      if (e.target) A.play('knifeHit', { pos: e.target.pos });
+      const kv = viewing(e.agent) ? 1 : audible(e.agent.pos, NOISE.knife * 2);
+      if (kv > 0) A.play('knife', { pos: viewing(e.agent) ? null : e.agent.pos, vol: kv });
+      if (e.target && (kv > 0 || viewing(e.target))) A.play('knifeHit', { pos: e.target.pos });
     });
     ev.on('impact', (e) => {
       this.effects.onImpact(e);
@@ -218,10 +229,11 @@ export class GameClient {
       }
     });
     ev.on('footstep', (e) => {
-      const me = viewing(e.agent);
-      if (e.loud) A.play('step', { pos: me ? null : e.agent.pos, vol: me ? 0.45 : 1 });
-      else if (me || Math.hypot(e.agent.pos.x - this.stage.camera.position.x, e.agent.pos.z - this.stage.camera.position.z) < 5) {
-        A.play('quietStep', { pos: me ? null : e.agent.pos, vol: me ? 1 : 0.8 });
+      if (viewing(e.agent)) A.play(e.loud ? 'step' : 'quietStep', { vol: e.loud ? 0.45 : 1 });
+      else {
+        // 달리는 발소리는 NOISE.step 거리까지, 걷거나 앉아 움직이는 소리는 아주 가까이(4m)에서만
+        const v = audible(e.agent.pos, e.loud ? NOISE.step : 4 / rain);
+        if (v > 0) A.play(e.loud ? 'step' : 'quietStep', { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v });
       }
     });
     ev.on('radio', (e) => {
@@ -296,7 +308,11 @@ export class GameClient {
       A.play('roundStart');
       this.hud.banner('작전 개시', this.team === TEAMS.DEFUSE ? '목표: 폭탄 2기 해체' : '목표: 폭탄 방어 · 해체팀 제압', 'good');
     });
-    ev.on('reload', (e) => viewing(e.agent) && A.play('reload'));
+    ev.on('reload', (e) => {
+      if (viewing(e.agent)) return A.play('reload');
+      const v = audible(e.agent.pos, NOISE.reload);
+      if (v > 0) A.play('reload', { pos: e.agent.pos, vol: v });
+    });
     ev.on('swap', (e) => viewing(e.agent) && A.play('swap'));
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
     ev.on('land', (e) => {
@@ -304,7 +320,8 @@ export class GameClient {
         this.viewmodel.landed(e.speed);
         this.landDip = Math.min(1, e.speed / 9);
       }
-      A.play('land', { pos: viewing(e.agent) ? null : e.agent.pos, vol: Math.min(1, e.speed / 10) });
+      const lv = viewing(e.agent) ? 1 : audible(e.agent.pos, NOISE.land);
+      if (lv > 0) A.play('land', { pos: viewing(e.agent) ? null : e.agent.pos, vol: Math.min(1, e.speed / 10) * lv });
     });
     ev.on('matchEnd', (e) => {
       this.ended = true;
@@ -359,7 +376,7 @@ export class GameClient {
     this.effects.update(dt, alpha, this.team);
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
-    const vel = new THREE.Vector3(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(cam.quaternion.clone().invert());
+    const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
     this.viewmodel.update(dt, {
       visible: va.alive && !this.ended,
       weapon: va.weapon,
