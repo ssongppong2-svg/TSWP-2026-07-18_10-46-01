@@ -29,7 +29,7 @@ export class AudioEngine {
       this.comp.connect(ctx.destination);
       // 울림: 콘크리트 건물 사이에서 울리는 잔향
       this.reverb = ctx.createConvolver();
-      this.reverb.buffer = this.makeImpulse(2.4);
+      this.reverb.buffer = this.makeImpulse(this.lowPower ? 1.3 : 2.4);
       this.reverbOut = ctx.createGain();
       this.reverbOut.gain.value = 0.55;
       this.reverb.connect(this.reverbOut);
@@ -45,6 +45,13 @@ export class AudioEngine {
       this.pendingRain = null;
       this.setRain(r);
     }
+  }
+
+  // 저사양: 입체음향을 가벼운 방식(equalpower)으로, 잔향을 짧게 (오디오 처리도 CPU를 꽤 씀)
+  setLowPower(on) {
+    if (this.lowPower === on) return;
+    this.lowPower = on;
+    if (this.reverb) this.reverb.buffer = this.makeImpulse(on ? 1.3 : 2.4);
   }
 
   makeImpulse(seconds) {
@@ -152,7 +159,7 @@ export class AudioEngine {
     if (pos) {
       const d = Math.hypot(pos.x - this.listener.x, pos.y - this.listener.y, pos.z - this.listener.z);
       const p = ctx.createPanner();
-      p.panningModel = 'HRTF';
+      p.panningModel = this.lowPower ? 'equalpower' : 'HRTF';
       p.distanceModel = 'inverse';
       p.refDistance = 3;
       p.maxDistance = 120;

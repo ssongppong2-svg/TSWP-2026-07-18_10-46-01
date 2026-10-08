@@ -523,6 +523,13 @@ button {
   color: var(--muted);
 }
 
+.field-note {
+  grid-column: 1 / -1;
+  margin: -10px 0 0;
+  font: 500 12px var(--font);
+  color: var(--muted);
+}
+
 .field input {
   width: 220px;
   padding: 10px 12px;

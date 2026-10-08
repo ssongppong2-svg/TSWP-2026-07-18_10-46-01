@@ -10,7 +10,7 @@ import { AgentView } from './agent-view.js';
 import { Effects } from './effects.js';
 import { Input, PlayerController } from './input.js';
 import { ViewModel } from './viewmodel.js';
-import { QUALITY } from './stage.js';
+import { QUALITY, QUALITY_ORDER } from './stage.js';
 
 const PATCH_SOUNDS = {
   gravityVeil: 'veil', elasticPad: 'pad', resultantAmp: 'amp', reactionRounds: 'rounds', buoyShield: 'shield',
@@ -47,10 +47,10 @@ export class GameClient {
       stage.scene.add(v.root);
       this.views.set(a.id, v);
     }
-    this.viewmodel = new ViewModel(team);
+    this.viewmodel = new ViewModel(team, { detail: stage.qualityKey === 'low' ? 1 : 2 });
     stage.overlay = this.viewmodel;
     stage.resize();
-    this.effects = new Effects(stage.scene, this.match);
+    this.effects = new Effects(stage.scene, this.match, stage.lightRig);
     this.effects.onCasingBounce = (p) => this.audio.play('casing', { pos: p });
     this.hud = new Hud(uiRoot, this.match, this.player.id, settings);
     this.lockpickUI = new LockpickUI(uiRoot);
@@ -81,7 +81,7 @@ export class GameClient {
     this.heartT = 0;
     this.alertT = { A: -99, B: -99 };
     this.caughtT = 0;
-    this.perf = { t: 0, frames: 0, sum: 0, done: false };
+    this.perf = { t: 0, frames: 0, sum: 0, done: false, warm: 1, holdT: 0 };
     this.tmp = new THREE.Vector3();
     this.tmp2 = new THREE.Vector3();
     this.bindEvents();
@@ -369,6 +369,7 @@ export class GameClient {
     this.updateCamera(dt, alpha);
 
     const time = now / 1000;
+    AgentView.eye.copy(this.stage.camera.position);
     for (const v of this.views.values()) {
       v.update(dt, alpha, time);
       v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive);
@@ -513,25 +514,37 @@ export class GameClient {
     }
   }
 
+  // 프레임 유지: 2초마다 평균 프레임을 보고 해상도를 먼저 조절하고,
+  // 해상도를 끝까지 낮춰도 30fps가 안 되면 (그래픽 '자동'일 때) 품질을 한 단계 내림
   watchPerformance(dt) {
     const p = this.perf;
     if (p.done) return;
     p.t += dt;
-    if (p.t < 1.5) return;
     p.frames++;
     p.sum += dt;
-    if (p.t > 6) {
-      p.done = true;
-      const fps = p.frames / p.sum;
-      const order = ['high', 'medium', 'low'];
-      const i = order.indexOf(this.stage.qualityKey);
-      if (fps < 38 && i >= 0 && i < order.length - 1) {
-        const next = order[i + 1];
-        this.settings.quality = next;
-        this.stage.applyQuality(next);
-        this.hooks.onQualityChange?.(next);
-        this.hooks.onToast?.(`프레임 저하 감지. 그래픽 품질 '${QUALITY[next].name}'(으)로 조정. 설정에서 변경 가능.`);
+    if (p.t < 2) return;
+    const fps = p.frames / p.sum;
+    p.t = p.frames = p.sum = 0;
+    if (p.warm-- > 0) return; // 첫 구간은 셰이더 준비 때문에 느림
+    const st = this.stage;
+    p.holdT -= 2;
+    if (fps < 52) {
+      if (st.setRenderScale(st.renderScale * (fps < 35 ? 0.8 : 0.9))) {
+        p.holdT = 20; // 방금 내렸으면 한동안 다시 올리지 않음
+        return;
       }
+      const i = QUALITY_ORDER.indexOf(st.qualityKey);
+      if (fps < 30 && st.qualityMode === 'auto' && i > 0) {
+        const next = QUALITY_ORDER[i - 1];
+        st.autoLevel = next;
+        st.setLevel(next);
+        this.audio.setLowPower(next === 'low');
+        p.warm = 1;
+        this.hooks.onToast?.(`프레임 저하 감지. 그래픽을 '${QUALITY[next].name}'(으)로 자동 조정했습니다.`);
+      }
+    } else if (fps > 58 && st.renderScale < 1 && p.holdT <= 0) {
+      st.setRenderScale(st.renderScale + 0.1);
+      p.holdT = 4;
     }
   }
 

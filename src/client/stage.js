@@ -3,19 +3,40 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GameMap } from '../sim/map.js';
 import { DEFAULT_MAP_ID } from '../sim/maps/index.js';
 import { createTextures } from './textures.js';
 import { RainSystem } from './weather.js';
 import { buildWorld } from './world-view.js';
+import { LightRig } from './lights.js';
 
+// 품질 단계. 점광원(points)은 개수만큼 모든 표면의 픽셀 계산이 늘어나므로 가장 크게 줄임.
+// pixelRatio = 해상도 상한, minScale = 프레임이 모자랄 때 내려갈 수 있는 해상도 하한 (자동 조절)
 export const QUALITY = {
-  low: { name: '낮음', shadows: false, shadowSize: 0, bloom: false, pixelRatio: 0.85, lamps: 6, rain: 2500 },
-  medium: { name: '보통', shadows: true, shadowSize: 1024, bloom: true, pixelRatio: 1, lamps: 11, rain: 5000 },
-  high: { name: '높음', shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1.5, lamps: 99, rain: 8000 },
+  low: { name: '낮음', shadows: false, shadowSize: 0, bloom: false, env: false, pixelRatio: 1, minScale: 0.5, startScale: 0.8, points: 2, muzzles: 0, rain: 1800 },
+  medium: { name: '보통', shadows: false, shadowSize: 0, bloom: false, env: true, pixelRatio: 1, minScale: 0.6, startScale: 1, points: 4, muzzles: 1, rain: 4000 },
+  high: { name: '높음', shadows: true, shadowSize: 2048, bloom: true, env: true, pixelRatio: 1.5, minScale: 0.7, startScale: 1, points: 6, muzzles: 2, rain: 7000 },
 };
+export const QUALITY_ORDER = ['low', 'medium', 'high'];
+
+// 처음 실행할 때 기기에 맞는 품질 추정 (설정이 '자동'일 때)
+export function detectQuality(renderer) {
+  let gpu = '';
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  } catch {
+    /* 알 수 없음 */
+  }
+  const ua = navigator.userAgent || '';
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem = navigator.deviceMemory || 8;
+  if (/CrOS|Android|iPhone|iPad/i.test(ua) || /SwiftShader|llvmpipe|Mali|Adreno|PowerVR|Software/i.test(gpu) || cores <= 4 || mem <= 4) return 'low';
+  if (/NVIDIA|GeForce|RTX|GTX|Radeon RX|Radeon Pro|Apple M\d (Pro|Max|Ultra)/i.test(gpu)) return 'high';
+  return 'medium';
+}
 
 // 날씨별 하늘·안개·달빛
 const WEATHER = {
@@ -134,6 +155,9 @@ export const BodycamShader = {
       // 섬광
       col = mix(col, vec3(1.0, 0.98, 0.94), clamp(flash, 0.0, 1.0));
       gl_FragColor = vec4(col, 1.0);
+      // 색 변환을 이 패스에서 같이 처리 (전체 화면 패스 하나 절약)
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }
   `,
 };
@@ -189,6 +213,8 @@ export class Stage {
     this.scene.add(moon, moon.target);
 
     this.textures = createTextures();
+    this.lightRig = new LightRig(this.scene);
+    this.renderScale = 1;
     this.rain = null;
     this.bolt = 0;
     this.onThunder = null;
@@ -218,8 +244,10 @@ export class Stage {
     this.world = buildWorld(this.map, this.textures);
     this.scene.add(this.world);
     this.lamps = this.world.userData.lamps;
+    this.lightRig.clear((src) => src.lamp);
+    for (const src of this.lamps.sources) this.lightRig.add(Object.assign(src, { lamp: true }));
     this.applyWeather();
-    if (this.renderer) this.applyQuality(this.qualityKey);
+    if (this.renderer) this.applyQuality(this.qualityMode);
   }
 
   applyWeather() {
@@ -249,36 +277,53 @@ export class Stage {
     }
   }
 
+  // key: 'auto' | 'low' | 'medium' | 'high'. 자동이면 기기에 맞춰 고르고, 느리면 한 단계씩 내림
   applyQuality(key) {
-    const q = QUALITY[key] ?? QUALITY.high;
-    if (!this.renderer) {
-      const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-      r.toneMapping = THREE.ACESFilmicToneMapping;
-      r.toneMappingExposure = 1.2;
-      r.outputColorSpace = THREE.SRGBColorSpace;
-      r.domElement.className = 'game-canvas';
-      r.domElement.tabIndex = 0;
-      this.container.prepend(r.domElement);
-      this.renderer = r;
-      // 금속 표면이 비칠 환경 (없으면 금속이 새까맣게 보임)
-      const pmrem = new THREE.PMREMGenerator(r);
-      this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-      pmrem.dispose();
-      this.scene.environment = this.envMap;
-      this.scene.environmentIntensity = 0.12;
-    }
+    if (!this.renderer) this.createRenderer();
+    this.qualityMode = key === 'auto' || key in QUALITY ? key : 'auto';
+    let level = this.qualityMode;
+    if (level === 'auto') level = this.autoLevel ??= detectQuality(this.renderer);
+    this.setLevel(level);
+  }
+
+  createRenderer() {
+    const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.2;
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    r.domElement.className = 'game-canvas';
+    r.domElement.tabIndex = 0;
+    this.container.prepend(r.domElement);
+    this.renderer = r;
+    // 금속 표면이 비칠 환경 (없으면 금속이 새까맣게 보임). 낮음 품질에서는 끔
+    const pmrem = new THREE.PMREMGenerator(r);
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    this.scene.environmentIntensity = 0.12;
+  }
+
+  setLevel(level) {
+    const q = QUALITY[level] ?? QUALITY.medium;
     const r = this.renderer;
-    this.qualityKey = key in QUALITY ? key : 'high';
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    const changed = this.qualityKey !== level;
+    this.qualityKey = level;
+    this.quality = q;
+    if (changed || this.renderScale > 1) this.renderScale = q.startScale;
+    this.scene.environment = q.env ? this.envMap : null;
+    // 그림자: 높음에서만, 움직이지 않는 지형만 한 번 그려 둠 (요원은 그림자 패스에서 제외)
     r.shadowMap.enabled = q.shadows;
     r.shadowMap.type = THREE.PCFShadowMap;
+    r.shadowMap.autoUpdate = false;
+    r.shadowMap.needsUpdate = true;
     this.moon.castShadow = q.shadows;
     if (q.shadows) {
       this.moon.shadow.mapSize.set(q.shadowSize, q.shadowSize);
       this.moon.shadow.map?.dispose();
       this.moon.shadow.map = null;
     }
-    this.lamps.forEach((l, i) => (l.visible = i < q.lamps));
+    this.lightRig.setBudget(q.points, q.muzzles);
+    // 블룸이 없을 때는 등 렌즈에 가벼운 후광을 붙임
+    if (this.lamps?.halos) this.lamps.halos.visible = !q.bloom;
     if (this.rain && this.rain.count !== q.rain) this.applyWeather();
     this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
@@ -287,9 +332,28 @@ export class Stage {
     this.resize();
   }
 
+  // 해상도 배율 (프레임이 모자라면 낮추고 여유 있으면 올림) — Game.watchPerformance가 조절
+  setRenderScale(scale) {
+    const q = this.quality ?? QUALITY.medium;
+    const s = Math.max(q.minScale, Math.min(1, scale));
+    if (Math.abs(s - this.renderScale) < 0.01) return false;
+    this.renderScale = s;
+    this.applyPixelRatio();
+    return true;
+  }
+
+  applyPixelRatio() {
+    const q = this.quality ?? QUALITY.medium;
+    const pr = Math.min(window.devicePixelRatio || 1, q.pixelRatio) * this.renderScale;
+    this.renderer.setPixelRatio(pr);
+    this.composer?.setPixelRatio(pr);
+    this.updateFov();
+  }
+
   // 화면 처리 순서: 맵 → 1인칭 총 → 빛번짐 → 바디캠 렌즈 → 색 변환
   buildComposer(q) {
     this.composer?.dispose?.();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio) * this.renderScale);
     const c = new EffectComposer(this.renderer);
     c.addPass(new RenderPass(this.scene, this.camera));
     this.overlayPass = new RenderPass(new THREE.Scene(), new THREE.PerspectiveCamera());
@@ -301,9 +365,9 @@ export class Stage {
       this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.5, 0.82);
       c.addPass(this.bloom);
     }
+    this.bloom = q.bloom ? this.bloom : null;
     this.bodycam = new ShaderPass(BodycamShader);
     c.addPass(this.bodycam);
-    c.addPass(new OutputPass());
     this.composer = c;
     if (this._overlay) this.overlay = this._overlay;
   }
@@ -392,9 +456,12 @@ export class Stage {
     if (this.rain) {
       this.bolt = this.rain.update(dt, this.camera);
       this.sky.material.uniforms.bolt.value = this.bolt;
-      this.hemi.intensity = w.hemi + this.bolt * 2.2;
+      this.hemi.intensity = w.hemi + this.bolt * 2.2 + (this.quality?.env ? 0 : 0.3);
       this.moon.intensity = w.moon + this.bolt * 1.6;
-    }
+    } else this.hemi.intensity = w.hemi + (this.quality?.env ? 0 : 0.3);
+    // 가까운 등에만 실제 광원 배정, 나머지는 빛 웅덩이로
+    this.lightRig.update(dt, this.camera.position);
+    this.lamps?.syncPools();
     this.composer.render(dt);
   }
 

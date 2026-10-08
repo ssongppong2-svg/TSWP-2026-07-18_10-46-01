@@ -6,7 +6,8 @@ export const DEFAULT_SETTINGS = {
   sensitivity: 1,
   fov: 100,
   volume: 0.8,
-  quality: 'high',
+  quality: 'auto', // 'auto'(기기에 맞춰 자동) | 'low' | 'medium' | 'high'
+  settingsVersion: 2,
   invertY: false,
   difficulty: 'normal',
   bodycam: true, // 바디캠 렌즈 효과
@@ -18,7 +19,15 @@ export const DEFAULT_SETTINGS = {
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const s = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      // 예전 버전은 기본값 '높음'이 그대로 저장돼 있어 저사양 기기에서 느림 → 한 번 '자동'으로 바꿈
+      if (!(s.settingsVersion >= 2)) {
+        s.quality = 'auto';
+        s.settingsVersion = 2;
+      }
+      return s;
+    }
   } catch {
     /* 저장소를 쓸 수 없으면 기본값 */
   }

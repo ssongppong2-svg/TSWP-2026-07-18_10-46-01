@@ -466,7 +466,7 @@ export function controlsModal({ onClose }) {
   return el;
 }
 
-export function settingsModal({ settings, onChange, onClose }) {
+export function settingsModal({ settings, onChange, onClose, qualityNow }) {
   const el = h(`
     <section class="modal">
       <div class="modal-card">
@@ -475,7 +475,8 @@ export function settingsModal({ settings, onChange, onClose }) {
         <label class="slider"><span>시야각 (FOV)</span><input type="range" min="80" max="120" step="1" data-key="fov"><output></output></label>
         <label class="slider"><span>음량</span><input type="range" min="0" max="1" step="0.05" data-key="volume"><output></output></label>
         <label class="slider"><span>화면 흔들림</span><input type="range" min="0" max="1.5" step="0.05" data-key="shake"><output></output></label>
-        <div class="field"><span>그래픽 품질</span><div class="seg">${Object.entries(QUALITY).map(([k, q]) => `<button data-quality="${k}">${q.name}</button>`).join('')}</div></div>
+        <div class="field"><span>그래픽 품질</span><div class="seg"><button data-quality="auto">자동</button>${Object.entries(QUALITY).map(([k, q]) => `<button data-quality="${k}">${q.name}</button>`).join('')}</div></div>
+        <p class="field-note" data-quality-note></p>
         <div class="field"><span>조준점</span><div class="seg"><button data-cross="dot">작은 점</button><button data-cross="off">없음</button></div></div>
         <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · 빗방울 · 비네팅)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
@@ -502,6 +503,11 @@ export function settingsModal({ settings, onChange, onClose }) {
   });
   const segs = () => {
     el.querySelectorAll('[data-quality]').forEach((b) => b.classList.toggle('on', b.dataset.quality === settings.quality));
+    const note = el.querySelector('[data-quality-note]');
+    const cur = qualityNow?.();
+    note.textContent = settings.quality === 'auto'
+      ? `자동: 이 기기에서는 '${QUALITY[cur]?.name ?? '보통'}'. 프레임이 모자라면 해상도부터 자동으로 낮춥니다.`
+      : '프레임이 모자라면 해상도를 자동으로 낮춥니다.';
     el.querySelectorAll('[data-cross]').forEach((b) => b.classList.toggle('on', b.dataset.cross === (settings.crosshair ?? 'dot')));
   };
   segs();
@@ -515,8 +521,8 @@ export function settingsModal({ settings, onChange, onClose }) {
     const q = e.target.closest('[data-quality]');
     if (q) {
       settings.quality = q.dataset.quality;
-      segs();
       onChange('quality');
+      segs();
     }
     if (e.target === el || e.target.closest('[data-act="close"]')) onClose();
   });

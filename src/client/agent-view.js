@@ -245,16 +245,30 @@ const cached = (key, make) => {
   }
   return g;
 };
-export const rbox = (w, h, d, r = 0.01, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, r);
-export const cylG = (r1, r2, h, seg = 12, open = false) => new THREE.CylinderGeometry(r1, r2, h, seg, 1, open);
-const sphG = (r, ws = 14, hs = 10) => new THREE.SphereGeometry(r, ws, hs);
+// 세부 단계: 2 = 1인칭 총·손(가장 정밀), 1 = 가까운 요원, 0 = 먼 요원 (작은 부품 생략, 각진 상자)
+let DETAIL = 2;
+export function withDetail(level, fn) {
+  const prev = DETAIL;
+  DETAIL = level;
+  try {
+    return fn();
+  } finally {
+    DETAIL = prev;
+  }
+}
+// 둘레 분할 수를 세부 단계에 맞게 줄임
+const sg = (n, min = 3) => (DETAIL >= 2 ? n : Math.max(min, Math.round(n * (DETAIL === 1 ? 0.7 : 0.4))));
+export const rbox = (w, h, d, r = 0.01, seg = 2) => (DETAIL === 0 ? new THREE.BoxGeometry(w, h, d) : new RoundedBoxGeometry(w, h, d, DETAIL === 1 ? 1 : seg, r));
+export const cylG = (r1, r2, h, seg = 12, open = false) => new THREE.CylinderGeometry(r1, r2, h, sg(seg, 5), 1, open);
+const sphG = (r, ws = 14, hs = 10) => new THREE.SphereGeometry(r, sg(ws, 6), sg(hs, 4));
 
 // 옆모습 윤곽(s = 앞쪽, y)을 두께 t로 밀어낸 형상. 앞쪽이 -z
 export function profile(points, t, bevel = 0.003, holes = []) {
   const sh = new THREE.Shape(points.map(([s, y]) => new THREE.Vector2(s, y)));
   for (const hp of holes) sh.holes.push(new THREE.Path(hp.map(([s, y]) => new THREE.Vector2(s, y))));
-  const depth = Math.max(0.001, t - bevel * 2);
-  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6 });
+  const bev = DETAIL > 0 ? bevel : 0;
+  const depth = Math.max(0.001, t - bev * 2);
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: DETAIL >= 2 ? 2 : 1, curveSegments: DETAIL >= 2 ? 6 : DETAIL === 1 ? 4 : 2 });
   g.translate(0, 0, -depth / 2);
   g.rotateY(Math.PI / 2);
   return g;
@@ -263,8 +277,9 @@ export function profile(points, t, bevel = 0.003, holes = []) {
 // 회전체 (r, y) 아래→위 순서, 스플라인으로 매끈하게
 export function lathe(points, seg = 12, smooth = 20) {
   const curve = new THREE.SplineCurve(points.map(([r, y]) => new THREE.Vector2(r, y)));
-  const pts = curve.getPoints(smooth).map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
-  return new THREE.LatheGeometry(pts, seg);
+  const n = DETAIL >= 2 ? smooth : Math.max(4, Math.round(smooth * (DETAIL === 1 ? 0.6 : 0.3)));
+  const pts = curve.getPoints(n).map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
+  return new THREE.LatheGeometry(pts, sg(seg, 6));
 }
 
 // 몸 둘레 띠 (단면이 사각형인 고리)
@@ -276,7 +291,7 @@ function ringG(rIn, rOut, h, seg = 20) {
     [rIn, h / 2],
     [rIn, -h / 2],
   ].map(([r, y]) => new THREE.Vector2(r, y));
-  return new THREE.LatheGeometry(pts, seg);
+  return new THREE.LatheGeometry(pts, sg(seg, 8));
 }
 
 // 상자를 몸통 곡면에 맞게 휨: z += k·x²
@@ -340,8 +355,6 @@ function boxUV(geo, density) {
 }
 
 const UV_DENSITY = { uniform: 2.2, carrier: 10, pouch: 7, helmet: 3.5, sleeve: 2.2 };
-// 그림자는 몸통·다리·헬멧처럼 큰 재질만 드리움 (작은 부품까지 그리면 그림자 패스의 그리기 호출이 두 배로 늘어남)
-const SHADOW = new Set(['uniform', 'carrier', 'pouch', 'helmet', 'boot', 'bala']);
 
 // 뼈대 하나에 붙는 부품들을 재질별로 합쳐 메시 수를 줄임
 export class Parts {
@@ -359,8 +372,20 @@ export class Parts {
     this.e.set(r[0], r[1], r[2], r[3] ?? 'XYZ');
     this.m.compose(new V3(p[0], p[1], p[2]), this.q.setFromEuler(this.e), new V3(sc[0], sc[1], sc[2]));
     g.applyMatrix4(this.m);
-    (this.by[mat] ??= []).push(g);
     geo.dispose?.();
+    return this.push(mat, g);
+  }
+  // 먼 요원: 3cm보다 작은 부품은 보이지 않으므로 생략
+  push(mat, g) {
+    if (DETAIL === 0) {
+      g.computeBoundingBox();
+      const b = g.boundingBox;
+      if (Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) < 0.03) {
+        g.dispose();
+        return this;
+      }
+    }
+    (this.by[mat] ??= []).push(g);
     return this;
   }
   // 이미 계산된 변환 행렬로 추가
@@ -368,9 +393,8 @@ export class Parts {
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
     for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
     g.applyMatrix4(matrix);
-    (this.by[mat] ??= []).push(g);
     geo.dispose?.();
-    return this;
+    return this.push(mat, g);
   }
   // 두 점 사이 막대
   rod(mat, a, b, r1, r2 = r1, seg = 8) {
@@ -381,8 +405,7 @@ export class Parts {
     const q = new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), B.clone().sub(A).normalize());
     this.m.compose(A.clone().add(B).multiplyScalar(0.5), q, new V3(1, 1, 1));
     g.applyMatrix4(this.m);
-    (this.by[mat] ??= []).push(g);
-    return this;
+    return this.push(mat, g);
   }
   build() {
     const out = {};
@@ -440,7 +463,7 @@ function buildTorso() {
   P.add('carrier', ringG(0.17, 0.188, 0.17, 24), [0, 0.12, 0], [0, 0, 0], [1, 1, 0.7]);
   for (const s of [-1, 1]) {
     P.add('pouch', rbox(0.022, 0.13, 0.13, 0.008), [s * 0.193, 0.115, 0.0]);
-    const strap = new THREE.TorusGeometry(0.13, 0.009, 4, 14, Math.PI);
+    const strap = new THREE.TorusGeometry(0.13, 0.009, sg(4), sg(14, 6), Math.PI);
     P.add('carrier', strap, [s * 0.095, 0.33, 0.0], [0, Math.PI / 2, 0], [1, 0.8, 1], (g) => g.scale(1, 1, 3.0));
     P.add('strap', rbox(0.05, 0.012, 0.09, 0.004), [s * 0.1, 0.425, 0.0], [0, 0, s * -0.15]); // 어깨 패드
   }
@@ -469,13 +492,13 @@ function buildTorso() {
   P.add('pouch', rbox(0.24, 0.3, 0.085, 0.028), [0, 0.235, 0.197]);
   for (const x of [-0.075, 0.075]) P.add('strap', rbox(0.014, 0.29, 0.088, 0.004), [x, 0.235, 0.198]);
   P.add('pouch', rbox(0.15, 0.09, 0.035, 0.012), [0, 0.15, 0.25]);
-  P.add('strap', new THREE.TorusGeometry(0.03, 0.007, 4, 10, Math.PI), [0, 0.39, 0.16]);
+  P.add('strap', new THREE.TorusGeometry(0.03, 0.007, sg(4), sg(10, 5), Math.PI), [0, 0.39, 0.16]);
   return P;
 }
 
 // 머리 (원점 = 머리 중심; 눈 높이 ≈ +0.01)
 function highCutShell(r) {
-  const g = new THREE.SphereGeometry(r, 30, 14, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  const g = new THREE.SphereGeometry(r, sg(30, 10), sg(14, 5), 0, Math.PI * 2, 0, Math.PI * 0.5);
   const p = g.attributes.position;
   const v = new V3();
   for (let i = 0; i < p.count; i++) {
@@ -499,7 +522,7 @@ function buildHead() {
   P.add('bala', rbox(0.112, 0.07, 0.11, 0.034), [0, -0.068, -0.02]);
   P.add('bala', rbox(0.024, 0.036, 0.03, 0.01), [0, -0.024, -0.091]);
   // 눈 트임 (어두운 피부) + 눈
-  P.add('skin', new THREE.SphereGeometry(0.1, 18, 3, Math.PI * 1.5 - 0.6, 1.2, Math.PI / 2 - 0.21, 0.27), [0, 0.0, -0.002], [0, 0, 0], [0.82, 1.06, 0.975]);
+  P.add('skin', new THREE.SphereGeometry(0.1, sg(18, 6), 3, Math.PI * 1.5 - 0.6, 1.2, Math.PI / 2 - 0.21, 0.27), [0, 0.0, -0.002], [0, 0, 0], [0.82, 1.06, 0.975]);
   for (const s of [-1, 1]) P.add('eye', sphG(0.011, 8, 6), [s * 0.03, 0.008, -0.091], [0, 0, 0], [1.3, 0.7, 0.6]);
   // 하이컷 방탄 헬멧
   P.add('helmet', highCutShell(0.124), [0, 0.024, 0.006], [0, 0, 0], [0.97, 0.93, 1.07]);
@@ -524,7 +547,7 @@ function buildHead() {
   // 헬멧 위에 올린 고글 + 끈
   P.add('rubber', rbox(0.16, 0.05, 0.018, 0.014), [0, 0.098, -0.106], [0.62, 0, 0], 1, bend(3.2));
   P.add('lens', rbox(0.15, 0.04, 0.012, 0.012), [0, 0.101, -0.113], [0.62, 0, 0], 1, bend(3.2));
-  P.add('strap', new THREE.TorusGeometry(0.119, 0.005, 4, 32), [0, 0.068, 0.006], [Math.PI / 2 + 0.24, 0, 0], [0.97, 1.07, 1]);
+  P.add('strap', new THREE.TorusGeometry(0.119, 0.005, sg(4), sg(32, 10)), [0, 0.068, 0.006], [Math.PI / 2 + 0.24, 0, 0], [0.97, 1.07, 1]);
   return P;
 }
 
@@ -590,7 +613,7 @@ function buildHand(side) {
   P.add('glove', rbox(0.056, 0.08, 0.032, 0.013), [s * -0.004, -0.002, -0.026]);
   P.add('glove', rbox(0.022, 0.072, 0.05, 0.009), [s * -0.03, -0.004, 0.0]);
   P.add('hard', rbox(0.014, 0.074, 0.03, 0.006), [s * 0.036, 0.0, -0.012]);
-  P.add('glove', new THREE.CapsuleGeometry(0.011, 0.034, 3, 8), [s * -0.012, 0.046, -0.004], [0, 0, Math.PI / 2]);
+  P.add('glove', new THREE.CapsuleGeometry(0.011, 0.034, sg(3, 1), sg(8, 4)), [s * -0.012, 0.046, -0.004], [0, 0, Math.PI / 2]);
   P.add('glove', cylG(0.034, 0.037, 0.052, 12), [s * 0.006, 0, 0.085], [Math.PI / 2, 0, 0]);
   P.add('hard', rbox(0.012, 0.026, 0.034, 0.004), [s * 0.04, 0.0, 0.086]);
   return P;
@@ -761,15 +784,115 @@ const GRIPS = {
 };
 
 // 요원 한 명의 3D 모형 + 애니메이션 (걷기·앉기·기울이기·조준·재장전·락픽·피격 움찔·쓰러짐)
+// ───────── 요원 한 명 = 스킨 메시 몇 개 ─────────
+// 부품(뼈대마다 재질별로 나뉜 메시 수십 개)을 재질 묶음 5개로 합쳐 한 번에 그림.
+// 뼈대는 기존 그룹을 그대로 쓰고(각 정점은 자기 뼈대 하나만 따라감), 숨길 부품은 크기를 0으로 만듦.
+const TEXTURED = new Set(['uniform', 'carrier', 'pouch', 'helmet']);
+const IDENTITY = new THREE.Matrix4();
+const skinCache = new Map();
+
+// 단색 부품용 재질: 색은 정점 색, 거칠기·금속성·발광은 정점 속성 (aRME)으로
+export function makeSolidMaterial({ strobe = 2 } = {}) {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+  const u = { value: strobe };
+  m.userData.strobe = u;
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uStrobe = u;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aRME;\nvarying vec3 vRME;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRME = aRME;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRME;\nuniform float uStrobe;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vRME.x;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vRME.y;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vRME.z * uStrobe;');
+  };
+  m.customProgramCacheKey = () => 'agentSolid';
+  return m;
+}
+
+// 뼈대별 부품 형상({재질: 형상})을 재질 묶음별 스킨 형상으로 합침.
+// info(재질) → { cls: 묶음 이름, color, rme: [거칠기, 금속성, 발광] } (cls가 'solid'일 때만 color·rme 사용)
+export function mergeSkinned(entries, info) {
+  const lists = {};
+  entries.forEach((parts, bone) => {
+    for (const [mat, geo] of Object.entries(parts)) {
+      const { cls, color, rme } = info(mat);
+      const g = geo.clone();
+      const n = g.attributes.position.count;
+      const idx = new Uint16Array(n * 4);
+      const w = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        idx[i * 4] = bone;
+        w[i * 4] = 1;
+      }
+      g.setAttribute('skinIndex', new THREE.BufferAttribute(idx, 4));
+      g.setAttribute('skinWeight', new THREE.BufferAttribute(w, 4));
+      if (cls === 'solid') {
+        const c = new Float32Array(n * 3);
+        const r = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          c.set([color.r, color.g, color.b], i * 3);
+          r.set(rme, i * 3);
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+        g.setAttribute('aRME', new THREE.BufferAttribute(r, 3));
+      }
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+      (lists[cls] ??= []).push(g);
+    }
+  });
+  const out = {};
+  for (const [cls, list] of Object.entries(lists)) {
+    out[cls] = mergeGeometries(list, false);
+    out[cls].computeBoundingSphere();
+    for (const g of list) g.dispose();
+  }
+  return out;
+}
+
+// 숨길 수 있는 뼈대: visible = false면 크기 0 (스킨 메시는 한 덩어리라 부품별로 숨길 수 없음)
+export function hideableBone(g) {
+  let shown = true;
+  Object.defineProperty(g, 'visible', {
+    configurable: true,
+    get: () => shown,
+    set: (v) => {
+      shown = !!v;
+      g.scale.setScalar(shown ? 1 : 0);
+    },
+  });
+  return g;
+}
+
+// 뼈대 목록(builds)으로 팀·세부 단계별 스킨 형상을 만듦 (같은 팀 요원끼리 공유)
+function skinGeometry(team, level, builds) {
+  const key = `${team}@${level}`;
+  if (skinCache.has(key)) return skinCache.get(key);
+  const T = teamMaterials(team);
+  const accent = new THREE.Color(TEAM_INFO[team].color);
+  const entries = builds.map(({ key: partKey, build }) => cached(`${partKey}@${level}`, () => withDetail(level, () => build().build())));
+  const out = mergeSkinned(entries, (mat) => {
+    if (TEXTURED.has(mat)) return { cls: mat };
+    if (mat === 'strobe') return { cls: 'solid', color: accent, rme: [0.4, 0, 1] };
+    const src = T[mat];
+    return { cls: 'solid', color: src?.color ?? new THREE.Color('#808080'), rme: [src?.roughness ?? 0.7, src?.metalness ?? 0, 0] };
+  });
+  skinCache.set(key, out);
+  return out;
+}
+
 export class AgentView {
+  // 카메라 위치 (가까운 요원만 정밀 모델로 그림) — 게임이 매 프레임 갱신
+  static eye = new THREE.Vector3(0, 1.6, 0);
+
   constructor(agent, { showTag }) {
     this.agent = agent;
     const team = agent.team;
-    const T = teamMaterials(team);
     const accent = TEAM_INFO[team].color;
-    this.strobeMat = new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 2.4, roughness: 0.4 });
-    this.M = { ...T, strobe: this.strobeMat };
-    this.meshCount = 0;
+    this.team = team;
+    this.bones = [];
+    this.builds = [];
 
     const root = new THREE.Group();
     root.rotation.order = 'YXZ';
@@ -852,6 +975,7 @@ export class AgentView {
     this.slungMag.position.copy(RIFLE.magPos);
     this.slung.position.set(0.02, 0.22, 0.285);
     this.slung.rotation.set(0, Math.PI / 2, 0.95, 'ZYX');
+    this.buildSkin();
 
     // 상태 효과 고리
     this.ring = new THREE.Mesh(
@@ -900,18 +1024,35 @@ export class AgentView {
     this.hands = { R: { p: t(), t: t(), w: t() }, L: { p: t(), t: t(), w: t() } };
   }
 
+  // 부품 묶음 하나 = 뼈대 하나. 숨기기(visible = false)는 크기 0으로 처리 (스킨 메시는 한 덩어리라서)
   mount(parent, key, build) {
-    const geos = cached(key, () => build().build());
-    const g = new THREE.Group();
-    for (const [mat, geo] of Object.entries(geos)) {
-      const m = new THREE.Mesh(geo, this.M[mat]);
-      m.name = `${key}:${mat}`;
-      m.castShadow = SHADOW.has(mat);
-      g.add(m);
-      this.meshCount++;
-    }
+    const g = hideableBone(new THREE.Group());
+    g.name = key;
+    this.bones.push(g);
+    this.builds.push({ key, build });
     parent.add(g);
     return g;
+  }
+
+  buildSkin() {
+    this.skeleton = new THREE.Skeleton(this.bones, this.bones.map(() => new THREE.Matrix4()));
+    const T = teamMaterials(this.team);
+    this.solidMat = makeSolidMaterial();
+    const mats = { solid: this.solidMat, uniform: T.uniform, carrier: T.carrier, pouch: T.pouch, helmet: T.helmet };
+    // [0] 가까이: 정밀 / [1] 멀리: 단순
+    this.lods = [1, 0].map((level) => {
+      const geos = skinGeometry(this.team, level, this.builds);
+      return Object.entries(geos).map(([cls, geo]) => {
+        const m = new THREE.SkinnedMesh(geo, mats[cls]);
+        m.name = `agent:${cls}@${level}`;
+        m.bind(this.skeleton, IDENTITY);
+        m.boundingSphere = new THREE.Sphere(new V3(0, 0.9, 0), 1.7);
+        m.visible = level === 1;
+        this.root.add(m);
+        return m;
+      });
+    });
+    this.far = false;
   }
 
   setWeapon(id) {
@@ -928,6 +1069,14 @@ export class AgentView {
     const st = this.st;
     dt = Math.max(0, Math.min(dt, 0.1)); // 프레임 시간이 음수로 들어와도 안전하게
     r.position.set(a.prev.x + (a.pos.x - a.prev.x) * alpha, a.prev.y + (a.pos.y - a.prev.y) * alpha, a.prev.z + (a.pos.z - a.prev.z) * alpha);
+    // 거리에 따라 정밀/단순 모델 (경계에서 깜빡이지 않게 여유를 둠)
+    const camD = r.position.distanceTo(AgentView.eye);
+    const far = this.far ? camD > 11 : camD > 13;
+    if (far !== this.far) {
+      this.far = far;
+      for (const m of this.lods[0]) m.visible = !far;
+      for (const m of this.lods[1]) m.visible = far;
+    }
     r.rotation.set(0, a.yaw, 0);
     if (this.weaponShown !== a.weapon) {
       this.setWeapon(a.weapon);
@@ -1053,10 +1202,10 @@ export class AgentView {
       r.position.y += 0.085 * smooth(fall);
       this.ring.visible = false;
       if (this.tag) this.tag.visible = false;
-      this.strobeMat.emissiveIntensity = Math.max(0, 2.4 - t * 3);
+      this.solidMat.userData.strobe.value = Math.max(0, 2.4 - t * 3);
       return;
     }
-    this.strobeMat.emissiveIntensity = 1.6 + (Math.sin(time * 9 + this.idle) > 0.6 ? 1.6 : 0);
+    this.solidMat.userData.strobe.value = 1.6 + (Math.sin(time * 9 + this.idle) > 0.6 ? 1.6 : 0);
     if (this.tag) this.tag.visible = true;
 
     // 상태 효과 고리
@@ -1338,7 +1487,8 @@ export class AgentView {
   }
 
   dispose() {
-    this.strobeMat.dispose();
+    this.solidMat.dispose();
+    this.skeleton.dispose();
     this.ring.geometry.dispose();
     this.ring.material.dispose();
     if (this.tag) {

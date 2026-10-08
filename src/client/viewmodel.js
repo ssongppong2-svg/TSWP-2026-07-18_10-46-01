@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { WEAPONS } from '../sim/data.js';
 import { TEAM_INFO } from '../sim/constants.js';
 import { flashTexture } from './textures.js';
-import { Parts, rbox, cylG, profile, teamMaterials } from './agent-view.js';
+import { Parts, rbox, cylG, profile, teamMaterials, makeSolidMaterial, mergeSkinned, hideableBone, withDetail } from './agent-view.js';
 
 const sphG = (r, ws = 12, hs = 8) => new THREE.SphereGeometry(r, ws, hs);
 
@@ -307,11 +307,11 @@ function buildKnifeParts() {
 
 // 1인칭 팔과 총. 별도 장면/카메라에 그려 벽에 총이 파묻히지 않게 하고, 화면 처리(렌즈·노이즈)는 함께 받는다.
 export class ViewModel {
-  constructor(team) {
+  constructor(team, { detail = 2 } = {}) {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(54, 1, 0.01, 10);
-    this.scene.add(new THREE.HemisphereLight('#7d8aa2', '#1a1712', 0.85));
-    this.key = new THREE.DirectionalLight('#f3dcc0', 1.5);
+    this.scene.add(new THREE.HemisphereLight('#7d8aa2', '#1a1712', 0.7));
+    this.key = new THREE.DirectionalLight('#f3dcc0', 1.25);
     this.key.position.set(0.7, 1.2, 0.35);
     this.scene.add(this.key);
     const fill = new THREE.DirectionalLight('#9fb6d8', 0.4);
@@ -352,7 +352,15 @@ export class ViewModel {
     };
     this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff3a26', transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 
-    this.guns = { rifle: this.buildRifle(), pistol: this.buildPistol(), knife: this.buildKnife() };
+    // 손·총 부품은 총마다 스킨 메시 몇 개로 합쳐 그림 (그리기 호출 54 → 약 5)
+    this.solidMat = makeSolidMaterial({ strobe: 1 });
+    this.skeletons = [];
+    this.guns = {};
+    for (const [id, build] of [['rifle', () => this.buildRifle()], ['pistol', () => this.buildPistol()], ['knife', () => this.buildKnife()]]) {
+      this.pending = [];
+      this.guns[id] = withDetail(detail, build);
+      this.bake(this.guns[id].group);
+    }
     for (const g of Object.values(this.guns)) this.root.add(g.group);
 
     this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), color: '#ffd7a0', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
@@ -381,18 +389,35 @@ export class ViewModel {
     this.tmpE = new THREE.Euler();
   }
 
-  // 부품 묶음 → 재질별 메시 (같은 경기 안에서 한 번만 만듦)
+  // 부품 묶음 = 뼈대 하나 (형상은 bake에서 총 단위로 합침)
   mount(parent, parts) {
-    const geos = parts.build();
     const g = new THREE.Group();
-    for (const [mat, geo] of Object.entries(geos)) {
-      const m = new THREE.Mesh(geo, this.mats[mat]);
-      m.name = mat;
-      if (mat === 'glass') m.renderOrder = 2;
-      g.add(m);
-    }
+    this.pending.push({ bone: g, geos: parts.build() });
     parent.add(g);
     return g;
+  }
+
+  // 총 하나(손 포함)의 부품을 재질 묶음별 스킨 메시로: 단색(정점 색) · 소매(위장 무늬) · 유리(반투명)
+  bake(group) {
+    const list = this.pending;
+    this.pending = [];
+    const bones = list.map((x) => x.bone);
+    const skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
+    this.skeletons.push(skeleton);
+    const emissive = { watchFace: 1, tritium: 1.4, lensW: 0.15 };
+    const geos = mergeSkinned(list.map((x) => x.geos), (mat) => {
+      if (mat === 'sleeve' || mat === 'glass') return { cls: mat };
+      const src = this.mats[mat];
+      return { cls: 'solid', color: src.color, rme: [src.roughness ?? 1, src.metalness ?? 0, emissive[mat] ?? 0] };
+    });
+    for (const [cls, geo] of Object.entries(geos)) {
+      const m = new THREE.SkinnedMesh(geo, cls === 'solid' ? this.solidMat : this.mats[cls]);
+      m.name = `vm:${cls}`;
+      m.bind(skeleton, new THREE.Matrix4());
+      m.frustumCulled = false;
+      if (cls === 'glass') m.renderOrder = 2;
+      group.add(m);
+    }
   }
 
   // 손: 손 로컬 anchor 점이 총 로컬 at 에 오도록. f = 손가락 방향, b = 손등 방향, arm = 팔뚝 방향 (모두 총 로컬)
@@ -417,7 +442,7 @@ export class ViewModel {
     coreHouse.position.set(-0.031, RB + 0.004, -0.255);
     g.add(coreHouse);
     // 탄창
-    const mag = new THREE.Group();
+    const mag = hideableBone(new THREE.Group());
     const magHome = new V3(0, -0.032, -0.044);
     mag.position.copy(magHome);
     this.mount(mag, buildMagParts());
@@ -473,7 +498,7 @@ export class ViewModel {
     const slide = new THREE.Group();
     this.mount(slide, buildPistolSlide());
     g.add(slide);
-    const mag = new THREE.Group();
+    const mag = hideableBone(new THREE.Group());
     const magHome = new V3(0, 0.0, -0.002);
     mag.position.copy(magHome);
     mag.rotation.x = -0.36;
@@ -776,6 +801,6 @@ export class ViewModel {
     gun.muzzle.getWorldPosition(this.flash.position);
     this.muzzleLight.position.copy(this.flash.position);
     this.muzzleLight.intensity = this.flashT > 0 ? 2.8 : 0;
-    this.key.intensity = 1.5 + (s.light ?? 0) * 0.6;
+    this.key.intensity = 1.25 + (s.light ?? 0) * 0.6;
   }
 }

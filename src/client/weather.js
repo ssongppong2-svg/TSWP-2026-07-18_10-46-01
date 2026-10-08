@@ -178,8 +178,25 @@ export class RainSystem {
   }
 }
 
-// 바닥의 물웅덩이 (얼룩 모양 알파) — 낮은 거칠기라 등불이 길게 반사됨
-export function puddleTexture(seed = 11) {
+// 바닥의 물웅덩이 거칠기 지도: 웅덩이일수록 값이 낮아(매끈) 등불이 길게 반사됨 (바닥 재질의 roughnessMap)
+export function puddleRoughness(seed = 11) {
+  const c = puddleCanvas(seed);
+  const g = c.getContext('2d');
+  const img = g.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = Math.round(255 * (1 - 0.6 * (d[i] / 255)));
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+// 물웅덩이 모양 (흰색 = 웅덩이)
+function puddleCanvas(seed = 11) {
   const S = 512;
   const c = document.createElement('canvas');
   c.width = c.height = S;
@@ -202,7 +219,5 @@ export function puddleTexture(seed = 11) {
       g.fill();
     }
   }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
+  return c;
 }

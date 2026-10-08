@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
 import { posterTexture, siteDecal, sprayTexture } from './textures.js';
-import { puddleTexture } from './weather.js';
+import { puddleRoughness } from './weather.js';
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 
@@ -22,42 +23,26 @@ export function buildWorld(map, tex) {
   // ── 바닥
   tex.floor.repeat.set(map.width / 4, map.depth / 4);
   tex.floorBump.repeat.set(map.width / 4, map.depth / 4);
+  // 물웅덩이는 바닥 재질의 거칠기 지도로 표현 (웅덩이 = 매끈해서 등불이 길게 비침). 바닥을 한 번만 그림
+  let puddles = null;
+  if (wet) {
+    puddles = puddleRoughness(map.width + map.depth);
+    puddles.repeat.set(map.width / 18, map.depth / 18);
+  }
   const floorMat = new THREE.MeshStandardMaterial({
     map: tex.floor,
     bumpMap: tex.floorBump,
     bumpScale: 1.2,
-    roughness: wet ? 0.62 : 0.9,
+    roughness: wet ? 0.7 : 0.9,
+    roughnessMap: puddles,
     metalness: 0.02,
-    color: wet ? '#8d939b' : '#ffffff',
+    color: wet ? '#868c94' : '#ffffff',
   });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
   group.add(buildFloorMarkings(map));
-  if (wet) {
-    // 물웅덩이: 거의 거울처럼 매끈한 얇은 층
-    const pt = puddleTexture(map.width + map.depth);
-    pt.repeat.set(map.width / 18, map.depth / 18);
-    const puddles = new THREE.Mesh(
-      new THREE.PlaneGeometry(map.width, map.depth),
-      new THREE.MeshStandardMaterial({
-        color: '#0c0e11',
-        roughness: 0.32,
-        metalness: 0.0,
-        envMapIntensity: 0.25,
-        alphaMap: pt,
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1.5,
-      }),
-    );
-    puddles.rotation.x = -Math.PI / 2;
-    puddles.position.y = 0.012;
-    puddles.receiveShadow = true;
-    group.add(puddles);
-  }
 
   // ── 벽: 보이는 면만 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
   const sides = new QuadBuilder();
@@ -150,10 +135,10 @@ export function buildWorld(map, tex) {
     group.add(decal);
   }
 
-  const lights = addLamps(group, map);
+  const lamps = addLamps(group, map);
   addDecor(group, map);
   group.add(buildSkyline(map));
-  group.userData.lamps = lights;
+  group.userData.lamps = lamps;
   return group;
 }
 
@@ -229,10 +214,45 @@ function buildFloorMarkings(map) {
   return mesh;
 }
 
-// 벽에 등을 달고 점광원 배치
+// 빛 웅덩이·후광용 방사형 그라데이션
+let glowTex = null;
+function radialGlow() {
+  if (glowTex) return glowTex;
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(0.55, 'rgba(255,255,255,0.18)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, S, S);
+  glowTex = new THREE.CanvasTexture(c);
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  return glowTex;
+}
+
+// 벽에 등을 달고, 광원 정보(LightRig가 가까운 등에만 실제 점광원을 배정)와
+// 실제 광원이 없을 때 대신 보일 빛 웅덩이(바닥·벽)·렌즈 후광을 만든다.
 function addLamps(group, map) {
-  const out = [];
+  const sources = [];
   const housingMat = new THREE.MeshStandardMaterial({ color: '#1d1f22', roughness: 0.6, metalness: 0.6 });
+  const fixM = new THREE.Matrix4();
+  const housings = [];
+  const lenses = {};
+  const pool = { pos: [], uv: [], col: [], index: [] };
+  const halo = { pos: [], col: [] };
+  const quad = (center, ux, uy, w, h, color) => {
+    const base = pool.pos.length / 3;
+    for (const [sx, sy, u, v] of [[-1, -1, 0, 0], [1, -1, 1, 0], [1, 1, 1, 1], [-1, 1, 0, 1]]) {
+      pool.pos.push(center.x + ux.x * sx * w / 2 + uy.x * sy * h / 2, center.y + ux.y * sx * w / 2 + uy.y * sy * h / 2, center.z + ux.z * sx * w / 2 + uy.z * sy * h / 2);
+      pool.uv.push(u, v);
+      pool.col.push(color.r, color.g, color.b);
+    }
+    pool.index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
   for (const lamp of map.def.decor?.lamps ?? []) {
     const st = LAMP_STYLE[lamp.kind];
     // 가장 가까운 벽 방향 찾기
@@ -250,23 +270,68 @@ function addLamps(group, map) {
     // 벽면 위치 = 셀 중심에서 벽 쪽으로 (d-0.5)칸
     const wx = cx + dir.dc * (dir.d - 0.5) * CELL, wz = cz + dir.dr * (dir.d - 0.5) * CELL;
     const y = 3.7;
-    const fixture = new THREE.Group();
-    fixture.position.set(wx - dir.dc * 0.12, y, wz - dir.dr * 0.12);
-    fixture.rotation.y = Math.atan2(-dir.dc, -dir.dr);
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.3 : 0.5, 0.22, 0.24), housingMat);
-    const lens = new THREE.Mesh(
-      new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.2 : 0.38, 0.06, 0.18),
-      new THREE.MeshStandardMaterial({ color: st.lens, emissive: st.lens, emissiveIntensity: 2.6 }),
-    );
-    lens.position.set(0, -0.12, 0.02);
-    fixture.add(housing, lens);
-    group.add(fixture);
-    const light = new THREE.PointLight(st.color, st.intensity, 20, 2);
-    light.position.set(wx - dir.dc * 0.7, y - 0.3, wz - dir.dr * 0.7);
-    group.add(light);
-    out.push(light);
+    // 등 몸체·렌즈는 모든 등을 합쳐 재질별로 한 번씩 그림
+    fixM.compose(new THREE.Vector3(wx - dir.dc * 0.12, y, wz - dir.dr * 0.12), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-dir.dc, -dir.dr)), new THREE.Vector3(1, 1, 1));
+    housings.push(new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.3 : 0.5, 0.22, 0.24).applyMatrix4(fixM));
+    (lenses[lamp.kind] ??= []).push(new THREE.BoxGeometry(lamp.kind === 'fluo' ? 1.2 : 0.38, 0.06, 0.18).translate(0, -0.12, 0.02).applyMatrix4(fixM));
+    const color = new THREE.Color(st.color);
+    const src = { pos: new THREE.Vector3(wx - dir.dc * 0.7, y - 0.3, wz - dir.dr * 0.7), color, intensity: st.intensity, distance: 20, poolStart: pool.col.length };
+    sources.push(src);
+    // 바닥 빛 웅덩이 (등에서 벽 반대쪽으로 조금 나간 곳이 가장 밝음) + 등 주변 벽
+    const out = new THREE.Vector3(-dir.dc, 0, -dir.dr);
+    const side = new THREE.Vector3(-out.z, 0, out.x);
+    const k = lamp.kind === 'fluo' ? 0.2 : 0.34;
+    quad(new THREE.Vector3(wx + out.x * 2.2, 0.025, wz + out.z * 2.2), side, out, 10, 10, color.clone().multiplyScalar(k));
+    quad(new THREE.Vector3(wx + out.x * 0.04, 2.9, wz + out.z * 0.04), side, new THREE.Vector3(0, 1, 0), 6, 5.6, color.clone().multiplyScalar(k * 0.8));
+    src.poolEnd = pool.col.length;
+    const lc = new THREE.Color(st.lens);
+    halo.pos.push(wx - dir.dc * 0.18, y - 0.13, wz - dir.dr * 0.18);
+    halo.col.push(lc.r * 0.55, lc.g * 0.55, lc.b * 0.55);
   }
-  return out;
+  if (housings.length) {
+    const hm = new THREE.Mesh(mergeGeometries(housings), housingMat);
+    hm.castShadow = true;
+    group.add(hm);
+    for (const [kind, list] of Object.entries(lenses)) {
+      const st = LAMP_STYLE[kind];
+      group.add(new THREE.Mesh(mergeGeometries(list), new THREE.MeshStandardMaterial({ color: st.lens, emissive: st.lens, emissiveIntensity: 2.6 })));
+    }
+  }
+  // 빛 웅덩이 전체가 한 번에 그려짐 (실제 광원이 배정된 등은 LightRig 가중치만큼 흐려짐)
+  const pg = new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.Float32BufferAttribute(pool.pos, 3));
+  pg.setAttribute('uv', new THREE.Float32BufferAttribute(pool.uv, 2));
+  const baseCol = new Float32Array(pool.col);
+  pg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pool.col), 3));
+  pg.setIndex(pool.index);
+  const pools = new THREE.Mesh(
+    pg,
+    new THREE.MeshBasicMaterial({ map: radialGlow(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2 }),
+  );
+  pools.name = 'lampPools';
+  pools.renderOrder = 2;
+  group.add(pools);
+  const hg = new THREE.BufferGeometry();
+  hg.setAttribute('position', new THREE.Float32BufferAttribute(halo.pos, 3));
+  hg.setAttribute('color', new THREE.Float32BufferAttribute(halo.col, 3));
+  const halos = new THREE.Points(hg, new THREE.PointsMaterial({ map: radialGlow(), size: 1.6, sizeAttenuation: true, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  halos.name = 'lampHalos';
+  group.add(halos);
+  // 실제 광원 가중치(realW)에 맞춰 빛 웅덩이 밝기 갱신
+  const colAttr = pg.attributes.color;
+  const last = sources.map(() => -1);
+  const syncPools = () => {
+    let dirty = false;
+    sources.forEach((src, i) => {
+      const f = 1 - 0.8 * (src.realW ?? 0);
+      if (Math.abs(f - last[i]) < 0.02) return;
+      last[i] = f;
+      for (let j = src.poolStart; j < src.poolEnd; j++) colAttr.array[j] = baseCol[j] * f;
+      dirty = true;
+    });
+    if (dirty) colAttr.needsUpdate = true;
+  };
+  return { sources, pools, halos, syncPools };
 }
 
 const ICONS = {

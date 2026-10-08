@@ -60,12 +60,16 @@ const openSettings = () =>
   openModal(
     S.settingsModal({
       settings,
+      qualityNow: () => stage.qualityKey,
       onClose: closeModal,
       onChange: (k) => {
         saveSettings(settings);
         if (k === 'volume') audio.setVolume(settings.volume);
         if (k === 'fov') stage.setFov(settings.fov);
-        if (k === 'quality') stage.applyQuality(settings.quality);
+        if (k === 'quality') {
+          stage.applyQuality(settings.quality);
+          audio.setLowPower(stage.qualityKey === 'low');
+        }
         if (k === 'bodycam') stage.setLens({});
       },
     }),
@@ -217,6 +221,7 @@ function boot() {
   }
   if (settings.mapId && settings.mapId !== stage.map.id) stage.setMap(settings.mapId);
   stage.setLens({});
+  audio.setLowPower(stage.qualityKey === 'low');
   audio.setRain(stage.map.weather === 'rain' ? 1 : 0);
   requestAnimationFrame(menuLoop);
   showTitle();

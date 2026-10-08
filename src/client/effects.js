@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { makeSolidMaterial } from './agent-view.js';
 import { createBombScreen, glowTexture, holeTexture, labelTexture, smokeTexture } from './textures.js';
 
 // 포스 패치 표시 색 (채도를 낮춘 현실적인 톤)
@@ -188,65 +190,113 @@ class Particles {
   }
 }
 
+// 형상을 옮겨 붙일 준비: 위치·법선만 남기고 비색인화
+function placed(geo, x, y, z, ry = 0) {
+  let g = geo.index ? geo.toNonIndexed() : geo;
+  for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+  if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+  if (ry) g.rotateY(ry);
+  g.translate(x, y, z);
+  return g;
+}
+// 단색 부품에 정점 색·거칠기·금속성을 붙임 (makeSolidMaterial 한 재질로 그림)
+function tinted(geo, color, rough, metal, emit = 0) {
+  const n = geo.attributes.position.count;
+  const c = new THREE.Color(color);
+  const col = new Float32Array(n * 3);
+  const rme = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    col.set([c.r, c.g, c.b], i * 3);
+    rme.set([rough, metal, emit], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aRME', new THREE.BufferAttribute(rme, 3));
+  return geo;
+}
+
+// 폭탄 하나: 재질 묶음별로 합쳐 그리기 호출을 줄임 (부품 36개 → 6개)
 class BombView {
   constructor(bomb) {
     this.bomb = bomb;
     const g = new THREE.Group();
     g.position.set(bomb.x, 0, bomb.z);
     this.group = g;
-    const metal = new THREE.MeshStandardMaterial({ color: '#2b2e33', roughness: 0.5, metalness: 0.75 });
-    const dark = new THREE.MeshStandardMaterial({ color: '#121417', roughness: 0.8, metalness: 0.3 });
-    const olive = new THREE.MeshStandardMaterial({ color: '#3d4130', roughness: 0.85 });
     this.liquid = new THREE.MeshStandardMaterial({ color: '#b2281f', emissive: '#b2281f', emissiveIntensity: 0.7 });
     const glass = new THREE.MeshStandardMaterial({ color: '#9fb6c2', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2 });
-    const add = (geo, mat, x, y, z) => {
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(x, y, z);
-      m.castShadow = true;
-      g.add(m);
-      return m;
-    };
-    add(new RoundedBoxGeometry(1.0, 0.16, 0.7, 2, 0.03), dark, 0, 0.08, 0);
-    add(new RoundedBoxGeometry(0.86, 0.42, 0.52, 2, 0.03), olive, 0, 0.37, 0);
+    // 단색 부품 (받침·몸체·마개·전선)
+    const solid = [
+      tinted(placed(new RoundedBoxGeometry(1.0, 0.16, 0.7, 2, 0.03), 0, 0.08, 0), '#121417', 0.8, 0.3),
+      tinted(placed(new RoundedBoxGeometry(0.86, 0.42, 0.52, 2, 0.03), 0, 0.37, 0), '#3d4130', 0.85, 0),
+    ];
+    const glassParts = [];
+    const liquidParts = [];
     for (const x of [-0.3, 0, 0.3]) {
-      add(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 14), glass, x, 0.83, -0.08);
-      add(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), this.liquid, x, 0.8, -0.08);
-      add(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 14), metal, x, 1.1, -0.08);
-      add(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 14), metal, x, 0.6, -0.08);
+      glassParts.push(placed(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 14), x, 0.83, -0.08));
+      liquidParts.push(placed(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), x, 0.8, -0.08));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 14), x, 1.1, -0.08), '#2b2e33', 0.5, 0.75));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 14), x, 0.6, -0.08), '#2b2e33', 0.5, 0.75));
     }
     // 전선
     for (let i = 0; i < 3; i++) {
       const curve = new THREE.CatmullRomCurve3([
         new THREE.Vector3(-0.3 + i * 0.3, 1.12, -0.08), new THREE.Vector3(-0.2 + i * 0.2, 1.2, 0.1), new THREE.Vector3(0.0, 0.62, 0.24),
       ]);
-      const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.008, 5), new THREE.MeshStandardMaterial({ color: ['#8a2a20', '#2a4a8a', '#c9a43a'][i], roughness: 0.6 }));
-      g.add(m);
+      solid.push(tinted(placed(new THREE.TubeGeometry(curve, 16, 0.008, 5), 0, 0, 0), ['#8a2a20', '#2a4a8a', '#c9a43a'][i], 0.6, 0));
     }
+    const mesh = (geo, mat, shadow = true) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = shadow;
+      g.add(m);
+      return m;
+    };
+    mesh(mergeGeometries(solid), makeSolidMaterial({ strobe: 0 }));
+    mesh(mergeGeometries(glassParts), glass, false);
+    mesh(mergeGeometries(liquidParts), this.liquid);
     const screen = createBombScreen();
     this.screen = screen;
-    add(new THREE.PlaneGeometry(0.42, 0.21), new THREE.MeshBasicMaterial({ map: screen.texture }), 0, 0.42, 0.262).castShadow = false;
-    this.lamp = add(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: '#ff2a2a', emissive: '#ff2a2a', emissiveIntensity: 3 }), 0.34, 0.62, 0.2);
-    this.light = new THREE.PointLight('#ff3020', 3, 5, 2);
-    this.light.position.set(0, 1.0, 0.3);
-    g.add(this.light);
-    this.segments = [];
+    const scr = mesh(new THREE.PlaneGeometry(0.42, 0.21), new THREE.MeshBasicMaterial({ map: screen.texture }), false);
+    scr.position.set(0, 0.42, 0.262);
+    this.lamp = mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: '#ff2a2a', emissive: '#ff2a2a', emissiveIntensity: 3 }), false);
+    this.lamp.position.set(0.34, 0.62, 0.2);
+    // 경고등 (실제 점광원은 LightRig가 가까울 때만 배정)
+    this.light = { pos: new THREE.Vector3(bomb.x, 1.0, bomb.z + 0.3), color: new THREE.Color('#ff3020'), intensity: 3, distance: 5, priority: 0.5 };
+    // 해체 진행 표시: 바닥 고리 16칸 (한 메시, 칸마다 정점 색)
+    const segs = [];
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.05), new THREE.MeshBasicMaterial({ color: '#2a2d32' }));
-      m.position.set(Math.cos(a) * 1.05, 0.02, Math.sin(a) * 1.05);
-      m.rotation.y = -a + Math.PI / 2;
-      g.add(m);
-      this.segments.push(m);
+      segs.push(placed(new THREE.BoxGeometry(0.2, 0.02, 0.05), Math.cos(a) * 1.05, 0.02, Math.sin(a) * 1.05, -a + Math.PI / 2));
     }
+    this.segPer = segs[0].attributes.position.count;
+    const segGeo = mergeGeometries(segs);
+    segGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(segGeo.attributes.position.count * 3), 3));
+    this.segColors = segGeo.attributes.color;
+    mesh(segGeo, new THREE.MeshBasicMaterial({ vertexColors: true }), false);
+    this.segKey = '';
+    this.segCount = 16;
     // 해체 완료 신호 (녹색 섬광등 + 희미한 빛기둥)
     this.beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.2, 0.35, 30, 16, 1, true),
       new THREE.MeshBasicMaterial({ color: '#4dbf7a', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
     );
     this.beam.position.y = 15;
+    this.beam.visible = false;
     g.add(this.beam);
     this.lastText = '';
     this.blink = 0;
+  }
+
+  setSegments(defused, lit) {
+    const key = defused ? 'd' : String(lit);
+    if (key === this.segKey) return;
+    this.segKey = key;
+    const on = new THREE.Color(defused ? '#3f9a62' : '#c08a2a');
+    const off = new THREE.Color('#2a2d32');
+    const arr = this.segColors.array;
+    for (let i = 0; i < this.segCount; i++) {
+      const c = defused || i < lit ? on : off;
+      for (let v = 0; v < this.segPer; v++) arr.set([c.r, c.g, c.b], (i * this.segPer + v) * 3);
+    }
+    this.segColors.needsUpdate = true;
   }
 
   update(dt, time, timeLeft) {
@@ -281,15 +331,16 @@ class BombView {
     const on = defused || Math.sin(this.blink * Math.PI * 2) > 0;
     this.lamp.material.emissive.set(on ? liquid : '#200000');
     this.light.intensity = defused ? 3 : on ? 4 : 1;
-    const lit = Math.round(b.progress * this.segments.length);
-    this.segments.forEach((m, i) => m.material.color.set(defused ? '#3f9a62' : i < lit ? '#c08a2a' : '#2a2d32'));
+    this.setSegments(defused, Math.round(b.progress * this.segCount));
     this.beam.material.opacity += ((defused ? 0.12 : 0) - this.beam.material.opacity) * Math.min(1, dt * 3);
+    this.beam.visible = this.beam.material.opacity > 0.004;
   }
 }
 
 // 모든 시각 효과
 export class Effects {
-  constructor(scene, match) {
+  constructor(scene, match, lights = null) {
+    this.lights = lights;
     this.scene = scene;
     this.match = match;
     this.group = new THREE.Group();
@@ -350,12 +401,6 @@ export class Effects {
       this.flashes.push({ sprite: s, t: 0 });
     }
     this.flashNext = 0;
-    this.muzzleLights = [0, 1, 2, 3].map(() => {
-      const l = new THREE.PointLight('#ffb866', 0, 11, 2);
-      this.group.add(l);
-      return { light: l, t: 0 };
-    });
-    this.lightNext = 0;
 
     this.veils = new Map();
     this.zones = new Map();
@@ -366,6 +411,7 @@ export class Effects {
     this.bombs = match.bombs.map((b) => {
       const v = new BombView(b);
       this.group.add(v.group);
+      lights?.add(v.light);
       return v;
     });
     // 무게 감지기로 탐지된 적 표시 (벽 너머로 보임)
@@ -393,11 +439,7 @@ export class Effects {
       f.t = 0.05;
       f.sprite.material.color.set(e.amp ? '#ffb15a' : '#ffc27a');
     }
-    const L = this.muzzleLights[this.lightNext];
-    this.lightNext = (this.lightNext + 1) % this.muzzleLights.length;
-    L.light.position.copy(muzzlePos);
-    L.light.intensity = isLocal ? 9 : 14;
-    L.t = 0.045;
+    this.lights?.flash(muzzlePos, isLocal ? 9 : 14);
     // 총구 연기
     this.smoke.burst(muzzlePos, '#9a9ea3', isLocal ? 2 : 1, { speed: 0.5, up: 1.2, life: 1.2, gravity: -0.6, spread: 0.6, drag: 2 });
     // 탄피 (가까운 사격만)
@@ -486,9 +528,9 @@ export class Effects {
       this.sparks.burst(p, '#ffb347', 180, { speed: 16, up: 2, life: 1.2, gravity: 8, spread: 1.4 });
       this.dust.burst(p, '#3b3631', 160, { speed: 9, up: 2.2, life: 3, gravity: 0.5, spread: 1.3, drag: 1.2 });
       this.smoke.burst(p, '#2c2a28', 60, { speed: 4, up: 3, life: 4.5, gravity: -0.8, spread: 1, drag: 0.8 });
-      const light = new THREE.PointLight('#ffb347', 900, 70, 2);
-      light.position.set(b.x, 3, b.z);
-      this.group.add(light);
+      // 폭발 빛: 광원 예산에서 가장 먼저 배정됨
+      const light = { pos: new THREE.Vector3(b.x, 3, b.z), color: new THREE.Color('#ffb347'), intensity: 900, distance: 70, priority: 5 };
+      this.lights?.add(light);
       this.blasts.push({ light, t: 0 });
       if (cameraPos) this.flash = Math.max(this.flash, Math.max(0, 1 - Math.hypot(cameraPos.x - b.x, cameraPos.z - b.z) / 45));
     }
@@ -576,10 +618,6 @@ export class Effects {
       f.t -= dt;
       f.sprite.visible = f.t > 0;
     }
-    for (const L of this.muzzleLights) {
-      L.t -= dt;
-      if (L.t <= 0) L.light.intensity = 0;
-    }
 
     // 탄피 물리
     for (let i = 0; i < this.maxCasings; i++) {
@@ -648,7 +686,7 @@ export class Effects {
     }
     this.blasts = this.blasts.filter((b) => {
       if (b.t < 1.2) return true;
-      this.group.remove(b.light);
+      this.lights?.remove(b.light);
       return false;
     });
 
@@ -862,6 +900,9 @@ export class Effects {
 
   dispose() {
     this.scene.remove(this.group);
+    // 광원 예산에서 이 경기의 광원(폭탄 경고등·폭발) 제거
+    for (const v of this.bombs) this.lights?.remove(v.light);
+    for (const b of this.blasts) this.lights?.remove(b.light);
     this.group.traverse((o) => {
       o.geometry?.dispose();
       if (o.material) {
