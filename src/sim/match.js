@@ -3,10 +3,10 @@ import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
 import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, ECON, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, TEAM_SIZE, TEAMS, ULT, otherTeam,
+  BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
 import { ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
-import { CONCEPTS } from './concepts.js';
+import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
@@ -66,7 +66,7 @@ export class Match {
   // conceptIds: 개념 카드로 먼저 놓을 개념 (아직 도감에 없는 것 등). conceptCount: 맵에 놓을 카드 수
   // roster: 직접 정한 명단 (온라인: 사람 여러 명 + 봇). client: 온라인 참가자 화면용 — 규칙 계산은 방장이 하고
   //         여기서는 자기 요원의 이동·사격 연출만 미리 보여 줌 (피해·패치·해체는 방장 결과를 받아 씀)
-  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false, rules = 'single' } = {}) {
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false, rules = 'single', playerMastery = [] } = {}) {
     this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
@@ -112,7 +112,10 @@ export class Match {
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
       for (const m of roster.filter((x) => x.team === team)) {
         this.agents.push(createAgent({ ...m, spawn: { x: 0, z: 0 }, loadout: loadouts.get(m.id) ?? [], kit: rules === 'rounds' ? 'pistol' : 'full' }));
-        this.agents.at(-1).human = !!m.human; // 온라인으로 들어온 다른 사람 (봇이 조종하지 않음)
+        const a = this.agents.at(-1);
+        a.human = !!m.human; // 온라인으로 들어온 다른 사람 (봇이 조종하지 않음)
+        // 숙달한 개념 (사람만): 관련 패치 재사용 대기가 짧아짐
+        a.mastered = new Set(m.mastery ?? (m.isPlayer ? playerMastery : []));
       }
     }
     this.byId = new Map(this.agents.map((a) => [a.id, a]));
@@ -126,6 +129,34 @@ export class Match {
 
   get rounds() {
     return this.rules === 'rounds';
+  }
+
+  // 그 패치와 관련된 개념을 숙달했는지
+  isMastered(a, patchId) {
+    const c = PATCH_CONCEPT[patchId];
+    return !!c && !!a.mastered?.has(c);
+  }
+
+  // 구매 시간 개념 점검: 사람 요원마다 라운드마다 한 문제 (숙달하지 않은 개념을 먼저)
+  dealQuiz(a) {
+    const recent = a.quizSeen ?? [];
+    const pool = CONCEPTS.filter((c) => !recent.includes(c.id));
+    const fresh = pool.filter((c) => !a.mastered?.has(c.id));
+    const c = this.rng.pick(fresh.length ? fresh : pool.length ? pool : CONCEPTS);
+    a.quiz = { id: c.id, done: false, ok: null };
+    a.quizSeen = [...recent, c.id].slice(-6);
+  }
+
+  answerQuiz(a, choice) {
+    const q = a.quiz;
+    if (!q || q.done || this.phase !== 'buy' || !this.rounds) return false;
+    const c = CONCEPT_BY_ID[q.id];
+    q.done = true;
+    q.ok = choice === c.answer;
+    q.choice = choice;
+    if (q.ok) a.credits = Math.min(ECON.max, a.credits + ECON.quiz);
+    this.emit('quizAnswer', { agent: a, conceptId: q.id, correct: q.ok, choice, bonus: q.ok ? ECON.quiz : 0 });
+    return true;
   }
 
   // 지금 그 쪽(해체/포스)을 맡은 분대
@@ -197,6 +228,7 @@ export class Match {
     this.roundReason = '';
     this.devices.reset();
     this.placeBombs();
+    if (!this.client) for (const a of this.agents) if (a.isPlayer || a.human) this.dealQuiz(a);
     const firstOfHalf = this.round === 1 || this.round === ROUNDS.half + 1;
     for (const a of this.agents) {
       if (!a.alive || firstOfHalf) {
@@ -436,6 +468,7 @@ export class Match {
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
       if (intent.buy) this.buy(a, intent.buy);
+      if (intent.quiz >= 0) this.answerQuiz(a, intent.quiz);
       this.stepAgent(a, intent, dt, live, mobile);
     }
     this.separateAgents();
@@ -1153,7 +1186,7 @@ export class Match {
         return false;
     }
     if (def.tier === 'ultimate') a.ult = 0;
-    else p.cd = def.cooldown;
+    else p.cd = def.cooldown * (this.isMastered(a, p.id) ? MASTERY.cooldownMult : 1);
     a.stats.patchUses++;
     this.makeNoise(a, 'patch');
     this.emit('patch', payload);
@@ -1385,6 +1418,7 @@ export class Match {
   }
 
   defuse(a, bomb) {
+    const puzzleKind = a.lockpick?.puzzle?.kind ?? null;
     bomb.state = 'defused';
     bomb.picker = null;
     bomb.progress = 1;
@@ -1392,7 +1426,7 @@ export class Match {
     a.stats.defuses++;
     a.ult = Math.min(ULT.max, a.ult + ULT.perDefuse);
     this.pay(a, ECON.defuse);
-    this.emit('lockpickEnd', { agent: a, bomb, reason: 'done' });
+    this.emit('lockpickEnd', { agent: a, bomb, reason: 'done', puzzleKind });
     this.emit('bombDefused', { agent: a, bomb });
   }
 

@@ -1,5 +1,4 @@
-import { LOCKPICK_CONCEPT } from '../sim/data.js';
-import { describeForce, formula, isSolved, netForce, signed } from '../sim/lockpick.js';
+import { PUZZLE_INFO, describeForce, formula, isSolved, netForce, signed } from '../sim/lockpick.js';
 
 const W = 640, X0 = 320, UNIT = 14; // 수직선: -20 N ~ +20 N
 const xOf = (n) => X0 + n * UNIT;
@@ -15,7 +14,7 @@ function arrow(x1, x2, y, color, width, label, dashed = false) {
     ${label ? `<text x="${(x1 + x2) / 2}" y="${y - width - 8}" fill="${color}" text-anchor="middle">${label}</text>` : ''}`;
 }
 
-// 합력 락픽 창: 힘 카드를 골라 합력을 목표와 일치시키면 해체 진행
+// 힘 락픽 창: 문제(합력·평형·용수철·부력·달 무게)를 읽고 힘 카드를 골라 합력을 맞추면 해체 진행
 export class LockpickUI {
   constructor(root) {
     this.root = document.createElement('div');
@@ -53,19 +52,23 @@ export class LockpickUI {
   // 새 문제가 열릴 때 한 번만 틀을 만듦 (카드를 누를 때마다 창이 깜빡이지 않게)
   build(lp, bomb) {
     this.puzzle = lp.puzzle;
+    const p = lp.puzzle;
+    const info = PUZZLE_INFO[p.kind] ?? PUZZLE_INFO.resultant;
+    const goal = p.fixed ? '전체 합력 0 N (힘의 평형)' : p.hidden ? '? N — 문제를 읽고 직접 계산' : describeForce(p.target, p.vertical);
     this.root.innerHTML = `
       <div class="lp-panel">
         <header>
-          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · 합력 잠금 해제</div>
+          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · ${info.title}</div>
           <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 힘 카드 · <kbd>F</kbd> 중단 · 피격 시 초기화</div>
         </header>
-        <div class="lp-target"><small>요구 합력</small><b>${describeForce(lp.puzzle.target)}</b></div>
+        <div class="lp-prompt">${p.prompt ?? ''}</div>
+        <div class="lp-target ${p.hidden ? 'hidden' : ''}"><small>요구</small><b>${goal}</b></div>
         <div class="lp-svg"></div>
         <div class="lp-formula"></div>
         <div class="lp-cards"></div>
         <div class="lp-hint"></div>
         <div class="lp-turn"><i></i></div>
-        <footer><b>교범 · ${LOCKPICK_CONCEPT.concept}</b> ${LOCKPICK_CONCEPT.conceptText}</footer>
+        <footer><b>교범 · ${info.title.replace(' 잠금', '')}</b> ${info.text}</footer>
       </div>`;
     const $ = (sel) => this.root.querySelector(sel);
     this.els = { panel: $('.lp-panel'), svg: $('.lp-svg'), formula: $('.lp-formula'), cards: $('.lp-cards'), hint: $('.lp-hint') };
@@ -73,8 +76,10 @@ export class LockpickUI {
 
   fill(lp, solved) {
     const { puzzle, selected } = lp;
-    const net = netForce(puzzle, selected);
-    const target = puzzle.target;
+    const fixed = puzzle.fixed ?? 0;
+    const net = netForce(puzzle, selected) + fixed; // 화면의 합력 = 카드 + 이미 걸린 힘(마찰력)
+    const target = puzzle.target + fixed; // 마찰 문제는 0
+    const vert = !!puzzle.vertical;
     const AXIS = 196;
 
     let ticks = '';
@@ -87,6 +92,11 @@ export class LockpickUI {
     let chain = '';
     let at = 0;
     let lane = 0;
+    if (fixed) {
+      chain += arrow(xOf(0), xOf(fixed), 58, '#c0392b', 3, `마찰력 ${signed(fixed)}`, true);
+      at = fixed;
+      lane = 1;
+    }
     puzzle.cards.forEach((c, i) => {
       if (!selected[i]) return;
       const v = c.dir * c.mag;
@@ -97,10 +107,10 @@ export class LockpickUI {
     const resultColor = solved ? '#6fcf8e' : '#e3b341';
     this.els.svg.innerHTML = `
       <svg viewBox="0 0 ${W} 232" class="numberline">
-        <text x="${xOf(-20)}" y="22" class="dir">← 좌 (−)</text>
-        <text x="${xOf(20)}" y="22" class="dir" text-anchor="end">우 (+) →</text>
-        <text x="${xOf(target)}" y="34" text-anchor="middle" class="goal">요구 ${signed(target)} N</text>
-        <line x1="${xOf(target)}" y1="42" x2="${xOf(target)}" y2="${AXIS}" stroke="#dfe4e8" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 5"/>
+        <text x="${xOf(-20)}" y="22" class="dir">${vert ? '↓ 아래 (−)' : '← 좌 (−)'}</text>
+        <text x="${xOf(20)}" y="22" class="dir" text-anchor="end">${vert ? '위 (+) ↑' : '우 (+) →'}</text>
+        ${puzzle.hidden ? '' : `<text x="${xOf(target)}" y="34" text-anchor="middle" class="goal">요구 ${signed(target)} N</text>
+        <line x1="${xOf(target)}" y1="42" x2="${xOf(target)}" y2="${AXIS}" stroke="#dfe4e8" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 5"/>`}
         ${chain}
         <line x1="${xOf(-20)}" y1="${AXIS}" x2="${xOf(20)}" y2="${AXIS}" stroke="rgba(220,226,232,.35)" stroke-width="2"/>
         ${ticks}
@@ -113,7 +123,7 @@ export class LockpickUI {
         const v = c.dir * c.mag;
         return `<button class="force-card ${selected[i] ? 'on' : ''} ${c.dir > 0 ? 'right' : 'left'}" data-card="${i}">
           <kbd>${i + 1}</kbd>
-          <span class="fc-arrow">${c.dir > 0 ? '→' : '←'}</span>
+          <span class="fc-arrow">${vert ? (c.dir > 0 ? '↑' : '↓') : c.dir > 0 ? '→' : '←'}</span>
           <span class="fc-mag">${c.mag} N</span>
           <span class="fc-sign">${signed(v)}</span>
         </button>`;
@@ -122,8 +132,9 @@ export class LockpickUI {
 
     let hint;
     if (solved) hint = '합력 일치. 잠금 해제 진행 중 — 위치 유지.';
-    else if (!selected.some(Boolean)) hint = '숫자 키 1~6으로 힘 카드 선택.';
-    else hint = `편차 ${describeForce(target - net)}. 보정 필요.`;
+    else if (!selected.some(Boolean)) hint = puzzle.hidden ? '문제를 읽고 필요한 힘을 계산한 뒤 숫자 키 1~6으로 힘 카드 선택.' : '숫자 키 1~6으로 힘 카드 선택.';
+    else if (puzzle.hidden) hint = `지금 합력 ${describeForce(net, vert)}. 계산한 힘과 다르면 카드를 바꿀 것.`;
+    else hint = `편차 ${describeForce(target - net, vert)}. 보정 필요.`;
     this.els.formula.textContent = formula(puzzle, selected);
     this.els.hint.textContent = hint;
     this.els.panel.classList.toggle('solved', solved);

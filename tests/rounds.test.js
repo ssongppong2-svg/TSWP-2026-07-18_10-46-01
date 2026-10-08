@@ -128,7 +128,7 @@ test('폭탄은 라운드마다 A·B 구역 안 무작위 칸에 놓임', () => 
     for (const b of m.bombs) {
       const { c, r: row } = m.map.toCell(b.x, b.z);
       assert.ok(m.map.siteCells[b.id].some((s) => s.c === c && s.r === row), `${b.id} 구역 안`);
-      assert.ok(m.map.walkable(c, row));
+      assert.ok(m.map.walkableAt(c, row, b.y ?? 0), '그 층 바닥');
       assert.equal(b.state, 'armed');
       seen[b.id].add(`${c},${row}`);
     }
@@ -232,4 +232,43 @@ test('온라인 라운드제: 참가자 구매가 방장에 반영되고 점수�
   assert.equal(client.roundReason, '포스팀 전원 제압');
   assert.equal(roundEnd, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(hs.snapshot({ withStats: true }))) < 3600);
+});
+
+test('구매 시간 개념 점검: 사람만 라운드마다 한 문제, 맞히면 에너지 +200 (한 번만), 다음 라운드는 다른 문제', async () => {
+  const { CONCEPT_BY_ID } = await import('../src/sim/concepts.js');
+  const m = roundsMatch(5);
+  const me = m.player;
+  assert.ok(me.quiz && !me.quiz.done, '사람에게 문제');
+  assert.ok(m.agents.filter((a) => a !== me).every((a) => !a.quiz), '봇은 없음');
+  const c = CONCEPT_BY_ID[me.quiz.id];
+  const before = me.credits;
+  m.setController(me.id, { getIntent: (mm, a) => ({ ...emptyIntent(a), quiz: c.answer }) });
+  ticks(m, 2);
+  assert.equal(me.credits, before + ECON.quiz, '정답 보너스');
+  assert.ok(me.quiz.done && me.quiz.ok);
+  ticks(m, 2);
+  assert.equal(me.credits, before + ECON.quiz, '두 번 받지 않음');
+  const first = me.quiz.id;
+  m.round = 2;
+  m.startRound();
+  assert.ok(me.quiz.id !== first && !me.quiz.done, '새 라운드에는 다른 문제');
+  // 틀리면 보너스 없음
+  const wrong = (CONCEPT_BY_ID[me.quiz.id].answer + 1) % CONCEPT_BY_ID[me.quiz.id].choices.length;
+  const c2 = me.credits;
+  m.setController(me.id, { getIntent: (mm, a) => ({ ...emptyIntent(a), quiz: wrong }) });
+  ticks(m, 2);
+  assert.ok(me.quiz.done && !me.quiz.ok && me.credits === c2, '틀리면 보너스 없음');
+});
+
+test('개념 숙달: 관련 개념을 숙달한 사람은 그 패치의 재사용 대기가 15% 짧음', () => {
+  const load = new Map([['defuse-0', ['elasticPad', null, null, null]]]);
+  const plain = new Match({ seed: 2, playerTeam: TEAMS.DEFUSE, loadouts: load });
+  const master = new Match({ seed: 2, playerTeam: TEAMS.DEFUSE, loadouts: load, playerMastery: ['elastic'] });
+  for (const m of [plain, master]) {
+    m.phase = 'live';
+    m.usePatch(m.player, 0);
+  }
+  const a = plain.player.patches[0].cd, b = master.player.patches[0].cd;
+  assert.ok(a > 0 && Math.abs(b - a * 0.85) < 1e-6, `${a} → ${b}`);
+  assert.ok(master.isMastered(master.player, 'elasticPad') && !plain.isMastered(plain.player, 'elasticPad'));
 });

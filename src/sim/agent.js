@@ -96,6 +96,7 @@ export function emptyIntent(agent) {
     patch: [false, false, false, false],
     interact: false,
     card: -1,
+    quiz: -1, // 구매 시간 개념 점검: 고른 보기 번호
     command: null, // 지휘 명령 { type } (분대장만)
     report: false, // 적 보고: 조준한 곳을 무전으로 알림
   };

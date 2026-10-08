@@ -163,7 +163,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     const s = net.session;
     const host = s.host();
     const lobby = host?.lobby ?? { map: settings.mapId, diff: settings.difficulty ?? 'normal' };
-    const players = s.peers().filter((p) => p.team).map((p) => ({ key: p.key, name: p.name, team: p.team, load: p.load ?? [] }));
+    const players = s.peers().filter((p) => p.team).map((p) => ({ key: p.key, name: p.name, team: p.team, load: p.load ?? [], mastery: Array.isArray(p.mas) ? p.mas : [] }));
     const seed = Math.floor(Math.random() * 1e9);
     const plan = planMatch(players, { botNames: BOT_NAMES, draft: TeamDraft, rng: createRng(seed) });
     const st = { id: `${seed}`, seed, map: MAP_ORDER.includes(lobby.map) ? lobby.map : MAP_ORDER[0], diff: lobby.diff ?? 'normal', p: packPlan(plan, PATCH_ORDER) };

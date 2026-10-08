@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
-import { BOT_NAMES, DT, NOISE, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { PATCHES, PATCH_ORDER, WEAPONS } from '../sim/data.js';
 import { ClientSync, HostSync, InputRecorder, RemoteController, rosterFor, unpackPlan } from '../net/protocol.js';
 import { Match } from '../sim/match.js';
@@ -16,8 +16,9 @@ import { QUALITY, QUALITY_ORDER } from './stage.js';
 import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
 import { conceptCardTexture } from './textures.js';
-import { CONCEPTS, CONCEPT_BY_ID } from '../sim/concepts.js';
-import { addConcept, loadProgress } from '../core/progress.js';
+import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
+import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
+import { PUZZLE_INFO } from '../sim/lockpick.js';
 
 const PATCH_SOUNDS = {
   gravityVeil: 'veil', elasticPad: 'pad', resultantAmp: 'amp', reactionRounds: 'rounds', buoyShield: 'shield',
@@ -65,7 +66,7 @@ export class GameClient {
       this.netCheckT = 0;
     } else {
       stage.setMap(mapId ?? stage.map.id);
-      this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh, rules: 'rounds' });
+      this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh, rules: 'rounds', playerMastery: masteredIds() });
       attachBots(this.match, difficulty);
       this.player = this.match.player;
     }
@@ -362,10 +363,19 @@ export class GameClient {
     ev.on('lockpickMatch', (e) => isMe(e.agent) && A.play('match'));
     ev.on('lockpickEnd', (e) => {
       if (!isMe(e.agent)) return;
+      // 해체 문제를 풀면 그 개념을 쓴 것 → 숙달
+      if (e.reason === 'done' && e.puzzleKind) this.studied(PUZZLE_INFO[e.puzzleKind]?.concept, '해체 문제');
       if (e.reason === 'hit' || e.reason === 'captured') {
         A.play('lockFail');
         this.hud.banner('해체 중단', e.reason === 'hit' ? '피격. 처음부터 재시도.' : '구속됨. 처음부터 재시도.', 'bad');
       }
+    });
+    ev.on('quizAnswer', (e) => {
+      if (!isMe(e.agent)) return;
+      A.play(e.correct ? 'match' : 'denied');
+      const fresh = recordQuiz(e.correct, e.conceptId);
+      if (e.correct) this.hud.banner('보급 점검 정답', `+${e.bonus} J · ${CONCEPT_BY_ID[e.conceptId]?.name ?? ''}`, 'good');
+      if (fresh) this.masteredBanner(e.conceptId);
     });
     ev.on('bombDefused', (e) => {
       A.play('defused');
@@ -740,6 +750,18 @@ export class GameClient {
       st.setRenderScale(st.renderScale + 0.1);
       p.holdT = 4;
     }
+  }
+
+  // 개념을 써서 문제를 풂 → 숙달도 +1 (새로 숙달하면 알림)
+  studied(conceptId, how) {
+    if (!conceptId) return;
+    if (recordUse(conceptId)) this.masteredBanner(conceptId);
+    else this.hud.radio({ name: '교범', text: `${how} 해결 · ${CONCEPT_BY_ID[conceptId]?.name ?? ''} 숙달도 ${masteryOf(conceptId)}/${MASTERY.need}`, kind: 'order' });
+  }
+
+  masteredBanner(conceptId) {
+    const patches = Object.entries(PATCH_CONCEPT).filter(([, c]) => c === conceptId).map(([p]) => PATCHES[p]?.name).filter(Boolean);
+    this.hud.banner(`개념 숙달 · ${CONCEPT_BY_ID[conceptId]?.name ?? ''}`, patches.length ? `다음 경기부터 ${patches.join('·')} 재사용 대기 −15%` : '도감에 숙달로 기록', 'good');
   }
 
   dispose() {

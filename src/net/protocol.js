@@ -5,10 +5,12 @@
 //
 // 이 파일은 화면·네트워크와 무관한 순수 변환 코드라서 Node 테스트로 검증한다.
 import { emptyIntent, freshAmmo } from '../sim/agent.js';
+import { CONCEPTS } from '../sim/concepts.js';
 import { PROJECTILE } from '../sim/constants.js';
 import { WEAPONS } from '../sim/data.js';
 
 export const PROTOCOL = 3;
+const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
 const ITEMS = [...WEAP, 'light', 'heavy']; // 상점에서 사는 것
 const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
@@ -135,6 +137,7 @@ export class HostSync {
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
         u: Math.round(a.ult),
         lp: a.lockpick?.kind === 'puzzle' ? { b: a.lockpick.bombId, z: a.lockpick.puzzle, s: a.lockpick.selected, t: r2(a.lockpick.turnT) } : 0,
+        q: a.quiz ? [a.quiz.id, a.quiz.done ? 1 : 0, a.quiz.ok == null ? -1 : a.quiz.ok ? 1 : 0, a.quiz.choice ?? -1] : 0,
         ak: this.acks[a.id] ?? 0,
         rc: [r3(a.recoil), r3(a.recoilYaw), r3(a.punch)],
       };
@@ -290,6 +293,8 @@ export class ClientSync {
         const keepLocal = a.lockpick?.kind === 'puzzle' && h.ak < this.pendingCardSeq;
         a.lockpick = { bombId: h.lp.b, kind: 'puzzle', puzzle: h.lp.z, selected: keepLocal ? a.lockpick.selected : h.lp.s, turnT: h.lp.t };
       } else if (a.lockpick) a.lockpick = null;
+      if (h.q) a.quiz = { id: h.q[0], done: !!h.q[1], ok: h.q[2] < 0 ? null : h.q[2] === 1, choice: h.q[3] };
+      else a.quiz = null;
     }
 
     snap.B.forEach(([st, pk, pr, bx, bz, by], i) => {
@@ -486,6 +491,8 @@ export class InputRecorder {
     this.cardN = 0;
     this.buys = [];
     this.buyN = 0;
+    this.quizN = 0;
+    this.qz = null;
     this.seq = 0;
     this.cmd = null;
     this.latest = null;
@@ -515,6 +522,7 @@ export class InputRecorder {
       if (a.lockpick?.kind === 'puzzle') a.lockpick.selected[i.card] = !a.lockpick.selected[i.card];
       this.onCard?.(this.seq + 1);
     }
+    if (i.quiz >= 0) this.qz = [++this.quizN, i.quiz];
     if (i.buy) {
       this.buyN++;
       this.buys.push([this.buyN, ITEMS.indexOf(i.buy)]);
@@ -534,6 +542,7 @@ export class InputRecorder {
       cm: this.cmd,
       cd: this.cards.map((c) => [...c]),
       by: this.buys.map((c) => [...c]),
+      qz: this.qz,
     };
     // 이 화면에서는 이동·사격·재장전·무기 교체만 미리 보여 줌
     i.interact = false;
@@ -542,6 +551,7 @@ export class InputRecorder {
     i.report = false;
     i.card = -1;
     i.buy = null; // 구매는 방장이 처리
+    i.quiz = -1; // 점검 답도 방장이 채점
     return i;
   }
 }
@@ -578,6 +588,7 @@ export class RemoteController {
       this.seen = [...c];
       this.cardSeen = Math.max(0, ...((inp.cd ?? []).map((x) => x[0])));
       this.buySeen = Math.max(0, ...((inp.by ?? []).map((x) => x[0])));
+      this.quizSeen = Array.isArray(inp.qz) ? inp.qz[0] - 1 : 0;
     }
     const fresh = (k) => (c[k] ?? 0) > (this.seen[k] ?? 0);
     if (fresh(ACT.reload)) i.reload = true;
@@ -600,6 +611,11 @@ export class RemoteController {
       this.buySeen = nb[0];
       i.buy = ITEMS[nb[1]] ?? null;
     }
+    // 개념 점검 답 (한 번만)
+    if (Array.isArray(inp.qz) && inp.qz[0] > (this.quizSeen ?? 0)) {
+      this.quizSeen = inp.qz[0];
+      i.quiz = inp.qz[1] | 0;
+    }
     this.onAck?.(inp.s);
     return i;
   }
@@ -614,7 +630,7 @@ export function planMatch(players, { teamSize = 5, botNames, draft, rng } = {}) 
     const humans = players.filter((p) => p.team === team).slice(0, teamSize);
     for (let i = 0; i < teamSize; i++) {
       const h = humans[i];
-      roster.push({ id: `${team}-${i}`, team, name: h ? String(h.name || '요원').slice(0, 8) : botNames[team][i], key: h?.key ?? null });
+      roster.push({ id: `${team}-${i}`, team, name: h ? String(h.name || '요원').slice(0, 8) : botNames[team][i], key: h?.key ?? null, mas: h ? (h.mastery ?? []).filter((x) => typeof x === 'string').slice(0, 20) : [] });
     }
   }
   // 패치: 사람은 고른 것 중 팀 재고(2기) 안에서 들어온 순서대로, 나머지는 자동
@@ -635,25 +651,25 @@ export function planMatch(players, { teamSize = 5, botNames, draft, rng } = {}) 
 
 // 이 화면 기준 명단 (내 요원 = isPlayer, 다른 사람 = human)
 export function rosterFor(plan, myKey) {
-  return plan.roster.map((r) => ({ id: r.id, team: r.team, name: r.name, isPlayer: !!r.key && r.key === myKey, human: !!r.key && r.key !== myKey }));
+  return plan.roster.map((r) => ({ id: r.id, team: r.team, name: r.name, isPlayer: !!r.key && r.key === myKey, human: !!r.key && r.key !== myKey, mastery: r.mas ?? [] }));
 }
 
 // 시작 정보를 작게 (presence 4KB 안에 경기 상태와 같이 들어가야 함): 패치는 번호로, 봇 이름은 생략
 export function packPlan(plan, patchOrder) {
   return {
-    h: plan.roster.filter((r) => r.key).map((r) => [r.id, r.key, r.name]),
+    h: plan.roster.filter((r) => r.key).map((r) => [r.id, r.key, r.name, (r.mas ?? []).map((c) => CONCEPT_IDS.indexOf(c)).filter((k) => k >= 0)]),
     l: plan.roster.map((r) => (new Map(plan.loadouts).get(r.id) ?? []).map((id) => (id ? patchOrder.indexOf(id) : -1))),
   };
 }
 
 export function unpackPlan(packed, patchOrder, botNames) {
-  const humans = new Map(packed.h.map(([id, key, name]) => [id, { key, name }]));
+  const humans = new Map(packed.h.map(([id, key, name, mas]) => [id, { key, name, mas: (mas ?? []).map((k) => CONCEPT_IDS[k]).filter(Boolean) }]));
   const roster = [];
   for (const team of TEAMS_) {
     for (let i = 0; i < 5; i++) {
       const id = `${team}-${i}`;
       const h = humans.get(id);
-      roster.push({ id, team, name: h ? h.name : botNames[team][i], key: h?.key ?? null });
+      roster.push({ id, team, name: h ? h.name : botNames[team][i], key: h?.key ?? null, mas: h?.mas ?? [] });
     }
   }
   const loadouts = roster.map((r, i) => [r.id, (packed.l[i] ?? []).map((k) => (k >= 0 ? patchOrder[k] : null))]);

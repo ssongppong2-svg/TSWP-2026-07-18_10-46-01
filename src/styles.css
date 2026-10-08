@@ -2996,6 +2996,20 @@ button {
   color: var(--muted);
 }
 
+.lp-prompt {
+  margin: 12px 4px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--warn);
+  background: rgba(227, 179, 65, 0.08);
+  font: 500 15px/1.5 var(--font);
+  color: var(--text);
+}
+
+.lp-target.hidden b {
+  font-size: 18px;
+  color: var(--muted);
+}
+
 .lp-target {
   display: flex;
   align-items: baseline;

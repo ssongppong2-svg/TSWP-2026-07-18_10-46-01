@@ -662,7 +662,7 @@ export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }
     btn.classList.add('picked');
     item.querySelectorAll('.qi-choice')[c.answer].classList.add('answer');
     item.querySelector('.qi-why').textContent = `${ok ? '정답' : '오답'} — ${c.why}`;
-    recordQuiz(ok);
+    recordQuiz(ok, c.id);
     answered++;
     if (ok) right++;
     if (answered === quiz.length) el.querySelector('.quiz-score').textContent = `점검 결과 ${right} / ${quiz.length}${right === quiz.length ? ' · 완벽합니다' : ''}`;

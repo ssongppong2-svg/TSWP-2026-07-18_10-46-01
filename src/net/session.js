@@ -1,4 +1,5 @@
 import { PROTOCOL } from './protocol.js';
+import { masteredIds } from '../core/progress.js';
 
 // 방 하나 (방 코드 = room 이름). 각자의 presence에 이름·소속·준비·패치를 올리고,
 // 방장은 여기에 대기실 설정(lobby), 시작 정보(start), 경기 상태(g)를, 참가자는 입력(in)을 올린다.
@@ -32,7 +33,8 @@ export class NetSession {
     await this.leave();
     this.room = await this.transport.join(`force-${code.toLowerCase()}`);
     this.code = code;
-    this.me = { v: PROTOCOL, k: 'p', name: String(name || '요원').slice(0, 8), team: null, ready: false, load: [], host, at: Date.now() };
+    // mas: 숙달한 개념 (관련 패치 재사용 대기 −15%)
+    this.me = { v: PROTOCOL, k: 'p', name: String(name || '요원').slice(0, 8), team: null, ready: false, load: [], mas: masteredIds().slice(0, 20), host, at: Date.now() };
     await this.room.presence(this.me);
     this.off = this.room.onPeers(() => this.changed());
   }
