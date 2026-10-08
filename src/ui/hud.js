@@ -1,4 +1,5 @@
 import { TEAM_INFO, TEAMS, BOMB, ULT } from '../sim/constants.js';
+import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
 import { COMMANDS } from '../client/input.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
@@ -20,10 +21,11 @@ const pad = (n) => String(n).padStart(2, '0');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const ORDER_NAME = { regroup: '집결', hold: '위치 사수', move: '지정 지점 이동', A: 'A 목표', B: 'B 목표' };
-const STREAK_NAME = ['', '처치', '2연속 처치', '3연속 처치', '4연속 처치', '에이스'];
+const BOMB_STATE = { armed: '무장', picking: '해체 중', defused: '해체됨', exploded: '폭발' };
 
-// 경기 중 화면 (발로란트식): 위 점수판·생존 인원, 왼쪽 위 미니맵, 오른쪽 위 처치 기록,
-// 아래 체력·방탄 / 포스 패치 / 탄약, 가운데 조준점·명중 표시
+// 경기 중 화면 = 연구소 요원 바디캠의 계기판.
+// 왼쪽 위: 녹화 표시·요원 식별 + 미니맵 · 위 가운데: 분대 생존(점)·점수·시간·폭탄 상태 · 오른쪽 위: 제압 기록
+// 아래 왼쪽: 생체 신호·보호막 · 아래 가운데: 포스 패치 계기(충전 고리) · 아래 오른쪽: 에너지(J)·탄약·무기
 export class Hud {
   constructor(root, match, localId, settings = {}) {
     this.match = match;
@@ -35,23 +37,21 @@ export class Hud {
     this.squad = me.squad;
     const mapName = match.map.def.nameEn ?? match.map.name;
 
+    const sideName = TEAM_INFO[me.team]?.name ?? '';
     this.root.innerHTML = `
-      <div class="bodycam">
-        <div class="bc-rec"><i></i>REC</div>
-        <div class="bc-line bc-time"></div>
-        <div class="bc-line">AX-7 BODYCAM · ${esc(me.name)} · ${esc(mapName)}</div>
+      <div class="cam">
+        <div class="cam-rec"><i></i>REC <b class="cam-t">00:00</b></div>
+        <div class="cam-id">${esc(match.map.def.code ?? 'LAB')} · ${esc(sideName)} · ${esc(me.name)}</div>
       </div>
+      <div class="cam-frame"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
       <div class="vh-top">
-        <div class="vh-side ally"><div class="vh-roster"></div><b class="vh-score">0</b></div>
-        <div class="vh-mid">
-          <div class="vh-clock">2:00</div>
-          <div class="vh-sub"></div>
-          <div class="vh-spikes">
-            <div class="spike" data-bomb="A">${GEAR_ICONS.spike}<b>A</b><i></i></div>
-            <div class="spike" data-bomb="B">${GEAR_ICONS.spike}<b>B</b><i></i></div>
-          </div>
+        <div class="st-side ally"><span class="st-label">아군</span><div class="st-pips"></div><b class="st-score">0</b></div>
+        <div class="st-mid"><div class="st-clock">2:00</div><div class="st-sub"></div></div>
+        <div class="st-side enemy"><b class="st-score">0</b><div class="st-pips"></div><span class="st-label">상대</span></div>
+        <div class="st-bombs">
+          <div class="bomb-chip" data-bomb="A"><b>A</b><span>무장</span><i></i></div>
+          <div class="bomb-chip" data-bomb="B"><b>B</b><span>무장</span><i></i></div>
         </div>
-        <div class="vh-side enemy"><b class="vh-score">0</b><div class="vh-roster"></div></div>
       </div>
       <div class="scope"><i class="sc-h"></i><i class="sc-v"></i><i class="sc-dot"></i></div>
       <div class="vh-minimap"><canvas></canvas></div>
@@ -67,20 +67,20 @@ export class Hud {
         <div class="order"><small>현재 지시</small><b>자율 교전</b></div>
         <div class="radio-log"></div>
       </div>
-      <div class="vh-killbanner"><div class="kb-icons"></div><b class="kb-text"></b></div>
-      <div class="vh-buyhint"><kbd>B</kbd> 상점 열기 <span class="bh-money">${GEAR_ICONS.credit}<b></b></span></div>
+      <div class="vh-killbanner"><b class="kb-text"></b><div class="kb-icons"></div></div>
+      <div class="vh-buyhint"><kbd>B</kbd> 보급 단말기 <span class="bh-e">에너지 <b class="bh-money"></b> J</span><span class="bh-quiz">점검 문제 +200 J</span></div>
       <div class="vh-vitals">
-        <div class="vh-armor"><span class="va-icon"></span><b>0</b></div>
-        <div class="vh-hp"><b>100</b><div class="vh-hpbar"><i></i></div></div>
+        <div class="vt-row hp"><small>생체</small><b class="vt-num">100</b><div class="vt-bar"><i></i></div></div>
+        <div class="vt-row ar"><small>보호막</small><b class="vt-num">0</b><div class="vt-bar"><i></i></div><span class="va-icon"></span></div>
       </div>
       <div class="hud-bottom"><div class="patch-bar"></div></div>
-      <div class="vh-ammo">
+      <div class="vh-weapon">
         <div class="amp-badge">합력 강화</div>
-        <div class="vh-money">${GEAR_ICONS.credit}<b></b></div>
-        <div class="vh-mag"><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
-        <div class="vh-wname"></div>
+        <div class="vw-energy">${GEAR_ICONS.credit}<b></b><span>J</span></div>
+        <div class="vw-ammo"><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
+        <div class="vw-name"></div>
       </div>
-      <div class="hint-keys"><kbd>B</kbd> 상점 <kbd>1·2·3</kbd> 무기 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 점수</div>
+      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
@@ -90,16 +90,16 @@ export class Hud {
     const $ = (s) => this.root.querySelector(s);
     this.$ = $;
     this.els = {
-      bodycam: $('.bodycam'),
-      bcTime: $('.bc-time'),
+      cam: $('.cam'),
+      camT: $('.cam-t'),
       top: $('.vh-top'),
-      allyRoster: $('.vh-side.ally .vh-roster'),
-      enemyRoster: $('.vh-side.enemy .vh-roster'),
-      allyScore: $('.vh-side.ally .vh-score'),
-      enemyScore: $('.vh-side.enemy .vh-score'),
-      clock: $('.vh-clock'),
-      sub: $('.vh-sub'),
-      spikes: Object.fromEntries([...this.root.querySelectorAll('.spike')].map((p) => [p.dataset.bomb, p])),
+      allyPips: $('.st-side.ally .st-pips'),
+      enemyPips: $('.st-side.enemy .st-pips'),
+      allyScore: $('.st-side.ally .st-score'),
+      enemyScore: $('.st-side.enemy .st-score'),
+      clock: $('.st-clock'),
+      sub: $('.st-sub'),
+      spikes: Object.fromEntries([...this.root.querySelectorAll('.bomb-chip')].map((p) => [p.dataset.bomb, p])),
       feed: $('.vh-feed'),
       crosshair: $('.crosshair'),
       hitmarker: $('.hitmarker'),
@@ -117,24 +117,26 @@ export class Hud {
       kbIcons: $('.kb-icons'),
       kbText: $('.kb-text'),
       buyhint: $('.vh-buyhint'),
-      buyMoney: $('.vh-buyhint .bh-money b'),
-      armor: $('.vh-armor'),
+      buyMoney: $('.bh-money'),
+      buyQuiz: $('.bh-quiz'),
+      armor: $('.vt-row.ar'),
       armorIcon: $('.va-icon'),
-      armorNum: $('.vh-armor b'),
-      hp: $('.vh-hp'),
-      hpNum: $('.vh-hp b'),
-      hpBar: $('.vh-hpbar i'),
+      armorNum: $('.vt-row.ar .vt-num'),
+      armorBar: $('.vt-row.ar .vt-bar i'),
+      hp: $('.vt-row.hp'),
+      hpNum: $('.vt-row.hp .vt-num'),
+      hpBar: $('.vt-row.hp .vt-bar i'),
       patchBar: $('.patch-bar'),
       order: $('.order'),
       orderText: $('.order b'),
       radioLog: $('.radio-log'),
       amp: $('.amp-badge'),
-      money: $('.vh-money'),
-      moneyNum: $('.vh-money b'),
+      money: $('.vw-energy'),
+      moneyNum: $('.vw-energy b'),
       mag: $('.am-mag'),
       res: $('.am-res'),
-      wname: $('.vh-wname'),
-      ammo: $('.vh-ammo'),
+      wname: $('.vw-name'),
+      ammo: $('.vh-weapon'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -144,13 +146,13 @@ export class Hud {
       scope: $('.scope'),
     };
 
-    // 위 점수판의 요원 칸 (내 분대 왼쪽, 상대 분대 오른쪽)
+    // 분대 생존 표시: 요원마다 점 하나 (내 분대 왼쪽, 상대 분대 오른쪽)
     this.rosterEls = new Map();
     for (const a of match.agents) {
       const ally = a.squad === this.squad;
-      const p = el('i', `rp ${a.id === localId ? 'me' : ''}`, `<span>${esc(a.name.slice(0, 1))}</span>`);
+      const p = el('i', `pip ${a.id === localId ? 'me' : ''}`);
       p.title = a.name;
-      (ally ? this.els.allyRoster : this.els.enemyRoster).appendChild(p);
+      (ally ? this.els.allyPips : this.els.enemyPips).appendChild(p);
       this.rosterEls.set(a.id, p);
     }
 
@@ -166,9 +168,11 @@ export class Hud {
         return null;
       }
       const def = PATCHES[p.id];
-      slot.title = `${def.name} · ${def.short}`;
+      const mastered = match.isMastered?.(me, p.id);
+      slot.title = `${def.name} · ${def.short}${mastered ? ' · 개념 숙달: 재사용 대기 −15%' : ''}`;
+      if (mastered) slot.classList.add('mastered');
       slot.innerHTML = `
-        <div class="ps-icon">${PATCH_ICONS[p.id]}<div class="ps-cd"></div><div class="ps-num"></div></div>
+        <div class="ps-icon">${PATCH_ICONS[p.id]}<div class="ps-cd"></div><div class="ps-num"></div>${mastered ? '<span class="ps-star" title="개념 숙달">★</span>' : ''}</div>
         <div class="ps-key">${slotDef.key}</div>`;
       this.els.patchBar.appendChild(slot);
       return { slot, cd: slot.querySelector('.ps-cd'), num: slot.querySelector('.ps-num') };
@@ -249,12 +253,12 @@ export class Hud {
     this.hitT = kind === 'kill' ? 0.45 : 0.22;
   }
 
-  // 내가 처치했을 때 아래 가운데 처치 표시 (연속 처치일수록 칸이 늘어남)
+  // 내가 제압했을 때 아래 가운데 표시 (이번 라운드 제압 수만큼 눈금)
   killStreak(n, headshot) {
     const E = this.els;
     const k = Math.max(1, Math.min(5, n));
     E.kbIcons.innerHTML = Array.from({ length: k }, (_, i) => `<i class="${i === k - 1 ? 'new' : ''}"></i>`).join('');
-    E.kbText.textContent = headshot && k === 1 ? '헤드샷' : STREAK_NAME[k];
+    E.kbText.textContent = `${headshot ? '머리 명중 · ' : ''}제압 ${k > 1 ? `×${k}` : '확인'}`;
     E.killbanner.dataset.n = k;
     E.killbanner.classList.remove('show');
     void E.killbanner.offsetWidth;
@@ -314,17 +318,14 @@ export class Hud {
     const E = this.els;
     const enemySquad = m.agents.find((x) => x.squad !== this.squad)?.squad;
 
-    // 바디캠 시각 (설정에서 켰을 때만) · 조준점 모양 (설정은 경기 중에도 바꿀 수 있음)
-    this.set('bodycam', !!this.settings.bodycam, (v) => E.bodycam.classList.toggle('show', v));
+    // 바디캠 계기: 녹화 시각(라운드 경과)은 늘 작게, 렌즈 테두리는 바디캠 설정일 때만
+    this.set('bodycam', !!this.settings.bodycam, (v) => this.root.classList.toggle('lens', v));
     this.set('chStyle', this.settings.crosshair ?? 'cross', (v) => (E.crosshair.dataset.style = v));
-    if (this.settings.bodycam) {
-      this.clockT -= dt;
-      if (this.clockT <= 0) {
-        this.clockT = 0.5;
-        const d = new Date();
-        const sec = Math.floor(Math.max(0, m.time - (m.liveAt ?? 0)));
-        E.bcTime.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} · T+${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
-      }
+    this.clockT -= dt;
+    if (this.clockT <= 0) {
+      this.clockT = 0.5;
+      const sec = Math.floor(Math.max(0, m.time - (m.liveAt ?? 0)));
+      E.camT.textContent = `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
     }
 
     // 점수·시간
@@ -334,7 +335,7 @@ export class Hud {
     const clock = fmtTime(buying ? m.phaseT : m.timeLeft);
     this.set('clock', clock, (v) => (E.clock.textContent = v));
     let sub;
-    if (buying) sub = m.rounds ? `구매 단계 · 라운드 ${m.round}` : '작전 개시 대기';
+    if (buying) sub = m.rounds ? `보급 · 라운드 ${m.round}` : '작전 개시 대기';
     else if (m.phase === 'roundEnd') sub = `라운드 ${m.round} 종료`;
     else if (m.phase === 'ended') sub = '경기 종료';
     else sub = m.rounds ? `라운드 ${m.round} · ${a.team === TEAMS.DEFUSE ? '공격' : '수비'}` : TEAM_INFO[me.team].name;
@@ -343,8 +344,12 @@ export class Hud {
     this.set('buying', buying, (v) => E.top.classList.toggle('buying', v));
     for (const b of m.bombs) {
       const state = b.state === 'armed' && b.picker ? 'picking' : b.state;
-      this.set(`bomb${b.id}`, state, (v) => (E.spikes[b.id].dataset.state = v));
+      this.set(`bomb${b.id}`, state, (v) => {
+        E.spikes[b.id].dataset.state = v;
+        E.spikes[b.id].querySelector('span').textContent = BOMB_STATE[v] ?? v;
+      });
       this.set(`bombp${b.id}`, Math.round(b.progress * 20), (v) => E.spikes[b.id].style.setProperty('--p', v / 20));
+      this.set(`bombf${b.id}`, (b.y ?? 0) > 1, (v) => E.spikes[b.id].classList.toggle('upper', v));
     }
     for (const ag of m.agents) {
       this.set(`rp${ag.id}`, ag.alive, (v) => this.rosterEls.get(ag.id)?.classList.toggle('dead', !v));
@@ -361,6 +366,7 @@ export class Hud {
     this.set('armor', armor, (v) => {
       E.armorNum.textContent = v;
       E.armor.classList.toggle('none', v <= 0);
+      E.armorBar.style.transform = `scaleX(${Math.min(1, v / 50)})`;
     });
     this.set('armorKind', (a.armorMax ?? 0) > 25 ? 'heavy' : (a.armorMax ?? 0) > 0 ? 'light' : 'none', (v) => (E.armorIcon.innerHTML = GEAR_ICONS[v] ?? GEAR_ICONS.light));
 
@@ -383,6 +389,7 @@ export class Hud {
       E.money.classList.toggle('show', !!v);
     });
     this.set('buyhint', buying && m.rounds && me.alive && !shopOpen && !spectating, (v) => E.buyhint.classList.toggle('show', v));
+    this.set('buyquiz', !!(me.quiz && !me.quiz.done), (v) => E.buyQuiz.classList.toggle('show', v));
 
     // 포스 패치 재사용 대기·필살 게이지
     if (!spectating) {
@@ -401,7 +408,7 @@ export class Hud {
           label = ready ? '' : Math.ceil(p.cd);
         }
         const active = p.activeT > 0;
-        this.set(`pcd${i}`, Math.round(frac * 60), (v) => pe.cd.style.setProperty('--p', v / 60));
+        this.set(`pcd${i}`, Math.round(frac * 60), (v) => pe.slot.style.setProperty('--p', v / 60));
         this.set(`pnum${i}`, active ? `${p.activeT.toFixed(1)}` : label, (v) => (pe.num.textContent = v));
         this.set(`pready${i}`, ready, (v) => pe.slot.classList.toggle('ready', v));
         this.set(`pact${i}`, active, (v) => pe.slot.classList.toggle('active', v));

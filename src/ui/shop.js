@@ -1,14 +1,18 @@
 import { ARMOR, WEAPONS } from '../sim/data.js';
+import { CONCEPT_BY_ID } from '../sim/concepts.js';
+import { ECON } from '../sim/constants.js';
 import { GEAR_ICONS, WEAPON_ICONS } from './icons.js';
 
-// 상점 (구매 시간에 B): 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~8로도 삼.
+// 보급 단말기 (구매 시간에 B): 에너지(J)로 장비를 받고, 보급 점검 문제를 맞히면 에너지를 더 받음.
+// 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~8로도 받음.
 const COLS = [
   { title: '보조무기', items: ['pistol', 'sheriff'] },
   { title: '근접 화기', items: ['shotgun', 'smg'] },
   { title: '소총', items: ['rifle'] },
   { title: '저격총', items: ['sniper'] },
-  { title: '방탄', items: ['light', 'heavy'] },
+  { title: '보호막', items: ['light', 'heavy'] },
 ];
+const MARK = ['①', '②', '③', '④'];
 export const SHOP_KEYS = { pistol: 1, sheriff: 2, shotgun: 3, smg: 4, rifle: 5, sniper: 6, light: 7, heavy: 8 };
 const BY_KEY = Object.fromEntries(Object.entries(SHOP_KEYS).map(([k, v]) => [v, k]));
 
@@ -29,14 +33,15 @@ function itemInfo(id) {
     };
   }
   const a = ARMOR[id];
-  return { name: a.name, kind: '방탄', price: a.price, icon: GEAR_ICONS[id], stats: [`보호막 +${a.value}`, '체력보다 먼저 깎임', '살아남으면 유지'] };
+  return { name: a.name, kind: '보호막', price: a.price, icon: GEAR_ICONS[id], stats: [`보호막 +${a.value}`, '생체보다 먼저 깎임', '살아남으면 유지'] };
 }
 
 export class Shop {
-  constructor(root, match, localId, { onBuy } = {}) {
+  constructor(root, match, localId, { onBuy, onQuiz } = {}) {
     this.match = match;
     this.localId = localId;
     this.onBuy = onBuy;
+    this.onQuiz = onQuiz;
     this.isOpen = false;
     this.cx = 0;
     this.cy = 0;
@@ -45,8 +50,9 @@ export class Shop {
     this.el.innerHTML = `
       <div class="shop-panel">
         <header class="shop-head">
-          <div><small>구매 단계</small><b class="shop-time">0:00</b></div>
-          <div class="shop-money">${GEAR_ICONS.credit}<b class="shop-credits">0</b></div>
+          <div class="sh-title"><small>보급 단말기 · SUPPLY</small><b>장비 보급</b></div>
+          <div class="sh-stat"><small>남은 시간</small><b class="shop-time">0:00</b></div>
+          <div class="sh-stat energy"><small>에너지</small><b class="shop-credits">0</b><span>J</span></div>
         </header>
         <div class="shop-body">
           <div class="shop-cols">${COLS.map((col) => `
@@ -58,13 +64,16 @@ export class Shop {
                 <div class="si-icon">${it.icon}</div>
                 <div class="si-name"><b>${esc(it.name)}</b><small>${it.kind}</small></div>
                 <div class="si-stats">${it.stats.map((x) => `<span>${x}</span>`).join('')}</div>
-                <div class="si-price">${GEAR_ICONS.credit}${it.price ? money(it.price) : '무료'}</div>
+                <div class="si-price">${it.price ? `${money(it.price)} J` : '기본 지급'}</div>
               </button>`;
             }).join('')}</div>`).join('')}
           </div>
-          <aside class="shop-team"><h4>분대 현황</h4><div class="st-list"></div></aside>
+          <aside class="shop-side">
+            <section class="shop-quiz"><h4>보급 점검 <span>정답 +${ECON.quiz} J</span></h4><div class="qz-body"></div></section>
+            <section class="shop-team"><h4>분대 보급 현황</h4><div class="st-list"></div></section>
+          </aside>
         </div>
-        <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span>클릭 또는 숫자 키로 구매</span><span>이번 구매 시간에 산 것을 다시 누르면 환불</span></footer>
+        <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span>클릭 또는 숫자 키로 보급</span><span>이번 보급 시간에 받은 것을 다시 누르면 반납</span></footer>
       </div>
       <div class="shop-cursor"></div>`;
     root.appendChild(this.el);
@@ -73,11 +82,15 @@ export class Shop {
     this.timeEl = this.el.querySelector('.shop-time');
     this.creditEl = this.el.querySelector('.shop-credits');
     this.teamEl = this.el.querySelector('.st-list');
+    this.quizEl = this.el.querySelector('.qz-body');
     this.cache = {};
     // 마우스 잠금이 막힌 환경(제한 모드)에서는 진짜 마우스로 클릭
     this.el.addEventListener('click', (e) => {
+      if (!e.isTrusted || document.pointerLockElement) return;
       const b = e.target.closest('.shop-item');
-      if (b && e.isTrusted && !document.pointerLockElement) this.onBuy?.(b.dataset.item);
+      if (b) this.onBuy?.(b.dataset.item);
+      const q = e.target.closest('.quiz-choice');
+      if (q) this.onQuiz?.(Number(q.dataset.choice));
     });
   }
 
@@ -112,7 +125,7 @@ export class Shop {
 
   placeCursor() {
     this.cursor.style.transform = `translate(${this.cx}px, ${this.cy}px)`;
-    const hit = document.elementFromPoint(this.cx, this.cy)?.closest?.('.shop-item');
+    const hit = document.elementFromPoint(this.cx, this.cy)?.closest?.('.shop-item, .quiz-choice');
     this.hover(hit ?? null);
   }
 
@@ -124,7 +137,9 @@ export class Shop {
   }
 
   click() {
-    if (this.isOpen && this.hovered) this.onBuy?.(this.hovered.dataset.item);
+    if (!this.isOpen || !this.hovered) return;
+    if (this.hovered.dataset.item) this.onBuy?.(this.hovered.dataset.item);
+    else if (this.hovered.dataset.choice != null) this.onQuiz?.(Number(this.hovered.dataset.choice));
   }
 
   key(code) {
@@ -176,7 +191,10 @@ export class Shop {
         btn.querySelector('.si-badge').textContent = v === 'mine' ? '환불 가능' : v === 'owned' ? '보유' : '';
       });
     }
-    // 분대원 크레딧·주무기 (구매 계획 맞추기)
+    // 보급 점검 문제 (사람만, 라운드마다 한 문제)
+    const q = me.quiz;
+    this.set('quiz', q ? `${q.id}|${q.done}|${q.ok}|${q.choice}` : '', () => this.renderQuiz(q));
+    // 분대원 에너지·주무기 (보급 계획 맞추기)
     const mates = m.agents.filter((a) => a.team === me.team);
     const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armor}`).join('|');
     this.set('team', sig, () => {
@@ -185,9 +203,27 @@ export class Shop {
           <b>${esc(a.name)}</b>
           <span class="st-w">${a.primary ? WEAPON_ICONS[a.primary] : WEAPON_ICONS[a.secondary] ?? ''}</span>
           <span class="st-a">${a.armor > 25 ? GEAR_ICONS.heavy : a.armor > 0 ? GEAR_ICONS.light : ''}</span>
-          <span class="st-c">${money(a.credits ?? 0)}</span>
+          <span class="st-c">${money(a.credits ?? 0)} J</span>
         </div>`).join('');
     });
+  }
+
+  renderQuiz(q) {
+    const c = q && CONCEPT_BY_ID[q.id];
+    this.el.querySelector('.shop-quiz').classList.toggle('none', !c);
+    if (!c) {
+      this.quizEl.innerHTML = '';
+      return;
+    }
+    const done = q.done;
+    this.quizEl.innerHTML = `
+      <small class="qz-tag">개념 · ${esc(c.name)}</small>
+      <p class="qz-q">${esc(c.q)}</p>
+      <div class="qz-choices">${c.choices.map((ch, i) => {
+        const cls = done ? (i === c.answer ? 'answer' : i === q.choice ? 'picked' : '') : '';
+        return `<button class="quiz-choice ${cls}" data-choice="${i}" ${done ? 'disabled' : ''}><b>${MARK[i] ?? i + 1}</b>${esc(ch)}</button>`;
+      }).join('')}</div>
+      ${done ? `<p class="qz-why ${q.ok ? 'ok' : 'no'}">${q.ok ? `정답 · +${ECON.quiz} J` : '오답'} — ${esc(c.why)}</p>` : '<p class="qz-hint">보기를 눌러 답하기 · 한 번만</p>'}`;
   }
 
   dispose() {

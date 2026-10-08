@@ -282,6 +282,11 @@ export class PlayerController {
     this.queue.buys.push(item);
   }
 
+  // 보급 점검 문제의 답 (보기 번호)
+  answerQuiz(choice) {
+    this.queue.quiz = choice;
+  }
+
   getIntent(match, agent) {
     const i = emptyIntent(agent);
     const inp = this.input;
@@ -307,7 +312,8 @@ export class PlayerController {
     i.command = q.command;
     i.report = q.report;
     i.buy = q.buys.length ? q.buys.shift() : null;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys };
+    i.quiz = q.quiz ?? -1;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1 };
     return i;
   }
 }

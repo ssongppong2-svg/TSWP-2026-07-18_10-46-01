@@ -102,7 +102,7 @@ export class GameClient {
     this.lockpickUI = new LockpickUI(uiRoot);
     this.lockpickUI.onCard = (i) => this.controller.queue.cards.push(i);
     // 상점 (구매 시간에 B)
-    this.shop = new Shop(uiRoot, this.match, this.player.id, { onBuy: (item) => this.controller.buy(item) });
+    this.shop = new Shop(uiRoot, this.match, this.player.id, { onBuy: (item) => this.controller.buy(item), onQuiz: (i) => this.controller.answerQuiz(i) });
     this.controller.shop = this.shop;
 
     this.started = false;

@@ -54,7 +54,8 @@ export const GEAR_ICONS = {
   light: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5.5v6c0 5 3.4 8.6 8 10.5 4.6-1.9 8-5.5 8-10.5v-6z"/><path d="M12 2v20" opacity=".5"/></svg>`,
   heavy: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5.5v6c0 5 3.4 8.6 8 10.5 4.6-1.9 8-5.5 8-10.5v-6z"/></svg>`,
   head: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg>`,
-  credit: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 22 12 12 22 2 12z"/><path d="M12 7l5 5-5 5-5-5z" fill="#000" fill-opacity=".35"/></svg>`,
+  // 에너지(J): 번개 모양 계기 표시
+  credit: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 1 4 13.5h6.5L9 23l11-13.5h-6.8z"/></svg>`,
   spike: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 16 9h-3v6h3l-4 8-4-8h3V9H8z"/></svg>`,
 };
 
