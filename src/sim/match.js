@@ -6,6 +6,7 @@ import {
   BOMB, BOT_NAMES, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, TEAM_SIZE, TEAMS, ULT,
 } from './constants.js';
 import { PATCHES, WEAPONS } from './data.js';
+import { CONCEPTS } from './concepts.js';
 import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap } from './map.js';
 import { NavGrid } from './nav.js';
@@ -57,7 +58,8 @@ export function segmentShield(a, b, sh) {
 }
 
 export class Match {
-  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now() } = {}) {
+  // conceptIds: 개념 카드로 먼저 놓을 개념 (아직 도감에 없는 것 등). conceptCount: 맵에 놓을 카드 수
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4 } = {}) {
     this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
@@ -105,6 +107,32 @@ export class Match {
       });
     }
     this.byId = new Map(this.agents.map((a) => [a.id, a]));
+    this.concepts = this.placeConcepts(conceptIds, conceptCount);
+  }
+
+  // 개념 카드: 맵이 정한 자리 중 몇 곳에 무작위로 (사람만 주울 수 있음, 각자 따로)
+  placeConcepts(prefer, count) {
+    const spots = [...(this.map.def.concepts ?? [])];
+    const n = Math.min(count, spots.length);
+    if (!n) return [];
+    const picked = [];
+    for (let i = 0; i < n; i++) picked.push(spots.splice(Math.floor(this.rng.next() * spots.length), 1)[0]);
+    const ids = [...new Set((prefer ?? []).filter((id) => CONCEPTS.some((c) => c.id === id)))];
+    const rest = CONCEPTS.map((c) => c.id).filter((id) => !ids.includes(id));
+    while (rest.length) ids.push(rest.splice(Math.floor(this.rng.next() * rest.length), 1)[0]);
+    return picked.map((s, i) => ({ key: i, id: ids[i], x: this.map.cellX(s.c), z: this.map.cellZ(s.r), takenBy: [] }));
+  }
+
+  updateConcepts() {
+    for (const c of this.concepts) {
+      for (const a of this.agents) {
+        if (!a.alive || !(a.isPlayer || a.human) || a.pos.y > 1.2) continue;
+        if (Math.hypot(a.pos.x - c.x, a.pos.z - c.z) > 1.1 || c.takenBy.includes(a.id)) continue;
+        c.takenBy.push(a.id);
+        (a.concepts ??= []).push(c.id);
+        this.emit('conceptPicked', { agent: a, concept: c });
+      }
+    }
   }
 
   get player() {
@@ -163,6 +191,7 @@ export class Match {
       this.stepAgent(a, intent, dt, live);
     }
     this.separateAgents();
+    this.updateConcepts();
     this.updateVeils(dt);
     this.updateShields(dt);
     this.updateProjectiles(dt);
@@ -1043,7 +1072,7 @@ export class Match {
     this.visT -= dt;
     if (this.visT > 0) return;
     this.visT = 0.15;
-    const maxSight = this.map.weather === 'rain' ? 36 : 60;
+    const maxSight = this.map.def.sight ?? (this.map.weather === 'rain' ? 36 : 60);
     for (const a of this.agents) a.visibleEnemies = [];
     for (const a of this.agents) {
       if (!a.alive) continue;

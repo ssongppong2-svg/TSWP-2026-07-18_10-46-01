@@ -197,6 +197,14 @@ export class Hud {
     this.radio({ name: issuer?.name ?? '분대장', text: order ? `지시: ${text}` : '지시 해제. 자율 교전.', kind: 'order' });
   }
 
+  // 맵에서 개념 카드를 주웠을 때
+  conceptCard(c, { isNew, total, of }) {
+    const t = this.els.toast;
+    t.innerHTML = `<div class="ct-head" style="--c:#6fd3e8"><div class="ct-card">F</div><div><small>개념 카드 ${isNew ? '새로 획득' : '획득'} · 도감 ${total}/${of}</small><b>${esc(c.name)}</b></div></div><p>${esc(c.text)}</p>`;
+    t.classList.add('show');
+    this.toastT = 6;
+  }
+
   // 패치를 처음 쓸 때 해당 힘의 개념을 교범 형식으로 표시
   concept(patchId) {
     if (this.shownConcepts.has(patchId)) return;

@@ -415,7 +415,9 @@ export class Stage {
     // 물방울 크기 계산용: 1m 거리의 1m가 화면에서 차지하는 픽셀 수
     if (this.renderer) {
       const h = this.renderer.domElement.height;
-      this.rain?.setPixelScale(h / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)));
+      const px = h / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+      this.rain?.setPixelScale(px);
+      if (this.lamps?.halos) this.lamps.halos.material.uniforms.uPixel.value = px;
     }
   }
 
@@ -459,6 +461,7 @@ export class Stage {
       this.hemi.intensity = w.hemi + this.bolt * 2.2 + (this.quality?.env ? 0 : 0.3);
       this.moon.intensity = w.moon + this.bolt * 1.6;
     } else this.hemi.intensity = w.hemi + (this.quality?.env ? 0 : 0.3);
+    this.world?.userData.tick?.(this.time); // 맵의 움직이는 전시물 (푸코 진자 등)
     // 가까운 등에만 실제 광원 배정, 나머지는 빛 웅덩이로
     this.lightRig.update(dt, this.camera.position);
     this.lamps?.syncPools();

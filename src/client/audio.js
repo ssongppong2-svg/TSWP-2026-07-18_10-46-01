@@ -336,6 +336,12 @@ const SOUNDS = {
     const o = a.out(null, 0.15, 0.1, 0);
     a.noise(o, t, 0.02, { type: 'bandpass', freq: 3800, q: 6, gain: 0.5 });
   },
+  // 개념 카드 획득: 맑은 두 음
+  concept(a, t) {
+    const o = a.out(null, 0.22, 0.8, 0.15);
+    a.tone(o, t, 0.25, { type: 'sine', freq: 880, gain: 0.5 });
+    a.tone(o, t + 0.12, 0.45, { type: 'sine', freq: 1320, gain: 0.45 });
+  },
   inspect(a, t) {
     // 탄창을 살짝 빼서 확인하는 소리
     const o = a.out(null, 0.3, 0.6, 0.03);

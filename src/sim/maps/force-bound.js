@@ -91,7 +91,12 @@ export const FORCE_BOUND = {
     { name: '남 중앙 회랑', r0: 24, r1: 31, c0: 15, c1: 20 },
     { name: '해체 진영', r0: 32, r1: 39, c0: 0, c1: 35 },
   ],
-  // 화면 장식 (조명·교범 포스터·스프레이 표시) — 칸 단위
+  // 개념 카드가 놓일 수 있는 자리 (경기마다 몇 곳)
+  concepts: [
+    { r: 21, c: 3 }, { r: 21, c: 32 }, { r: 33, c: 17 }, { r: 26, c: 17 },
+    { r: 19, c: 18 }, { r: 3, c: 10 }, { r: 25, c: 4 }, { r: 25, c: 31 },
+  ],
+  // 화면 장식 (조명·교범 포스터·스프레이 표시·실험 장비) — 칸 단위
   decor: {
     lamps: [
       { r: 5, c: 8, kind: 'sodium' }, { r: 5, c: 27, kind: 'sodium' },
@@ -105,6 +110,15 @@ export const FORCE_BOUND = {
     ],
     // 해체팀 시작 홀의 북쪽 벽(32번째 줄 북쪽 면)에 교범 포스터
     posters: { faceRow: 32, cols: [9, 12.5, 22.5, 26], topics: ['gravity', 'elastic', 'resultant', 'friction'] },
+    // 남측 광장 북쪽 벽(창고 블록 남쪽 면)의 연구소 게시물
+    posterList: [
+      { c: 9.5, r: 21, rotY: 0, topic: 'buoyancy' },
+      { c: 12, r: 21, rotY: 0, topic: 'weight' },
+      { c: 24, r: 21, rotY: 0, topic: 'action' },
+      { c: 26.5, r: 21, rotY: 0, topic: 'equilibrium' },
+    ],
+    // 작은 상자 위에 놓인 실험 장비 (용수철저울·추·빗면 등)
+    labProps: true,
     signs: [
       { text: 'A', sub: '← A', x: 7.8, z: 32, rotY: 0 },
       { text: 'B', sub: 'B →', x: 28.2, z: 32, rotY: 0 },

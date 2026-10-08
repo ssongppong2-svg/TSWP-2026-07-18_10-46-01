@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 import { TILES } from '../sim/map.js';
-import { posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { buildLabProps, buildMuseumProps } from './exhibits.js';
 import { puddleRoughness } from './weather.js';
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
@@ -10,12 +11,16 @@ export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 const LAMP_STYLE = {
   sodium: { color: '#ffb35c', intensity: 30, lens: '#ffd39a' },
   fluo: { color: '#cfe0ff', intensity: 14, lens: '#dfe8f6' },
+  warm: { color: '#ffd7a6', intensity: 22, lens: '#fff0dc' }, // 전시관 조명
 };
 
 // 맵(글자 격자)을 3D 메쉬로 만든다.
-export function buildWorld(map, tex) {
+export function buildWorld(map, baseTex) {
   const group = new THREE.Group();
   group.name = 'world';
+  // 맵 테마: 'industrial'(포스 바운드: 콘크리트·상자) / 'museum'(과학관: 광택 타일·전시물)
+  const museum = map.def.theme === 'museum';
+  const tex = museum ? { ...baseTex, ...museumTextures() } : baseTex;
 
   // 비가 오면 모든 표면이 젖어 어둡고 매끈해짐 (등불이 바닥에 번져 반사)
   const wet = map.weather === 'rain';
@@ -32,17 +37,17 @@ export function buildWorld(map, tex) {
   const floorMat = new THREE.MeshStandardMaterial({
     map: tex.floor,
     bumpMap: tex.floorBump,
-    bumpScale: 1.2,
-    roughness: wet ? 0.7 : 0.9,
+    bumpScale: museum ? 0.6 : 1.2,
+    roughness: museum ? 0.4 : wet ? 0.7 : 0.9,
     roughnessMap: puddles,
     metalness: 0.02,
-    color: wet ? '#868c94' : '#ffffff',
+    color: museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
   });
+  withFloorMarkings(floorMat, buildFloorMarkings(map));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
-  group.add(buildFloorMarkings(map));
 
   // ── 벽: 보이는 면만 (월드 좌표 UV라서 이어지는 벽의 무늬가 자연스럽게 연결됨)
   const sides = new QuadBuilder();
@@ -78,10 +83,10 @@ export function buildWorld(map, tex) {
   const wallMat = new THREE.MeshStandardMaterial({
     map: tex.wall,
     bumpMap: tex.wallBump,
-    bumpScale: 2.0,
-    roughness: wet ? 0.74 : 0.93,
+    bumpScale: museum ? 0.8 : 2.0,
+    roughness: museum ? 0.82 : wet ? 0.74 : 0.93,
     metalness: 0.02,
-    color: wet ? '#a7acb3' : '#ffffff',
+    color: museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
   });
   const wallMesh = new THREE.Mesh(sides.build(), wallMat);
   wallMesh.castShadow = true;
@@ -93,11 +98,17 @@ export function buildWorld(map, tex) {
   group.add(topMesh);
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
-  const kinds = {
+  const kinds = museum ? {} : {
     crate: { tex: tex.crate, top: '#3f432c', rough: 0.85, metal: 0.05, inset: 0.92 },
     bigCrate: { tex: tex.container, top: '#2b373c', rough: 0.6, metal: 0.55, inset: 0.98 },
     barrier: { tex: tex.barrier, top: '#77776f', rough: 0.95, metal: 0.0, inset: 0.96 },
   };
+  // 과학관: 상자 대신 전시물 (진열장·키오스크·수조·전시 탁자·푸코 진자)
+  if (museum) {
+    const props = buildMuseumProps(map, posterAtlas());
+    group.add(props);
+    group.userData.tick = props.userData.tick;
+  } else if (map.def.decor?.labProps) group.add(buildLabProps(map));
   for (const [kind, style] of Object.entries(kinds)) {
     const cells = [];
     for (let r = 0; r < map.rows; r++) {
@@ -127,7 +138,7 @@ export function buildWorld(map, tex) {
   for (const b of map.bombs) {
     const decal = new THREE.Mesh(
       new THREE.PlaneGeometry(7, 7),
-      new THREE.MeshStandardMaterial({ map: siteDecal(b.id, '#d8d2bf'), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
+      new THREE.MeshStandardMaterial({ map: siteDecal(b.id, museum ? '#2b3a52' : '#d8d2bf'), transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
     );
     decal.rotation.x = -Math.PI / 2;
     decal.position.set(b.x + 4.2, 0.02, b.z + 3.5);
@@ -136,7 +147,7 @@ export function buildWorld(map, tex) {
   }
 
   const lamps = addLamps(group, map);
-  addDecor(group, map);
+  addDecor(group, map, museum);
   group.add(buildSkyline(map));
   group.userData.lamps = lamps;
   return group;
@@ -204,14 +215,22 @@ function buildFloorMarkings(map) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(map.width, map.depth),
-    new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1 }),
-  );
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = 0.01;
-  mesh.receiveShadow = true;
-  return mesh;
+  return t;
+}
+
+// 구역 선(바닥 표시)을 바닥 재질 안에서 섞음 — 맵 전체를 덮는 반투명 층을 따로 그리지 않음
+function withFloorMarkings(mat, marks) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.markMap = { value: marks };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vMarkUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMarkUv = uv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D markMap;\nvarying vec2 vMarkUv;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\nvec4 mk = texture2D(markMap, vMarkUv);\ndiffuseColor.rgb = mix(diffuseColor.rgb, mk.rgb, mk.a);');
+  };
+  mat.customProgramCacheKey = () => 'floorMarks';
+  return mat;
 }
 
 // 빛 웅덩이·후광용 방사형 그라데이션
@@ -314,7 +333,37 @@ function addLamps(group, map) {
   const hg = new THREE.BufferGeometry();
   hg.setAttribute('position', new THREE.Float32BufferAttribute(halo.pos, 3));
   hg.setAttribute('color', new THREE.Float32BufferAttribute(halo.col, 3));
-  const halos = new THREE.Points(hg, new THREE.PointsMaterial({ map: radialGlow(), size: 1.6, sizeAttenuation: true, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  // 후광: 실제 크기(지름 약 1m)로 보이되 화면에서 최대 72px, 가까이 가면 사라짐 (바로 앞의 등이 화면을 덮지 않게)
+  const halos = new THREE.Points(
+    hg,
+    new THREE.ShaderMaterial({
+      uniforms: { map: { value: radialGlow() }, uPixel: { value: 600 } },
+      vertexShader: /* glsl */ `
+        uniform float uPixel;
+        attribute vec3 color;
+        varying vec3 vColor;
+        varying float vFade;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          float d = max(0.1, -mv.z);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(1.0 * uPixel / d, 2.0, 72.0);
+          vFade = smoothstep(3.0, 9.0, d);
+          vColor = color;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D map;
+        varying vec3 vColor;
+        varying float vFade;
+        void main() {
+          vec4 t = texture2D(map, gl_PointCoord);
+          gl_FragColor = vec4(vColor * t.a * vFade, 1.0);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
   halos.name = 'lampHalos';
   group.add(halos);
   // 실제 광원 가중치(realW)에 맞춰 빛 웅덩이 밝기 갱신
@@ -409,6 +458,95 @@ const ICONS = {
     g.lineTo(x - 150, y + 20);
     g.stroke();
   },
+  buoyancy(g, x, y) {
+    g.fillStyle = 'rgba(47,111,181,0.25)';
+    g.fillRect(x - 170, y - 10, 340, 110);
+    g.strokeStyle = '#23262a';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(x - 170, y - 10);
+    g.lineTo(x + 170, y - 10);
+    g.stroke();
+    g.fillStyle = '#23262a';
+    g.fillRect(x - 45, y - 50, 90, 80);
+    const arrow = (x0, y0, dy) => {
+      g.lineWidth = 6;
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x0, y0 + dy);
+      g.stroke();
+      g.beginPath();
+      const s = Math.sign(dy);
+      g.moveTo(x0, y0 + dy + s * 18);
+      g.lineTo(x0 - 14, y0 + dy);
+      g.lineTo(x0 + 14, y0 + dy);
+      g.fill();
+    };
+    arrow(x + 90, y + 60, -110);
+    arrow(x - 90, y - 70, 110);
+    g.font = `600 24px "IBM Plex Sans KR", sans-serif`;
+    g.fillText('부력', x + 108, y - 40);
+    g.fillText('중력', x - 160, y + 60);
+  },
+  weight(g, x, y) {
+    g.strokeStyle = '#23262a';
+    g.fillStyle = '#23262a';
+    g.lineWidth = 5;
+    g.fillRect(x - 60, y - 120, 120, 12);
+    g.beginPath();
+    for (let i = 0; i <= 60; i++) {
+      const t = i / 60;
+      const px = x + Math.sin(t * Math.PI * 14) * 22;
+      const py = y - 108 + t * 120;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.stroke();
+    g.fillRect(x - 40, y + 14, 80, 70);
+    g.font = `600 24px "IBM Plex Sans KR", sans-serif`;
+    g.fillText('1 kg → 9.8 N', x + 60, y - 30);
+  },
+  equilibrium(g, x, y) {
+    g.fillStyle = '#23262a';
+    g.strokeStyle = '#23262a';
+    g.fillRect(x - 50, y - 40, 100, 80);
+    g.lineWidth = 6;
+    for (const s of [-1, 1]) {
+      g.beginPath();
+      g.moveTo(x + s * 55, y);
+      g.lineTo(x + s * 160, y);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x + s * 180, y);
+      g.lineTo(x + s * 155, y - 15);
+      g.lineTo(x + s * 155, y + 15);
+      g.fill();
+    }
+    g.font = `600 26px "IBM Plex Sans KR", sans-serif`;
+    g.fillText('합력 = 0', x - 52, y - 70);
+  },
+  action(g, x, y) {
+    g.fillStyle = '#23262a';
+    g.strokeStyle = '#23262a';
+    g.fillRect(x - 150, y - 40, 110, 80);
+    g.fillRect(x + 40, y - 40, 110, 80);
+    g.lineWidth = 6;
+    const arrow = (x0, dir) => {
+      g.beginPath();
+      g.moveTo(x0, y + 70);
+      g.lineTo(x0 + dir * 90, y + 70);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x0 + dir * 108, y + 70);
+      g.lineTo(x0 + dir * 86, y + 56);
+      g.lineTo(x0 + dir * 86, y + 84);
+      g.fill();
+    };
+    arrow(x - 20, 1);
+    arrow(x + 20, -1);
+    g.font = `600 26px "IBM Plex Sans KR", sans-serif`;
+    g.fillText('작용 = 반작용', x - 80, y - 70);
+  },
 };
 
 const POSTER_TOPICS = {
@@ -416,22 +554,49 @@ const POSTER_TOPICS = {
   elastic: { title: '탄성력', icon: ICONS.elastic, lines: ['원래 형태로 복원하려는 힘', '변형시킨 힘의 반대 방향', '변형이 클수록 커짐'] },
   resultant: { title: '합력', icon: ICONS.resultant, lines: ['같은 방향: 크기를 더함', '반대 방향: 큰 힘 − 작은 힘', '방향은 큰 힘 쪽'] },
   friction: { title: '마찰력', icon: ICONS.friction, lines: ['운동을 방해하는 힘', '운동 방향의 반대', '거칠수록·무거울수록 커짐'] },
+  buoyancy: { title: '부력', icon: ICONS.buoyancy, lines: ['액체·기체가 위로 밀어 올리는 힘', '중력과 반대 방향', '공기 중 무게 − 물속 무게'] },
+  weight: { title: '무게와 질량', icon: ICONS.weight, lines: ['무게 = 중력의 크기 (N)', '질량 = 물체의 고유한 양 (kg)', '달에서 무게 1/6, 질량 그대로'] },
+  equilibrium: { title: '힘의 평형', icon: ICONS.equilibrium, lines: ['합력이 0인 상태', '크기 같고 방향 반대', '같은 직선 위에 작용'] },
+  action: { title: '작용과 반작용', icon: ICONS.action, lines: ['서로 주고받는 두 힘', '크기 같고 방향 반대', '서로 다른 물체에 작용'] },
 };
+const ATLAS_TOPICS = ['gravity', 'elastic', 'resultant', 'friction', 'buoyancy', 'weight', 'equilibrium', 'action'];
+
+// 과학관 전시 설명판 8종을 한 장(가로 4 × 세로 2)에 모음 → 키오스크·전시 탁자가 한 번에 그려짐
+let atlasCache = null;
+function posterAtlas() {
+  if (atlasCache) return atlasCache;
+  const W = 512, H = 704, cols = 4, rows = 2;
+  const c = document.createElement('canvas');
+  c.width = W * cols;
+  c.height = H * rows;
+  const g = c.getContext('2d');
+  ATLAS_TOPICS.forEach((key, i) => {
+    const img = posterTexture({ no: i + 1, ...POSTER_TOPICS[key], museum: true }, { canvasOnly: true });
+    g.drawImage(img, (i % cols) * W, Math.floor(i / cols) * H);
+  });
+  const atlas = new THREE.CanvasTexture(c);
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.anisotropy = 8;
+  atlasCache = { atlas, panelCount: ATLAS_TOPICS.length };
+  return atlasCache;
+}
 
 // 맵 정의(map.def.decor)에 적힌 교범 포스터·스프레이 표시를 붙임
-function addDecor(group, map) {
+function addDecor(group, map, museum = false) {
   const decor = map.def.decor ?? {};
+  // 포스터: 한 줄로 붙인 것(posters) + 자리마다 지정한 것(posterList: 칸 좌표 c·r = 벽면 경계, rotY = 바라보는 방향)
+  const list = [];
   const posters = decor.posters;
-  if (posters) {
-    const faceZ = map.originZ + posters.faceRow * CELL + 0.03;
-    posters.topics.forEach((key, i) => {
-      const p = { no: i + 1, ...POSTER_TOPICS[key] };
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
-      m.position.set(map.originX + posters.cols[i] * CELL, 1.9, faceZ);
-      m.receiveShadow = true;
-      group.add(m);
-    });
-  }
+  if (posters) posters.topics.forEach((topic, i) => list.push({ c: posters.cols[i], r: posters.faceRow, rotY: 0, topic }));
+  for (const p of decor.posterList ?? []) list.push(p);
+  list.forEach(({ c, r, rotY, topic }, i) => {
+    const p = { no: i + 1, ...POSTER_TOPICS[topic], museum };
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.65), new THREE.MeshStandardMaterial({ map: posterTexture(p), roughness: 0.45, metalness: 0 }));
+    m.position.set(map.originX + c * CELL + Math.sin(rotY) * 0.03, 1.9, map.originZ + r * CELL + Math.cos(rotY) * 0.03);
+    m.rotation.y = rotY;
+    m.receiveShadow = true;
+    group.add(m);
+  });
   for (const s of decor.signs ?? []) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(2.2, 1.1),

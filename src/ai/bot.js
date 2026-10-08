@@ -738,8 +738,10 @@ export class BotBrain {
 // 팀별로 봇 두뇌 붙이기 + 경기 단위 작전 계획(해체팀 진입 시각·방식)
 export function attachBots(match, difficulty) {
   const rng = match.rng;
+  // 해체팀이 집결 후 진입을 시작하는 시각 (맵마다 다를 수 있음 — 평균 교전 1분 30초 안팎이 되도록)
+  const [p0, p1] = match.map.def.push ?? [28, 46];
   match.botPlan = {
-    defuse: { pushAt: rng.range(28, 46), style: rng.pick(['split', 'split', 'stackA', 'stackB']) },
+    defuse: { pushAt: rng.range(p0, p1), style: rng.pick(['split', 'split', 'stackA', 'stackB']) },
   };
   match.radioClock = {
     defuse: { t: -99, bySource: new Map() },

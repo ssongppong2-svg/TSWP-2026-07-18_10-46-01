@@ -11,6 +11,10 @@ import { Effects } from './effects.js';
 import { Input, PlayerController } from './input.js';
 import { ViewModel } from './viewmodel.js';
 import { QUALITY, QUALITY_ORDER } from './stage.js';
+import { ConceptCards } from './exhibits.js';
+import { conceptCardTexture } from './textures.js';
+import { CONCEPTS, CONCEPT_BY_ID } from '../sim/concepts.js';
+import { addConcept, loadProgress } from '../core/progress.js';
 
 const PATCH_SOUNDS = {
   gravityVeil: 'veil', elasticPad: 'pad', resultantAmp: 'amp', reactionRounds: 'rounds', buoyShield: 'shield',
@@ -29,7 +33,10 @@ export class GameClient {
     this.team = team;
 
     stage.setMap(mapId ?? stage.map.id);
-    this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed });
+    // 개념 카드: 아직 도감에 없는 개념부터 (순서는 무작위)
+    const have = loadProgress().concepts;
+    const fresh = CONCEPTS.map((c) => c.id).filter((id) => !have.includes(id)).sort(() => Math.random() - 0.5);
+    this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh });
     attachBots(this.match, difficulty);
     this.player = this.match.player;
 
@@ -51,6 +58,9 @@ export class GameClient {
     stage.overlay = this.viewmodel;
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
+    this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
+    this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
+    this.newConcepts = [];
     this.effects.onCasingBounce = (p) => this.audio.play('casing', { pos: p });
     this.hud = new Hud(uiRoot, this.match, this.player.id, settings);
     this.lockpickUI = new LockpickUI(uiRoot);
@@ -236,6 +246,15 @@ export class GameClient {
         if (v > 0) A.play(e.loud ? 'step' : 'quietStep', { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v });
       }
     });
+    ev.on('conceptPicked', (e) => {
+      if (!isMe(e.agent)) return;
+      const id = e.concept.id;
+      this.pickedConcepts.push(id);
+      const isNew = addConcept(id);
+      if (isNew) this.newConcepts.push(id);
+      A.play('concept');
+      this.hud.conceptCard(CONCEPT_BY_ID[id], { isNew, total: loadProgress().concepts.length, of: CONCEPTS.length });
+    });
     ev.on('radio', (e) => {
       if (e.team !== this.team) return;
       A.play('radio');
@@ -337,14 +356,16 @@ export class GameClient {
 
   result() {
     const m = this.match;
-    return { match: m, winner: m.winner, reason: m.reason, team: this.team, player: this.player };
+    return { match: m, winner: m.winner, reason: m.reason, team: this.team, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts } };
   }
 
   // ───────────── 매 프레임 ─────────────
   frame(now) {
     if (this.disposed) return;
     this.raf = requestAnimationFrame((t) => this.frame(t));
-    const dt = Math.min(0.1, (now - this.last) / 1000);
+    // requestAnimationFrame 시각은 프레임 시작 시각이라, 직전에 performance.now()로 잰 값보다 앞설 수 있음
+    // (셰이더를 준비하느라 첫 프레임이 오래 걸리면 수백 ms) → 음수가 되지 않게
+    const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     const m = this.match;
 
@@ -375,6 +396,7 @@ export class GameClient {
       v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive);
     }
     this.effects.update(dt, alpha, this.team);
+    this.conceptCards.update(time, this.player.id);
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
@@ -563,6 +585,7 @@ export class GameClient {
       v.dispose();
     }
     this.effects.dispose();
+    this.conceptCards.dispose();
     this.stage.overlay = null;
     this.stage.onThunder = null;
     this.stage.setZoom(1);

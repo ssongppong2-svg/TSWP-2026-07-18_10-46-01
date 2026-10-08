@@ -1828,6 +1828,18 @@ button {
   border: 1px solid var(--c);
 }
 
+.ct-card {
+  flex: 0 0 34px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font: 700 20px var(--display, 'Rajdhani', sans-serif);
+  color: var(--c);
+  border: 1px solid var(--c);
+  border-radius: 4px;
+  background: rgba(111, 211, 232, 0.08);
+}
+
 .ct-head small {
   display: block;
   font: 500 10.5px var(--mono);
@@ -2653,6 +2665,179 @@ button {
   margin: 0 auto;
 }
 
+/* 결과 화면: 개념 점검 */
+.quiz {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+}
+
+.quiz h3 {
+  margin: 0 0 10px;
+  font: 600 12px var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.quiz h3 small {
+  margin-left: 10px;
+  font: 500 12px var(--font);
+  letter-spacing: 0;
+  color: #6fd3e8;
+}
+
+.quiz-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+.quiz-item {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 2px solid #6fd3e8;
+  background: var(--panel);
+}
+
+.quiz-item.right {
+  border-top-color: var(--good);
+}
+
+.quiz-item.wrong {
+  border-top-color: var(--bad);
+}
+
+.qi-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.qi-head span {
+  font: 700 15px var(--display);
+  color: #6fd3e8;
+}
+
+.qi-head small {
+  font: 500 11px var(--mono);
+  color: var(--muted);
+}
+
+.qi-q {
+  margin: 8px 0 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.qi-choices {
+  display: grid;
+  gap: 6px;
+}
+
+.qi-choice {
+  padding: 8px 10px;
+  text-align: left;
+  font: 500 13px var(--font);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.qi-choice:hover {
+  border-color: #6fd3e8;
+}
+
+.quiz-item.done .qi-choice {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.quiz-item.done .qi-choice.answer {
+  opacity: 1;
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.quiz-item.wrong .qi-choice.picked {
+  opacity: 1;
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.qi-why {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #c3c9cf;
+}
+
+.quiz-score {
+  margin-top: 8px;
+  font: 600 13px var(--font);
+  color: #6fd3e8;
+}
+
+/* 개념 도감 */
+.modal-card.codex {
+  width: min(980px, 100%);
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+
+.modal-card.codex h2 small {
+  margin-left: 8px;
+  font: 600 14px var(--mono);
+  color: #6fd3e8;
+}
+
+.codex-note {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.codex-note b {
+  color: #6fd3e8;
+}
+
+.codex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.codex-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-top: 2px solid #6fd3e8;
+  background: var(--panel);
+}
+
+.codex-card.locked {
+  border-top-color: var(--dim);
+  opacity: 0.55;
+}
+
+.codex-card small {
+  font: 500 11px var(--mono);
+  color: var(--muted);
+}
+
+.codex-card b {
+  display: block;
+  margin-top: 4px;
+  font-size: 15px;
+}
+
+.codex-card p {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #c3c9cf;
+}
+
 .concepts h3 {
   margin: 0 0 10px;
   font: 600 12px var(--mono);
@@ -2777,4 +2962,10 @@ button {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.btn small {
+  margin-left: 6px;
+  font: 600 11px var(--mono);
+  color: #6fd3e8;
 }

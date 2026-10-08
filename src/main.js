@@ -80,7 +80,7 @@ let menuT = 0;
 let menuLast = performance.now();
 function menuLoop(now) {
   requestAnimationFrame(menuLoop);
-  const dt = Math.min(0.1, (now - menuLast) / 1000);
+  const dt = Math.min(0.1, Math.max(0, (now - menuLast) / 1000));
   menuLast = now;
   if (game) return;
   menuT += dt;
@@ -98,6 +98,7 @@ function showTitle() {
   setScreen(
     S.titleScreen({
       onStart: showTeam,
+      onCodex: () => openModal(S.codexModal({ onClose: closeModal })),
       onControls: openControls,
       onSettings: openSettings,
       onFullscreen: () => {

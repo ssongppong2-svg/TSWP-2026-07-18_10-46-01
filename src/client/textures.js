@@ -377,16 +377,17 @@ export function sprayTexture(text, sub = '', color = '#e8e2d0') {
 }
 
 // 벽에 붙인 교범(코팅된 작전 문서)
-export function posterTexture({ title, no, lines, icon }) {
+// museum = true: 과학관 전시 설명판 (밝은 바탕, 기관명이 다름)
+export function posterTexture({ title, no, lines, icon, museum = false }, { canvasOnly = false } = {}) {
   const c = makeCanvas(512, 704);
   const g = c.getContext('2d');
-  paintNoise(g, 512, 704, [214, 209, 194], 8, { seed: no * 7 + 1, cells: 4, octaves: 3 });
-  g.fillStyle = '#1d2024';
+  paintNoise(g, 512, 704, museum ? [232, 229, 220] : [214, 209, 194], museum ? 4 : 8, { seed: no * 7 + 1, cells: 4, octaves: 3 });
+  g.fillStyle = museum ? '#22324a' : '#1d2024';
   g.fillRect(0, 0, 512, 110);
   g.fillStyle = '#c9c3b2';
   g.font = `600 22px ${STENCIL}`;
   g.textAlign = 'left';
-  g.fillText(`FIELD MANUAL · FM-${String(no).padStart(2, '0')}`, 28, 40);
+  g.fillText(museum ? `NATIONAL FORCE SCIENCE HALL · EXHIBIT ${String(no).padStart(2, '0')}` : `FIELD MANUAL · FM-${String(no).padStart(2, '0')}`, 28, 40);
   g.font = `700 52px ${FONT}`;
   g.fillStyle = '#f0ece2';
   g.fillText(title, 28, 92);
@@ -399,8 +400,83 @@ export function posterTexture({ title, no, lines, icon }) {
   g.strokeRect(14, 124, 484, 290);
   g.fillStyle = 'rgba(30,30,30,0.6)';
   g.font = `500 18px ${STENCIL}`;
-  g.fillText('FORCE BOUND RESEARCH FACILITY  ·  DISTRIBUTION: ALL UNITS', 28, 676);
-  return toTexture(c);
+  g.fillText(museum ? '국립 힘 과학관  ·  중학교 과학 「힘」' : 'FORCE BOUND RESEARCH FACILITY  ·  DISTRIBUTION: ALL UNITS', 28, 676);
+  return canvasOnly ? c : toTexture(c);
+}
+
+// ── 과학관 테마: 광택 석재 타일 바닥 · 도장 패널 벽 (처음 쓸 때 한 번만 만듦)
+let museumCache = null;
+export function museumTextures() {
+  if (museumCache) return museumCache;
+  // 바닥: 2m 타일 2×2 (한 장 = 4m), 테라조 알갱이 + 얇은 줄눈
+  const S = 512;
+  const fc = makeCanvas(S, S);
+  const fg = fc.getContext('2d');
+  paintNoise(fg, S, S, [176, 172, 164], 10, { seed: 41, cells: 8, octaves: 4 });
+  const fr = rng(43);
+  for (let i = 0; i < 2600; i++) {
+    const v = 90 + fr() * 120;
+    fg.fillStyle = `rgba(${v},${v - 6},${v - 14},${0.25 + fr() * 0.4})`;
+    fg.fillRect(fr() * S, fr() * S, 1 + fr() * 3, 1 + fr() * 3);
+  }
+  const tile = S / 2;
+  for (let ty = 0; ty < 2; ty++) {
+    for (let tx = 0; tx < 2; tx++) {
+      // 타일마다 아주 조금 다른 색
+      fg.fillStyle = `rgba(${fr() < 0.5 ? 255 : 0},${fr() < 0.5 ? 255 : 0},${fr() < 0.5 ? 255 : 0},0.025)`;
+      fg.fillRect(tx * tile, ty * tile, tile, tile);
+    }
+  }
+  fg.fillStyle = 'rgba(70,68,64,0.5)';
+  for (let i = 0; i <= 2; i++) {
+    fg.fillRect(i * tile - 1, 0, 2, S);
+    fg.fillRect(0, i * tile - 1, S, 2);
+  }
+  const fb = makeCanvas(S, S);
+  const fbg = fb.getContext('2d');
+  fbg.fillStyle = '#ffffff';
+  fbg.fillRect(0, 0, S, S);
+  fbg.fillStyle = '#000000';
+  for (let i = 0; i <= 2; i++) {
+    fbg.fillRect(i * tile - 1.5, 0, 3, S);
+    fbg.fillRect(0, i * tile - 1.5, S, 3);
+  }
+  // 벽: 4m × 4.8m, 밝은 도장 패널 + 2m 이음새 + 걸레받이 + 1.1m 높이 남색 띠
+  const wc = makeCanvas(512, 614);
+  const wg = wc.getContext('2d');
+  paintNoise(wg, 512, 614, [196, 192, 184], 6, { seed: 47, cells: 6, octaves: 3 });
+  const px = 614 / 4.8;
+  wg.fillStyle = '#2b3a52';
+  wg.fillRect(0, 614 - 1.12 * px, 512, 0.08 * px);
+  wg.fillStyle = '#3a3c40';
+  wg.fillRect(0, 614 - 0.16 * px, 512, 0.16 * px);
+  wg.fillStyle = 'rgba(70,68,64,0.6)';
+  wg.fillRect(0, 0, 2, 614);
+  wg.fillRect(255, 0, 2, 614);
+  const grad = wg.createLinearGradient(0, 0, 0, 160);
+  grad.addColorStop(0, 'rgba(20,20,22,0.35)');
+  grad.addColorStop(1, 'rgba(20,20,22,0)');
+  wg.fillStyle = grad;
+  wg.fillRect(0, 0, 512, 160);
+  const wb = makeCanvas(256, 307);
+  const wbg = wb.getContext('2d');
+  wbg.fillStyle = '#ffffff';
+  wbg.fillRect(0, 0, 256, 307);
+  wbg.fillStyle = '#000000';
+  wbg.fillRect(0, 0, 2, 307);
+  wbg.fillRect(127, 0, 2, 307);
+  wbg.fillRect(0, 307 - 0.16 * (307 / 4.8), 256, 2);
+  const top = makeCanvas(64, 64);
+  const tg = top.getContext('2d');
+  paintNoise(tg, 64, 64, [44, 46, 50], 6, { seed: 53, cells: 4, octaves: 2 });
+  museumCache = {
+    floor: toTexture(fc),
+    floorBump: toTexture(fb, { srgb: false }),
+    wall: toTexture(wc),
+    wallBump: toTexture(wb, { srgb: false }),
+    wallTop: toTexture(top),
+  };
+  return museumCache;
 }
 
 // 이름표용 스프라이트 텍스처
@@ -517,4 +593,36 @@ export function createBombScreen() {
     tex.needsUpdate = true;
   };
   return { texture: tex, draw };
+}
+
+// 개념 카드 (맵에 떠 있는 홀로그램 카드): 이름과 짧은 설명
+const cardCache = new Map();
+export function conceptCardTexture(concept) {
+  if (cardCache.has(concept.id)) return cardCache.get(concept.id);
+  const W = 256, H = 356;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(8,24,32,0.82)';
+  roundRect(g, 4, 4, W - 8, H - 8, 18);
+  g.fill();
+  g.strokeStyle = 'rgba(111,211,232,0.95)';
+  g.lineWidth = 4;
+  roundRect(g, 4, 4, W - 8, H - 8, 18);
+  g.stroke();
+  g.fillStyle = '#6fd3e8';
+  g.font = `600 20px ${STENCIL}`;
+  g.textAlign = 'center';
+  g.fillText('CONCEPT CARD', W / 2, 42);
+  g.font = `700 64px ${STENCIL}`;
+  g.fillText('F', W / 2, 140);
+  g.fillStyle = '#e8f6fa';
+  g.font = `700 ${concept.name.length > 6 ? 26 : 34}px ${FONT}`;
+  g.fillText(concept.name, W / 2, 210);
+  g.fillStyle = 'rgba(232,246,250,0.7)';
+  g.font = `500 17px ${FONT}`;
+  g.fillText('가까이 가면 도감에 기록', W / 2, 310);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  cardCache.set(concept.id, t);
+  return t;
 }

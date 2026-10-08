@@ -7,6 +7,8 @@ import { MAP_ORDER, getMapDef } from '../sim/maps/index.js';
 import { DIFFICULTY } from '../ai/bot.js';
 import { QUALITY } from '../client/stage.js';
 import { PATCH_ICONS, UI_ICONS, WEAPON_ICONS } from './icons.js';
+import { CONCEPTS, CONCEPT_BY_ID, pickQuiz } from '../sim/concepts.js';
+import { loadProgress, recordQuiz } from '../core/progress.js';
 
 const h = (html) => {
   const t = document.createElement('template');
@@ -19,7 +21,8 @@ const tierColor = (id) => PATCH_TIERS[PATCHES[id].tier].color;
 const slotKeys = (tier) => LOADOUT_SLOTS.filter((s) => s.tier === tier).map((s) => s.key).join('·');
 
 // ───────────────────────── 타이틀 ─────────────────────────
-export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
+export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex }) {
+  const prog = loadProgress();
   const el = h(`
     <section class="screen title-screen">
       <div class="title-center">
@@ -30,6 +33,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
         <div class="menu">
           <button class="btn primary big" data-act="start">작전 개시</button>
           <div class="menu-row">
+            <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}</small></button>
             <button class="btn ghost" data-act="controls">조작 교범</button>
             <button class="btn ghost" data-act="settings">설정</button>
             <button class="btn ghost" data-act="fullscreen">전체 화면</button>
@@ -46,6 +50,29 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen }) {
     if (act === 'controls') onControls();
     if (act === 'settings') onSettings();
     if (act === 'fullscreen') onFullscreen();
+    if (act === 'codex') onCodex?.();
+  });
+  return el;
+}
+
+// ───────────────────────── 개념 도감 ─────────────────────────
+// 경기 중 맵에서 주운 개념 카드 모음. 아직 못 주운 카드는 이름만 가림.
+export function codexModal({ onClose }) {
+  const prog = loadProgress();
+  const q = prog.quiz;
+  const el = h(`
+    <section class="modal">
+      <div class="modal-card codex">
+        <header><h2>개념 도감 <small>${prog.concepts.length} / ${CONCEPTS.length}</small></h2><button class="btn ghost small" data-act="close">닫기</button></header>
+        <p class="codex-note">경기 중 맵에 떠 있는 <b>개념 카드</b>에 다가가면 기록됩니다. 경기가 끝나면 주운 카드로 개념 점검을 합니다.${q.solved ? ` · 점검 정답 ${q.correct}/${q.solved}` : ''}</p>
+        <div class="codex-grid">${CONCEPTS.map((c, i) => {
+          const got = prog.concepts.includes(c.id);
+          return `<div class="codex-card ${got ? 'got' : 'locked'}"><small>No.${String(i + 1).padStart(2, '0')}</small><b>${got ? esc(c.name) : '???'}</b><p>${got ? esc(c.text) : '아직 발견하지 못한 개념'}</p></div>`;
+        }).join('')}</div>
+      </div>
+    </section>`);
+  el.addEventListener('click', (e) => {
+    if (e.target === el || e.target.closest('[data-act="close"]')) onClose();
   });
   return el;
 }
@@ -58,7 +85,7 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
   const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음' };
   const mapCard = (id) => {
     const d = getMapDef(id);
-    return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-en">${d.nameEn ?? ''}</span><span class="mc-desc">${d.desc ?? ''}</span><span class="mc-wx">${WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
+    return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-en">${d.nameEn ?? ''}</span><span class="mc-desc">${d.desc ?? ''}</span><span class="mc-wx">${d.mood ?? WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
   };
   const card = (t, icon, lines) => `
     <button class="team-card t-${t}" data-team="${t}">
@@ -558,6 +585,10 @@ export function resultScreen({ result, onAgain, onTeam, onMenu }) {
     { title: LOCKPICK_CONCEPT.concept, text: LOCKPICK_CONCEPT.conceptText, color: '#c9ced4', icon: UI_ICONS.lock },
   ];
   const s = player.stats;
+  const picked = result.concepts?.picked ?? [];
+  const fresh = result.concepts?.fresh ?? [];
+  const quiz = pickQuiz(picked, used, 3);
+  const prog = loadProgress();
   const el = h(`
     <section class="screen result-screen ${won ? 'win' : 'lose'} t-${winner}">
       <div class="result-head">
@@ -573,6 +604,17 @@ export function resultScreen({ result, onAgain, onTeam, onMenu }) {
         </div>
       </div>
       <div class="result-body"></div>
+      <div class="quiz">
+        <h3>개념 점검 <small>주운 개념 카드 ${picked.length}장${fresh.length ? ` · 새 카드 ${fresh.length}장` : ''} · 도감 ${prog.concepts.length}/${CONCEPTS.length}</small></h3>
+        <div class="quiz-list">${quiz.map((c, qi) => `
+          <div class="quiz-item" data-q="${qi}">
+            <div class="qi-head"><span>Q${qi + 1}</span><small>${esc(c.name)}</small></div>
+            <p class="qi-q">${esc(c.q)}</p>
+            <div class="qi-choices">${c.choices.map((ch, i) => `<button class="qi-choice" data-q="${qi}" data-i="${i}">${i + 1}. ${esc(ch)}</button>`).join('')}</div>
+            <p class="qi-why"></p>
+          </div>`).join('')}</div>
+        <div class="quiz-score"></div>
+      </div>
       <div class="concepts">
         <h3>작전 보고 · 운용한 힘의 원리</h3>
         <div class="concept-cards">${concepts.map((c) => `<div class="concept-card" style="--c:${c.color}"><div class="cc-icon">${c.icon}</div><b>${c.title}</b><p>${c.text}</p></div>`).join('')}</div>
@@ -584,6 +626,24 @@ export function resultScreen({ result, onAgain, onTeam, onMenu }) {
       </footer>
     </section>`);
   el.querySelector('.result-body').appendChild(scoreboard(match));
+  // 점검 문제: 한 번만 고를 수 있음, 고르면 정답·해설 표시
+  let answered = 0, right = 0;
+  el.addEventListener('click', (e) => {
+    const btn = e.target.closest('.qi-choice');
+    if (!btn) return;
+    const item = btn.closest('.quiz-item');
+    if (item.classList.contains('done')) return;
+    const c = quiz[Number(btn.dataset.q)];
+    const ok = Number(btn.dataset.i) === c.answer;
+    item.classList.add('done', ok ? 'right' : 'wrong');
+    btn.classList.add('picked');
+    item.querySelectorAll('.qi-choice')[c.answer].classList.add('answer');
+    item.querySelector('.qi-why').textContent = `${ok ? '정답' : '오답'} — ${c.why}`;
+    recordQuiz(ok);
+    answered++;
+    if (ok) right++;
+    if (answered === quiz.length) el.querySelector('.quiz-score').textContent = `점검 결과 ${right} / ${quiz.length}${right === quiz.length ? ' · 완벽합니다' : ''}`;
+  });
   el.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'again') onAgain();
