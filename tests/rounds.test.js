@@ -210,6 +210,12 @@ test('온라인 라운드제: 참가자 구매가 방장에 반영되고 점수�
   assert.equal(me.secondary, 'sheriff', '참가자 화면에도 반영');
   assert.equal(me.weapon, 'sheriff');
   assert.equal(me.credits, 200);
+  for (const a of host.agents) {
+    if (a.id === 'defuse-1') continue;
+    const c = client.agentById(a.id);
+    assert.equal(c.secondary, a.secondary, `${a.id} 보조무기가 참가자 화면에도`);
+    assert.equal(c.primary, a.primary);
+  }
   for (const [i, b] of host.bombs.entries()) {
     assert.equal(client.bombs[i].x, b.x);
     assert.equal(client.bombs[i].z, b.z);

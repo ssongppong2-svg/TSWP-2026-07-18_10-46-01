@@ -118,6 +118,7 @@ export class HostSync {
         r2(a.adsT), r2(a.reloadT), r2(a.swapT), r2(Math.min(9, a.sinceShot)), r2(a.meleeCd), r2(a.ampT),
         r2(Math.max(0, a.revealedUntil - m.time)), a.held?.zoneId ?? 0, a.lockpick ? (a.lockpick.bombId === 'A' ? 1 : 2) : 0,
         Math.round(a.armor ?? 0), r2(Math.max(-1, Math.min(9, m.time - a.spottedT))),
+        a.primary ? WEAP.indexOf(a.primary) : -1, WEAP.indexOf(a.secondary ?? 'pistol'),
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
@@ -203,7 +204,7 @@ export class ClientSync {
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
@@ -221,6 +222,11 @@ export class ClientSync {
         return;
       }
       a.net = { x, y, z, vx, vy, vz, t: now };
+      // 다른 요원이 가진 총 (3인칭 모형·등에 멘 총·관전 화면)
+      if (pw !== undefined) {
+        a.primary = WEAP[pw] ?? null;
+        a.secondary = WEAP[sw] ?? 'pistol';
+      }
       a.yaw = yaw;
       a.pitch = pitch;
       a.onGround = !!(flags & 2);

@@ -368,11 +368,12 @@ export class Hud {
     const w = WEAPONS[a.weapon];
     const ws = a.weapons[a.weapon];
     this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`));
-    this.set('mag', w.melee ? '—' : ws?.mag ?? 0, (v) => {
+    // 온라인에서 다른 사람을 관전하면 탄약은 모름 → —
+    this.set('mag', w.melee || !ws ? '—' : ws.mag, (v) => {
       E.mag.textContent = v;
       E.mag.classList.toggle('low', !w.melee && typeof v === 'number' && v <= Math.ceil(w.magSize * 0.25));
     });
-    this.set('res', w.melee ? '' : `/ ${ws?.reserve ?? 0}`, (v) => (E.res.textContent = v));
+    this.set('res', w.melee || !ws ? '' : `/ ${ws.reserve}`, (v) => (E.res.textContent = v));
     this.set('reloading', a.reloadT > 0 && !w.melee, (v) => E.ammo.classList.toggle('reloading', v));
     this.set('amp', a.ampT > 0 && !w.melee, (v) => E.amp.classList.toggle('show', v));
     const credits = me.credits ?? 0;
