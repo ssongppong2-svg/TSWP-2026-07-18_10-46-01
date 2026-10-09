@@ -97,6 +97,8 @@ export class GameClient {
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
     this.newConcepts = [];
+    // 이번 경기 공부 기록 (결과 화면): 보급 점검·해체 문제·힘 장치 사용·새로 숙달한 개념
+    this.study = { quiz: 0, quizRight: 0, puzzles: {}, devices: 0, mastered: [] };
     this.effects.onCasingBounce = (p) => this.audio.play('casing', { pos: p });
     this.hud = new Hud(uiRoot, this.match, this.player.id, settings);
     this.lockpickUI = new LockpickUI(uiRoot);
@@ -364,7 +366,10 @@ export class GameClient {
     ev.on('lockpickEnd', (e) => {
       if (!isMe(e.agent)) return;
       // 해체 문제를 풀면 그 개념을 쓴 것 → 숙달
-      if (e.reason === 'done' && e.puzzleKind) this.studied(PUZZLE_INFO[e.puzzleKind]?.concept, '해체 문제');
+      if (e.reason === 'done' && e.puzzleKind) {
+        this.study.puzzles[e.puzzleKind] = (this.study.puzzles[e.puzzleKind] ?? 0) + 1;
+        this.studied(PUZZLE_INFO[e.puzzleKind]?.concept, '해체 문제');
+      }
       if (e.reason === 'hit' || e.reason === 'captured') {
         A.play('lockFail');
         this.hud.banner('해체 중단', e.reason === 'hit' ? '피격. 처음부터 재시도.' : '구속됨. 처음부터 재시도.', 'bad');
@@ -373,6 +378,8 @@ export class GameClient {
     ev.on('quizAnswer', (e) => {
       if (!isMe(e.agent)) return;
       A.play(e.correct ? 'match' : 'denied');
+      this.study.quiz++;
+      if (e.correct) this.study.quizRight++;
       const fresh = recordQuiz(e.correct, e.conceptId);
       if (e.correct) this.hud.banner('보급 점검 정답', `+${e.bonus} J · ${CONCEPT_BY_ID[e.conceptId]?.name ?? ''}`, 'good');
       if (fresh) this.masteredBanner(e.conceptId);
@@ -437,11 +444,15 @@ export class GameClient {
     });
     ev.on('swap', (e) => viewing(e.agent) && A.play('swap'));
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
-    ev.on('padLaunch', (e) => A.play('pad', { pos: e.agent.pos, vol: viewing(e.agent) ? 1.2 : 1 }));
+    ev.on('padLaunch', (e) => {
+      A.play('pad', { pos: e.agent.pos, vol: viewing(e.agent) ? 1.2 : 1 });
+      if (isMe(e.agent)) this.study.devices++;
+    });
     ev.on('gate', (e) => {
       const [r, c] = e.device.cells[0];
       const pos = { x: this.match.map.cellX(c), y: 2, z: this.match.map.cellZ(r) };
       A.play(e.done ? 'shutterStop' : 'shutter', { pos });
+      if (!e.done && e.by && isMe(e.by)) this.study.devices++;
       if (!e.done && e.by && isMe(e.by)) this.hud.radio({ name: e.device.name ?? '지레 셔터', text: `${e.closed ? '셔터 내림' : '셔터 올림'} · 지레: 받침점에서 먼 곳의 작은 힘으로 무거운 셔터를 움직임`, kind: 'order' });
     });
     ev.on('cratePush', (e) => A.play('cratePush', { pos: { x: this.match.map.cellX(e.device.st.c), y: 0.5, z: this.match.map.cellZ(e.device.st.r) } }));
@@ -469,7 +480,7 @@ export class GameClient {
 
   result() {
     const m = this.match;
-    return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts } };
+    return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts }, study: this.study };
   }
 
   // ───────────── 매 프레임 ─────────────
@@ -760,8 +771,13 @@ export class GameClient {
   }
 
   masteredBanner(conceptId) {
+    if (!this.study.mastered.includes(conceptId)) this.study.mastered.push(conceptId);
     const patches = Object.entries(PATCH_CONCEPT).filter(([, c]) => c === conceptId).map(([p]) => PATCHES[p]?.name).filter(Boolean);
-    this.hud.banner(`개념 숙달 · ${CONCEPT_BY_ID[conceptId]?.name ?? ''}`, patches.length ? `다음 경기부터 ${patches.join('·')} 재사용 대기 −15%` : '도감에 숙달로 기록', 'good');
+    const lock = Object.values(PUZZLE_INFO).find((p) => p.concept === conceptId);
+    const gain = patches.length
+      ? `다음 경기부터 ${patches.join('·')} 재사용 대기 −${Math.round((1 - MASTERY.cooldownMult) * 100)}%`
+      : lock ? `다음 경기부터 ${lock.title}은 계산 결과 표시 · 빠른 해체` : '도감에 숙달로 기록';
+    this.hud.banner(`개념 숙달 · ${CONCEPT_BY_ID[conceptId]?.name ?? ''}`, gain, 'good');
   }
 
   dispose() {

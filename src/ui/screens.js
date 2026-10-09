@@ -1,5 +1,5 @@
 import { createRng } from '../core/rng.js';
-import { DRAFT_TIME, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { DRAFT_TIME, ECON, MASTERY, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { LOADOUT_SLOTS, LOCKPICK_CONCEPT, PATCHES, PATCH_TIERS, SHOP_WEAPONS, WEAPONS, patchesOfTier } from '../sim/data.js';
 import { COPIES_PER_TEAM, SLOTS_PER_PLAYER, TIER_SLOTS, TeamDraft } from '../sim/draft.js';
 import { makeRoster } from '../sim/match.js';
@@ -7,8 +7,9 @@ import { MAP_ORDER, getMapDef } from '../sim/maps/index.js';
 import { DIFFICULTY } from '../ai/bot.js';
 import { QUALITY } from '../client/stage.js';
 import { PATCH_ICONS, UI_ICONS, WEAPON_ICONS } from './icons.js';
-import { CONCEPTS, CONCEPT_BY_ID, pickQuiz } from '../sim/concepts.js';
-import { loadProgress, recordQuiz } from '../core/progress.js';
+import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT, pickQuiz } from '../sim/concepts.js';
+import { loadProgress, masteredIds, recordQuiz } from '../core/progress.js';
+import { PUZZLE_INFO } from '../sim/lockpick.js';
 
 const h = (html) => {
   const t = document.createElement('template');
@@ -23,20 +24,21 @@ const slotKeys = (tier) => LOADOUT_SLOTS.filter((s) => s.tier === tier).map((s) 
 // ───────────────────────── 타이틀 ─────────────────────────
 export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline }) {
   const prog = loadProgress();
+  const mastered = masteredIds().length;
   const el = h(`
     <section class="screen title-screen">
       <div class="title-center">
-        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 5 대 5 라운드 전술 슈팅</div>
+        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 연구소 요원 바디캠 · 5 대 5 전술</div>
         <h1 class="logo">FORCE</h1>
         <div class="logo-ko">포스</div>
-        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>상점에서 총을 사고, 포스 패치로 힘을 다뤄 7라운드를 먼저 이겨라.</p>
+        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>힘의 원리를 아는 요원이 이긴다.<br>2층 작전 지역의 힘 장치와 포스 패치로 ${ROUNDS.winTo}라운드를 먼저 가져와라.</p>
         <div class="menu">
           <div class="menu-main">
             <button class="btn primary big" data-act="start">작전 개시 <small>봇 9명</small></button>
             <button class="btn big online-btn" data-act="online">온라인 작전 <small>친구와 함께</small></button>
           </div>
           <div class="menu-row">
-            <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}</small></button>
+            <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}${mastered ? ` · 숙달 ${mastered}` : ''}</small></button>
             <button class="btn ghost" data-act="controls">조작 교범</button>
             <button class="btn ghost" data-act="settings">설정</button>
             <button class="btn ghost" data-act="fullscreen">전체 화면</button>
@@ -44,7 +46,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         </div>
       </div>
       <footer class="title-foot">
-        <span>작전 지역 ${MAP_ORDER.length}곳</span><span>7라운드 선승 · 6라운드 뒤 공수 교대</span><span>폭탄 2기 · 라운드 2:00</span>
+        <span>작전 지역 ${MAP_ORDER.length}곳 · 2층 구조</span><span>${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대</span><span>폭탄 2기 · 라운드 2:00</span>
       </footer>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -68,10 +70,12 @@ export function codexModal({ onClose }) {
     <section class="modal">
       <div class="modal-card codex">
         <header><h2>개념 도감 <small>${prog.concepts.length} / ${CONCEPTS.length}</small></h2><button class="btn ghost small" data-act="close">닫기</button></header>
-        <p class="codex-note">경기 중 맵에 떠 있는 <b>개념 카드</b>에 다가가면 기록됩니다. 경기가 끝나면 주운 카드로 개념 점검을 합니다.${q.solved ? ` · 점검 정답 ${q.correct}/${q.solved}` : ''}</p>
+        <p class="codex-note">경기 중 맵에 떠 있는 <b>개념 카드</b>에 다가가면 기록됩니다. 보급 점검·해체 문제·경기 뒤 점검에서 한 개념을 <b>${MASTERY.need}번</b> 맞히면 <b>숙달</b> — 그 힘을 쓰는 포스 패치의 재사용 대기가 짧아지고, 그 개념의 해체 잠금은 계산 결과가 바로 보입니다.${q.solved ? ` · 점검 정답 ${q.correct}/${q.solved}` : ''}</p>
         <div class="codex-grid">${CONCEPTS.map((c, i) => {
           const got = prog.concepts.includes(c.id);
-          return `<div class="codex-card ${got ? 'got' : 'locked'}"><small>No.${String(i + 1).padStart(2, '0')}</small><b>${got ? esc(c.name) : '???'}</b><p>${got ? esc(c.text) : '아직 발견하지 못한 개념'}</p></div>`;
+          const lv = Math.min(MASTERY.need, prog.mastery[c.id] ?? 0);
+          const done = lv >= MASTERY.need;
+          return `<div class="codex-card ${got || lv ? 'got' : 'locked'} ${done ? 'mastered' : ''}"><small>No.${String(i + 1).padStart(2, '0')}<span class="cx-lv">${done ? '★ 숙달' : lv ? `숙달 ${lv}/${MASTERY.need}` : ''}</span></small><b>${got || lv ? esc(c.name) : '???'}</b><p>${got || lv ? esc(c.text) : '아직 발견하지 못한 개념'}</p></div>`;
         }).join('')}</div>
       </div>
     </section>`);
@@ -83,7 +87,7 @@ export function codexModal({ onClose }) {
 
 // ───────────────────────── 작전 브리핑 (팀 선택) ─────────────────────────
 export function teamScreen({ settings, onNext, onBack, onMap }) {
-  let team = settings.lastTeam ?? null;
+  let team = settings.lastTeam ?? TEAMS.DEFUSE;
   let difficulty = settings.difficulty ?? 'normal';
   let mapId = MAP_ORDER.includes(settings.mapId) ? settings.mapId : MAP_ORDER[0];
   const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음', wet: '주간 · 비 갠 뒤' };
@@ -104,16 +108,18 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
       <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
       <h3 class="brief-label">첫 진영 <small>6라운드가 끝나면 서로 바꿈</small></h3>
       <div class="team-cards">
-        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b>', '폭탄 앞 <kbd>F</kbd> → <b>합력 잠금 해제</b>로 해체', '포스팀을 <b>전원 제압</b>해도 라운드 승리', '구매 시간에 <kbd>B</kbd> 상점'])}
-        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 라운드 승리', '해체 시도 감지 시 경보 수신', '구매 시간에 <kbd>B</kbd> 상점'])}
+        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', '폭탄 앞 <kbd>F</kbd> → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)', '포스팀을 <b>전원 제압</b>해도 라운드 승리'])}
+        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 라운드 승리', '지레 셔터·승강기로 길을 끊고 위층에서 내려다보기'])}
       </div>
-      <div class="team-options">
-        <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '나')}"></label>
-        <div class="field"><span>적·아군 숙련도</span>
-          <div class="seg">${Object.entries(DIFFICULTY).map(([k, d]) => `<button data-diff="${k}" class="${k === difficulty ? 'on' : ''}">${d.name}</button>`).join('')}</div>
+      <footer class="screen-foot sticky team-foot">
+        <div class="team-options">
+          <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '나')}"></label>
+          <div class="field"><span>적·아군 숙련도</span>
+            <div class="seg">${Object.entries(DIFFICULTY).map(([k, d]) => `<button data-diff="${k}" class="${k === difficulty ? 'on' : ''}">${d.name}</button>`).join('')}</div>
+          </div>
         </div>
-      </div>
-      <footer class="screen-foot"><button class="btn primary big" data-act="next" disabled>다음 · 포스 패치 장착 →</button></footer>
+        <button class="btn primary big" data-act="next" disabled>다음 · 포스 패치 장착 →</button>
+      </footer>
     </section>`);
   const next = el.querySelector('[data-act="next"]');
   const refresh = () => {
@@ -171,11 +177,14 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
   }
   schedule.sort((a, b) => a.t - b.t);
 
+  // 숙달한 개념의 패치는 재사용 대기가 짧음 (공부가 곧 실력)
+  const mastered = new Set(masteredIds());
+  const isMastered = (id) => mastered.has(PATCH_CONCEPT[id]);
   const card = (id) => {
     const p = PATCHES[id];
     return `
-      <button class="patch-card tier-${p.tier}" data-patch="${id}" style="--tier:${tierColor(id)}">
-        <div class="pc-top"><div class="pc-icon">${PATCH_ICONS[id]}</div><span class="pc-concept">${p.concept}</span></div>
+      <button class="patch-card tier-${p.tier} ${isMastered(id) ? 'mastered' : ''}" data-patch="${id}" style="--tier:${tierColor(id)}">
+        <div class="pc-top"><div class="pc-icon">${PATCH_ICONS[id]}</div><span class="pc-concept">${isMastered(id) ? '<b class="pc-star">★</b>' : ''}${p.concept}</span></div>
         <div class="pc-name">${p.name}</div>
         <div class="pc-short">${p.short}</div>
         <div class="pc-stock"></div>
@@ -201,8 +210,8 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
           <div class="tier-row">${section('special')}${section('ultimate')}</div>
           <div class="patch-detail"></div>
           <div class="side-block weapons">
-            <h3>상점 화기 <small>구매 시간에 <kbd>B</kbd></small></h3>
-            ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `◆ ${w.price.toLocaleString('en-US')}` : '기본'}</em></b><small>${w.kind} · 몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${Math.round(w.damage * w.headMult)}</small></div></div>`; }).join('')}
+            <h3>보급 화기 <small>구매 시간에 <kbd>B</kbd> 보급 단말기</small></h3>
+            ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `${w.price.toLocaleString('en-US')} J` : '기본 지급'}</em></b><small>${w.kind} · 몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${Math.round(w.damage * w.headMult)}</small></div></div>`; }).join('')}
           </div>
         </div>
         <aside class="draft-side">
@@ -238,7 +247,7 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
       return;
     }
     const p = PATCHES[id];
-    const cd = p.tier === 'ultimate' ? '필살 게이지 100%' : `재사용 ${p.cooldown}초`;
+    const cd = p.tier === 'ultimate' ? '필살 게이지 100%' : isMastered(id) ? `재사용 ${p.cooldown}초 → ${Math.round(p.cooldown * MASTERY.cooldownMult * 10) / 10}초 · ★ 숙달` : `재사용 ${p.cooldown}초`;
     detail.innerHTML = `
       <div class="pd-icon" style="--tier:${tierColor(id)}">${PATCH_ICONS[id]}</div>
       <div class="pd-body">
@@ -408,9 +417,10 @@ export function clickToStart({ team, loadout, mapId, onClick, online = false }) 
         <h2>${TEAM_INFO[team].goal}</h2>
         <ul class="sc-rules">
           <li><b>라운드제</b> — ${ROUNDS.winTo}라운드 먼저 이기면 승리 · ${ROUNDS.half}라운드 뒤 공수 교대 · 한쪽 전멸 시 라운드 종료</li>
-          <li><b>상점</b> — 구매 시간(시작 구역)에 <kbd>B</kbd> · 처치·해체·라운드 결과로 크레딧 · 살아남으면 총·방탄 유지</li>
+          <li><b>보급</b> — 구매 시간(시작 구역)에 <kbd>B</kbd> 보급 단말기 · 에너지(J)는 처치·해체·라운드 결과로 · <b>보급 점검</b> 정답 +${ECON.quiz} J</li>
+          <li><b>힘 장치</b> — 탄성 발판(올라서면 2층으로) · 승강기 · 지레 셔터(<kbd>F</kbd>) · 마찰 미끄럼틀 · 여럿이 밀면 빨라지는 상자(합력)</li>
           <li><b>사격</b> — 멈춰 서서 쏘면 정확, 달리며 쏘면 빗나감 · 소총은 머리 1발</li>
-          <li><kbd>1·2·3</kbd> 무기 · <kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>M</kbd> 지도 · <kbd>Tab</kbd> 점수 · <kbd>Shift</kbd> 보행(무음)</li>
+          <li><kbd>1·2·3</kbd> 무기 · <kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>M</kbd> 지도 · <kbd>Tab</kbd> 전황 · <kbd>Shift</kbd> 보행(무음)</li>
         </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
           const id = loadout[i];
@@ -474,12 +484,13 @@ export function controlsModal({ onClose }) {
       ['휠 클릭 / H', '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
       ['T (누른 채)', '총 살펴보기'],
       ['M (누른 채)', '큰 지도 (지형 · 아군 · 아군이 본 적 · 무전 보고)'],
-      ['Tab', '점수판'],
+      ['Tab', '전황판'],
     ]],
     ['임무', [
-      ['B', '상점 (구매 시간) · 숫자 1~8로 바로 구매'],
-      ['F', '폭탄 해체 개시 · 중단'],
+      ['B', '보급 단말기 (구매 시간) · 숫자 1~8로 바로 보급 · 보급 점검 문제'],
+      ['F', '폭탄 해체 개시 · 중단 · 지레 손잡이 당기기'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
+      ['밀며 걷기', '상자 밀기 (여럿이 같은 쪽으로 밀면 빨라짐)'],
       ['Esc', '일시 중지'],
     ]],
   ];
@@ -488,9 +499,10 @@ export function controlsModal({ onClose }) {
       <div class="modal-card wide">
         <header><h2>조작 교범</h2><button class="btn ghost small" data-act="close">닫기</button></header>
         <div class="key-groups">${groups.map(([title, rows]) => `<div class="key-group"><h4>${title}</h4>${rows.map(([k, v]) => `<div class="key-row"><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>`).join('')}</div>
-        <div class="tip"><b>합력 잠금 해제</b> 요구 합력과 일치하도록 힘 카드를 선택. 우(→) +, 좌(←) − 로 계산. 해체 중 피격 시 초기화.</div>
+        <div class="tip"><b>힘 잠금 해체</b> ${Object.values(PUZZLE_INFO).map((p) => p.title).join(' · ')}. 문제를 읽고 필요한 힘을 계산해 힘 카드를 고름. 오른쪽·위쪽 +, 왼쪽·아래쪽 −. 해체 중 피격 시 처음부터.</div>
         <div class="tip"><b>라운드제</b> ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대 · 구매 시간 ${ROUNDS.buyTime}초(전·후반 첫 라운드 ${ROUNDS.buyTimeFirst}초) · 라운드 2분 · 한쪽이 전멸하면 바로 끝남.</div>
-        <div class="tip"><b>크레딧</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더). 살아남으면 산 총·방탄이 다음 라운드까지 남음. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
+        <div class="tip"><b>에너지 (J)</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더) · 보급 점검 정답 ${ECON.quiz}. 살아남으면 받은 총·보호막이 다음 라운드까지 남음. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
+        <div class="tip"><b>개념 숙달</b> 한 개념을 ${MASTERY.need}번 맞히면(보급 점검·해체 문제·경기 뒤 점검) 그 힘을 쓰는 포스 패치의 재사용 대기 −${Math.round((1 - MASTERY.cooldownMult) * 100)}% · 그 개념의 해체 잠금은 계산 결과가 바로 보이고 더 빨리 풀림.</div>
         <div class="tip"><b>참고</b> 브라우저 특성상 <kbd>Ctrl</kbd>+<kbd>W</kbd>는 탭 닫기로 처리될 수 있음. 전체 화면에서 플레이 권장.</div>
       </div>
     </section>`);
@@ -512,7 +524,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
         <div class="field"><span>그래픽 품질</span><div class="seg"><button data-quality="auto">자동</button>${Object.entries(QUALITY).map(([k, q]) => `<button data-quality="${k}">${q.name}</button>`).join('')}</div></div>
         <p class="field-note" data-quality-note></p>
         <div class="field"><span>조준점</span><div class="seg"><button data-cross="cross">점 + 선</button><button data-cross="dot">점만</button><button data-cross="off">없음</button></div></div>
-        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 효과 (왜곡 · 노이즈 · REC 표시)</span></label>
+        <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 (가장자리 왜곡 · 필름 노이즈 · 테두리 눈금)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
       </div>
     </section>`);
@@ -564,8 +576,8 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
 }
 
 // ───────────────────────── 전황판 (Tab) ─────────────────────────
-// 점수판: 내 분대(위)와 상대 분대(아래). 크레딧은 내 분대만 보임
-export function scoreboard(match, { me = match.player } = {}) {
+// 전황판: 내 분대(위)와 상대 분대(아래). 에너지는 내 분대만 보임
+export function scoreboard(match, { me = match.player, head: showHead = true } = {}) {
   const squad = me?.squad ?? TEAMS.DEFUSE;
   const enemy = match.agents.find((a) => a.squad !== squad)?.squad ?? TEAMS.FORCE;
   const mine = match.score?.[squad] ?? 0, theirs = match.score?.[enemy] ?? 0;
@@ -573,17 +585,17 @@ export function scoreboard(match, { me = match.player } = {}) {
     <div class="sb-team ${ally ? 'ally' : 'enemy'}">
       <h3><b>${ally ? mine : theirs}</b>${ally ? '아군 분대' : '상대 분대'}<small>${TEAM_INFO[match.agents.find((a) => a.squad === sq)?.team ?? sq].name}</small></h3>
       <table>
-        <tr><th>요원</th><th>무기</th><th>처치</th><th>죽음</th><th>도움</th><th>피해</th>${ally ? '<th>크레딧</th>' : ''}<th>포스 패치</th></tr>
+        <tr><th>요원</th><th>무기</th><th>처치</th><th>죽음</th><th>도움</th><th>피해</th>${ally ? '<th>에너지</th>' : ''}<th>포스 패치</th></tr>
         ${match.agents
           .filter((a) => a.squad === sq)
           .sort((p, q) => q.stats.kills - p.stats.kills || q.stats.damage - p.stats.damage)
-          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.id === me?.id ? 'me' : ''}"><td>${esc(a.name)}</td><td class="sb-w">${WEAPON_ICONS[a.primary ?? a.secondary ?? 'pistol'] ?? ''}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.assists ?? 0}</td><td>${a.stats.damage}</td>${ally ? `<td class="sb-c">${(a.credits ?? 0).toLocaleString('en-US')}</td>` : ''}<td class="sb-patches">${a.patches
+          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.id === me?.id ? 'me' : ''}"><td>${esc(a.name)}</td><td class="sb-w">${WEAPON_ICONS[a.primary ?? a.secondary ?? 'pistol'] ?? ''}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.assists ?? 0}</td><td>${a.stats.damage}</td>${ally ? `<td class="sb-c">${(a.credits ?? 0).toLocaleString('en-US')} <small>J</small></td>` : ''}<td class="sb-patches">${a.patches
             .map((p) => (p ? `<i style="--tier:${tierColor(p.id)}" title="${PATCHES[p.id].name}">${PATCH_ICONS[p.id]}</i>` : '<i class="empty"></i>'))
             .join('')}</td></tr>`)
           .join('')}
       </table>
     </div>`;
-  const head = match.rules === 'rounds' ? `<div class="sb-head"><span>라운드 ${match.round}</span><b><i class="ally">${mine}</i> : <i class="enemy">${theirs}</i></b><span>${ROUNDS.winTo}라운드 선승</span></div>` : '';
+  const head = showHead && match.rules === 'rounds' ? `<div class="sb-head"><span>라운드 ${match.round}</span><b><i class="ally">${mine}</i> : <i class="enemy">${theirs}</i></b><span>${ROUNDS.winTo}라운드 선승</span></div>` : '';
   return h(`<section class="scoreboard">${head}${table(squad, true)}${table(enemy, false)}</section>`);
 }
 
@@ -591,6 +603,30 @@ export function scoreboard(match, { me = match.player } = {}) {
 function roundStrip(match, squad) {
   const icon = (r) => (r.reason.includes('해체 완료') ? '✓' : r.reason.includes('폭발') ? '✸' : '✕');
   return `<div class="round-strip">${(match.history ?? []).map((r) => `<i class="${r.squad === squad ? 'ally' : 'enemy'} ${r.round === ROUNDS.half ? 'half' : ''}" title="라운드 ${r.round} · ${esc(r.reason)}"><small>${r.round}</small>${icon(r)}</i>`).join('')}</div>`;
+}
+
+// 이번 경기 공부 기록: 보급 점검 · 해체 문제 · 힘 장치 · 새로 숙달한 개념
+function studyBlock(st) {
+  if (!st) return '';
+  const puzzles = Object.entries(st.puzzles ?? {});
+  const solved = puzzles.reduce((n, [, v]) => n + v, 0);
+  const patchesOf = (cid) => Object.entries(PATCH_CONCEPT).filter(([, c]) => c === cid).map(([p]) => PATCHES[p]?.name).filter(Boolean);
+  const gain = (cid) => {
+    const ps = patchesOf(cid);
+    if (ps.length) return ` → ${ps.join('·')} 재사용 −${Math.round((1 - MASTERY.cooldownMult) * 100)}%`;
+    const lock = Object.values(PUZZLE_INFO).find((p) => p.concept === cid);
+    return lock ? ` → ${lock.title} 계산 표시·빠른 해체` : '';
+  };
+  return `
+    <div class="study">
+      <h3>공부 기록 <small>힘을 아는 만큼 강해짐</small></h3>
+      <div class="study-grid">
+        <div><b>${st.quizRight}<small> / ${st.quiz}</small></b><span>보급 점검 정답</span><em>+${(st.quizRight * ECON.quiz).toLocaleString('en-US')} J</em></div>
+        <div><b>${solved}</b><span>해체 문제</span><em>${puzzles.length ? puzzles.map(([k, v]) => `${PUZZLE_INFO[k]?.title ?? k} ${v}`).join(' · ') : '—'}</em></div>
+        <div><b>${st.devices}</b><span>힘 장치 사용</span><em>발판 · 지레 셔터</em></div>
+        <div class="${st.mastered.length ? 'hot' : ''}"><b>${st.mastered.length}</b><span>새로 숙달</span><em>${st.mastered.length ? st.mastered.map((c) => `${esc(CONCEPT_BY_ID[c]?.name ?? c)}${gain(c)}`).join('<br>') : `한 개념 ${MASTERY.need}번 맞히면 숙달`}</em></div>
+      </div>
+    </div>`;
 }
 
 // ───────────────────────── 작전 결과 ─────────────────────────
@@ -622,10 +658,11 @@ export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }
           <div><b>${s.deaths}</b><span>죽음</span></div>
           <div><b>${s.assists ?? 0}</b><span>도움</span></div>
           <div><b>${s.damage}</b><span>피해량</span></div>
-          <div><b>${s.headshots}</b><span>헤드샷</span></div>
+          <div><b>${s.headshots}</b><span>머리 명중</span></div>
           <div><b>${s.defuses}</b><span>해체</span></div>
         </div>
       </div>
+      ${studyBlock(result.study)}
       <div class="result-body"></div>
       <div class="quiz">
         <h3>개념 점검 <small>주운 개념 카드 ${picked.length}장${fresh.length ? ` · 새 카드 ${fresh.length}장` : ''} · 도감 ${prog.concepts.length}/${CONCEPTS.length}</small></h3>
@@ -648,7 +685,7 @@ export function resultScreen({ result, onAgain, onTeam, onMenu, online = false }
         <button class="btn primary big" data-act="again">${online ? '대기실로' : '재출격 · 같은 소속'}</button>
       </footer>
     </section>`);
-  el.querySelector('.result-body').appendChild(scoreboard(match, { me: player }));
+  el.querySelector('.result-body').appendChild(scoreboard(match, { me: player, head: false }));
   // 점검 문제: 한 번만 고를 수 있음, 고르면 정답·해설 표시
   let answered = 0, right = 0;
   el.addEventListener('click', (e) => {

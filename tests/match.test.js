@@ -143,6 +143,31 @@ test('합력 락픽: 맞으면 처음부터, 정답이면 1초 뒤 해체', () =
   assert.equal(me.stats.defuses, 1);
 });
 
+test('개념 숙달: 해체 문제 개념을 숙달하면 계산 결과가 보이고 더 빨리 돌아감', () => {
+  const lockConcepts = ['resultantOpposite', 'equilibrium', 'springScale', 'buoyancySize', 'moonWeight'];
+  const turnFrames = (mastery) => {
+    const match = new Match({ seed: 9, playerTeam: TEAMS.DEFUSE, playerMastery: mastery });
+    match.phase = 'live';
+    const me = match.player;
+    const bomb = match.bombs[0];
+    me.pos = { x: bomb.x + 1, y: bomb.y ?? 0, z: bomb.z };
+    assert.ok(match.tryStartLockpick(me));
+    const p = me.lockpick.puzzle;
+    if (mastery.length) assert.ok(p.mastered && !p.hidden, '숙달하면 요구 힘을 바로 보여 줌');
+    else assert.ok(!p.mastered);
+    for (const k of p.solution) me.lockpick.selected[k] = true;
+    let n = 0;
+    while (me.lockpick && n < 200) {
+      match.stepLockpick(me, emptyIntent(me), DT);
+      n++;
+    }
+    assert.equal(bomb.state, 'defused');
+    return n;
+  };
+  const plain = turnFrames([]), master = turnFrames(lockConcepts);
+  assert.ok(master < plain * 0.7, `${plain} → ${master}프레임`);
+});
+
 test('폭탄은 2분 뒤 터지고 포스팀 승리', () => {
   const match = new Match({ seed: 11 });
   match.phase = 'live';

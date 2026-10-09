@@ -7,7 +7,7 @@ import {
 } from './constants.js';
 import { ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
-import { CARD_COUNT, generatePuzzle, isSolved } from './lockpick.js';
+import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
 import { Devices } from './devices.js';
@@ -1362,9 +1362,15 @@ export class Match {
     bomb.picker = a.id;
     bomb.progress = 0;
     bomb.alertT = this.time;
-    a.lockpick = a.isPlayer || a.human
-      ? { bombId: bomb.id, kind: 'puzzle', puzzle: generatePuzzle(this.rng), selected: Array(CARD_COUNT).fill(false), turnT: 0 }
-      : { bombId: bomb.id, kind: 'timed', t: 0, need: this.rng.range(BOMB.botTimeMin, BOMB.botTimeMax) };
+    if (a.isPlayer || a.human) {
+      const puzzle = generatePuzzle(this.rng);
+      // 숙달한 개념의 잠금: 계산 결과(요구 힘)가 바로 보이고 더 빨리 돌아감
+      if (a.mastered?.has(PUZZLE_INFO[puzzle.kind]?.concept)) {
+        puzzle.mastered = true;
+        puzzle.hidden = false;
+      }
+      a.lockpick = { bombId: bomb.id, kind: 'puzzle', puzzle, selected: Array(CARD_COUNT).fill(false), turnT: 0 };
+    } else a.lockpick = { bombId: bomb.id, kind: 'timed', t: 0, need: this.rng.range(BOMB.botTimeMin, BOMB.botTimeMax) };
     a.vel.x = 0;
     a.vel.z = 0;
     this.makeNoise(a, 'lockpick', bomb);
@@ -1392,8 +1398,9 @@ export class Match {
       if (isSolved(lp.puzzle, lp.selected)) {
         if (lp.turnT === 0) this.emit('lockpickMatch', { agent: a, bomb });
         lp.turnT += dt;
-        bomb.progress = Math.min(1, lp.turnT / BOMB.turnTime);
-        if (lp.turnT >= BOMB.turnTime) this.defuse(a, bomb);
+        const turn = BOMB.turnTime * (lp.puzzle.mastered ? MASTERY.turnMult : 1);
+        bomb.progress = Math.min(1, lp.turnT / turn);
+        if (lp.turnT >= turn) this.defuse(a, bomb);
       } else {
         lp.turnT = 0;
         bomb.progress = 0;

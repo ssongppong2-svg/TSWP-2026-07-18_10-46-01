@@ -58,7 +58,7 @@ export class LockpickUI {
     this.root.innerHTML = `
       <div class="lp-panel">
         <header>
-          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · ${info.title}</div>
+          <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · ${info.title}${p.mastered ? '<span class="lp-mastered">★ 숙달 · 계산 결과 표시 · 빠른 해체</span>' : ''}</div>
           <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 힘 카드 · <kbd>F</kbd> 중단 · 피격 시 초기화</div>
         </header>
         <div class="lp-prompt">${p.prompt ?? ''}</div>

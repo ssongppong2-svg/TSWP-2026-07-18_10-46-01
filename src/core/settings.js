@@ -7,10 +7,10 @@ export const DEFAULT_SETTINGS = {
   fov: 100,
   volume: 0.8,
   quality: 'auto', // 'auto'(기기에 맞춰 자동) | 'low' | 'medium' | 'high'
-  settingsVersion: 3,
+  settingsVersion: 4,
   invertY: false,
   difficulty: 'normal',
-  bodycam: false, // 바디캠 렌즈 효과 (왜곡·노이즈·REC 표시) — 기본은 끔
+  bodycam: true, // 바디캠 렌즈 (가장자리 왜곡·필름 노이즈·테두리 눈금) — 기본은 켬 (약하게)
   shake: 1, // 화면 흔들림 세기
   crosshair: 'cross', // 조준점: 'cross' 점+선 / 'dot' 점만 / 'off' 없음
   mapId: 'force-bound',
@@ -23,12 +23,11 @@ export function loadSettings() {
       const s = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
       // 예전 버전은 기본값 '높음'이 그대로 저장돼 있어 저사양 기기에서 느림 → 한 번 '자동'으로 바꿈
       if (!(s.settingsVersion >= 2)) s.quality = 'auto';
-      // 발로란트식으로 바뀌며 바디캠 렌즈는 기본으로 끄고 조준점은 점+선으로 (한 번만)
-      if (!(s.settingsVersion >= 3)) {
-        s.bodycam = false;
-        if (s.crosshair === 'dot') s.crosshair = 'cross';
-      }
-      s.settingsVersion = 3;
+      // 예전 버전의 점 조준점은 점+선으로 (한 번만)
+      if (!(s.settingsVersion >= 3) && s.crosshair === 'dot') s.crosshair = 'cross';
+      // 연구소 요원 바디캠 톤으로 바뀌며 렌즈를 약하게 다듬고 기본으로 켬 (한 번만, 이후 끄면 그대로)
+      if (!(s.settingsVersion >= 4)) s.bodycam = true;
+      s.settingsVersion = 4;
       return s;
     }
   } catch {

@@ -464,10 +464,11 @@ export class Stage {
   setLens({ damage = 0, pulse = 0, flash = 0, blur = 0 } = {}) {
     const u = this.bodycam.uniforms;
     const on = !!this.settings.bodycam;
-    u.distortion.value = on ? 0.16 : 0;
-    u.chroma.value = on ? 0.0025 : 0;
-    u.grain.value = on ? 0.03 : 0.01;
-    u.vignette.value = on ? 0.55 : 0.3;
+    // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
+    u.distortion.value = on ? 0.09 : 0;
+    u.chroma.value = on ? 0.0015 : 0;
+    u.grain.value = on ? 0.025 : 0.01;
+    u.vignette.value = on ? 0.45 : 0.3;
     u.damage.value = damage;
     u.pulse.value = pulse;
     u.flash.value = flash;
