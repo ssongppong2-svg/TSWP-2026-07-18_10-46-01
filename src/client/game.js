@@ -19,6 +19,7 @@ import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
 import { PUZZLE_INFO } from '../sim/lockpick.js';
+import { footSurface } from './sound-surfaces.js';
 
 const PATCH_SOUNDS = {
   gravityVeil: 'veil', elasticPad: 'pad', resultantAmp: 'amp', reactionRounds: 'rounds', buoyShield: 'shield',
@@ -136,7 +137,9 @@ export class GameClient {
     this.tmp = new THREE.Vector3();
     this.tmp2 = new THREE.Vector3();
     this.bindEvents();
-    // 비 오는 맵: 빗소리와 번개 뒤 천둥
+    // 맵의 소리 공간(실내 울림·실외 메아리)과 배경음, 비 오는 맵이면 빗소리와 번개 뒤 천둥
+    this.audio.setEnvironment(this.match.map);
+    this.audio.startAmbience(this.match.map.def?.theme === 'museum' ? 'museum' : 'outdoor');
     this.audio.setRain(this.match.map.weather === 'rain' ? 1 : 0);
     stage.onThunder = (delay, vol) => {
       setTimeout(() => {
@@ -273,6 +276,8 @@ export class GameClient {
         this.hitSoundT = 0.03;
         this.hud.hitmark(e.killed ? 'kill' : e.headshot ? 'head' : 'hit');
         if (!e.killed) A.play(e.headshot ? 'headshot' : e.armor ? 'armorHit' : 'hit');
+        // 보호막(방탄)이 이번 탄으로 다 깨짐
+        if (e.armor && !e.killed && (e.target.armor ?? 0) <= 0) A.play('armorBreak');
       }
       // 내가 맞음: 맞은 방향 표시 + 짧은 충격
       if (viewing(e.target)) {
@@ -301,12 +306,15 @@ export class GameClient {
         this.hud.banner('전투 불능', `${e.killer?.name ?? ''} · 아군 시점으로 전환`, 'bad');
       }
     });
+    // 발밑 재질(콘크리트·철제 통로·타일·계단)에 따라 다른 발소리
+    const surfaceOf = (a) => footSurface(this.match.map, a.pos.x, a.pos.y, a.pos.z);
     ev.on('footstep', (e) => {
-      if (viewing(e.agent)) A.play(e.loud ? 'step' : 'quietStep', { vol: e.loud ? 0.45 : 1 });
+      const name = e.loud ? 'step' : 'quietStep';
+      if (viewing(e.agent)) A.play(name, { vol: e.loud ? 0.45 : 1, surface: surfaceOf(e.agent) });
       else {
         // 달리는 발소리는 NOISE.step 거리까지, 걷거나 앉아 움직이는 소리는 아주 가까이(4m)에서만
         const v = audible(e.agent.pos, e.loud ? NOISE.step : 4 / rain);
-        if (v > 0) A.play(e.loud ? 'step' : 'quietStep', { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v });
+        if (v > 0) A.play(name, { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v, surface: surfaceOf(e.agent) });
       }
     });
     ev.on('conceptPicked', (e) => {
@@ -463,7 +471,7 @@ export class GameClient {
         this.landDip = Math.min(1, e.speed / 9);
       }
       const lv = viewing(e.agent) ? 1 : audible(e.agent.pos, NOISE.land);
-      if (lv > 0) A.play('land', { pos: viewing(e.agent) ? null : e.agent.pos, vol: Math.min(1, e.speed / 10) * lv });
+      if (lv > 0) A.play('land', { pos: viewing(e.agent) ? null : e.agent.pos, vol: Math.min(1, e.speed / 10) * lv, surface: surfaceOf(e.agent) });
     });
     ev.on('matchEnd', (e) => {
       this.ended = true;
@@ -804,6 +812,7 @@ export class GameClient {
     this.stage.setZoom(1);
     this.stage.setLens({});
     this.audio.setMuffle(0);
+    this.audio.stopAmbience();
     this.hud.dispose();
     this.shop.dispose();
     this.lockpickUI.dispose();

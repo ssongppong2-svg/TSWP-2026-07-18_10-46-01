@@ -50,8 +50,8 @@ const WEATHER = {
   },
   // 노을(골든아워): 낮게 뜬 주황 해 · 긴 그림자 · 붉게 물든 구름 · 푸른 하늘빛으로 그늘을 채움
   sunset: {
-    fog: ['#c99a86', 55, 230], top: '#28406e', horizon: '#f0a466', glow: '#ff9a52', overcast: 0, moon: 2.7, hemi: 1.05,
-    sun: '#ffb36e', sky: '#a9b8e0', ground: '#7d5a44', exposure: 1.08, env: 0.5, lamps: 0.55, sunDir: [-0.78, 0.2, 0.42],
+    fog: ['#c99a86', 55, 230], top: '#28406e', horizon: '#f0a466', glow: '#ff9a52', overcast: 0, moon: 2.7, hemi: 1.3,
+    sun: '#ffb36e', sky: '#a9b8e0', ground: '#8a6650', exposure: 1.12, env: 0.55, lamps: 0.65, sunDir: [-0.78, 0.2, 0.42],
     sunCol: '#ffd29a', cloudLit: '#ffb27e', cloudShade: '#6d5a78', clouds: 0.48, sunSize: 0.0016,
   },
   museum: {
