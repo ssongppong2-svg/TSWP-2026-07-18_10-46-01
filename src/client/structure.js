@@ -106,6 +106,9 @@ export function buildStructure(map, mats, { museum = false } = {}) {
   };
   const Q = {};
   const q = (name) => (Q[name] ??= new QuadBuilder());
+  // 공장 맵: 지붕 덮인 건물의 바깥벽(건물 밖을 향한 면)은 골진 금속 외장판으로 (담장·안쪽 벽은 콘크리트)
+  const inRoof = (c, r) => map.roofs.some((qq) => r >= qq.r0 && r <= qq.r1 && c >= qq.c0 && c <= qq.c1);
+  const cladding = !museum && !!mats.clad;
   const DIRS = [
     // dc, dr, 면의 두 아래 점(왼쪽→오른쪽, 바깥에서 볼 때), 법선
     [0, -1, (x0, x1, z0) => [[x1, z0], [x0, z0]], [0, 0, -1]],
@@ -137,7 +140,7 @@ export function buildStructure(map, mats, { museum = false } = {}) {
           for (const [ya, yb] of vis) {
             let name, uvv;
             if (isWall || kind === KIND.roof) {
-              name = 'wall';
+              name = cladding && inRoof(c, r) && !inRoof(nc, nr) ? 'clad' : 'wall';
               // 벽 무늬 높이: 2층 바닥이 보이는 쪽은 1층·2층을 따로, 2층 없는 높은 벽은 한 장을 늘여서
               if (viewerUp) uvv = (y) => (y0 >= STORY - SLAB - EPS ? (y - STORY) / 4.8 : y / 4.8);
               else if (tallWall) uvv = (y) => y / ROOF;
@@ -181,7 +184,7 @@ export function buildStructure(map, mats, { museum = false } = {}) {
   buildStairs(map, q, shade);
 
   // 재질별 메쉬
-  const order = ['wall', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip'];
+  const order = ['wall', 'clad', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip'];
   const alias = { grateUnder: 'grate' };
   for (const name of order) {
     const b = Q[name];

@@ -12,10 +12,10 @@ export const WEAPONS = {
     kind: '권총',
     auto: false,
     rpm: 400,
-    damage: 26, // 머리 78
-    headMult: 3,
+    damage: 10, // 몸통 10발 · 머리 15 → 7발 (보호막 없을 때)
+    headMult: 1.45,
     falloff: [[30, 0.85]],
-    ampBonus: 4,
+    ampBonus: 2,
     magSize: 12,
     reserve: 36,
     reload: 1.75,
@@ -46,10 +46,10 @@ export const WEAPONS = {
     kind: '리볼버',
     auto: false,
     rpm: 240,
-    damage: 55, // 머리 159
-    headMult: 2.9,
+    damage: 25, // 몸통 4발 · 머리 35 → 3발
+    headMult: 1.4,
     falloff: [[30, 0.85]],
-    ampBonus: 8,
+    ampBonus: 4,
     magSize: 6,
     reserve: 24,
     reload: 2.25,
@@ -82,10 +82,10 @@ export const WEAPONS = {
     rpm: 66,
     pellets: 12,
     pelletSpread: 0.075,
-    damage: 17, // 한 알, 가까이서 몸통에 다 맞으면 204
-    headMult: 2,
+    damage: 3.5, // 한 알 (반올림 4), 가까이서 몸통에 다 맞으면 48 → 3번
+    headMult: 1.5,
     falloff: [[8, 0.7], [12, 0.4]],
-    ampBonus: 3,
+    ampBonus: 1,
     magSize: 5,
     reserve: 10,
     reload: 2.5,
@@ -117,10 +117,10 @@ export const WEAPONS = {
     kind: '기관단총',
     auto: true,
     rpm: 800,
-    damage: 26, // 머리 78
-    headMult: 3,
+    damage: 10, // 몸통 10발 · 머리 15 → 7발
+    headMult: 1.45,
     falloff: [[20, 0.85]],
-    ampBonus: 4,
+    ampBonus: 2,
     magSize: 30,
     reserve: 90,
     reload: 2.25,
@@ -151,9 +151,9 @@ export const WEAPONS = {
     kind: '소총',
     auto: true,
     rpm: 585,
-    damage: 40, // 머리 160 (어느 거리든 머리 1발)
-    headMult: 4,
-    ampBonus: 6,
+    damage: 11, // 몸통 10발 · 머리 16 → 7발 (어느 거리든)
+    headMult: 1.45,
+    ampBonus: 2,
     magSize: 25,
     reserve: 75,
     reload: 2.5,
@@ -186,9 +186,9 @@ export const WEAPONS = {
     auto: false,
     scope: true, // 정조준 = 조준경 (화면 확대, 조준하지 않으면 크게 빗나감)
     rpm: 37.5,
-    damage: 150, // 몸통 1발 (중량 방탄 포함 150)
-    headMult: 1.7,
-    ampBonus: 22,
+    damage: 34, // 몸통 3발 · 머리 51 → 2발
+    headMult: 1.5,
+    ampBonus: 5,
     magSize: 5,
     reserve: 10,
     reload: 3.7,
@@ -222,8 +222,8 @@ export const WEAPONS = {
     kind: '근접',
     melee: true,
     draw: 0.3,
-    light: { damage: 50, rate: 0.55, range: 2.1 },
-    heavy: { damage: 80, rate: 1.0, range: 1.9 },
+    light: { damage: 25, rate: 0.55, range: 2.1 },
+    heavy: { damage: 40, rate: 1.0, range: 1.9 },
     backstabMult: 1.5,
   },
 };
@@ -291,9 +291,9 @@ export const PATCHES = {
     cooldown: 18,
     duration: 5,
     short: '총기 공격력 +15% · 5초',
-    desc: '5초간 총알에 같은 방향의 힘을 더한다 (벡터 R-24: 40 → 46). 경량 방탄 상대 몸통 4발 → 3발.',
+    desc: '5초간 총알에 같은 방향의 힘을 더한다 (벡터 R-24: 11 → 13). 경량 보호막 상대 몸통 12발 → 10발.',
     concept: '합력',
-    conceptText: '두 힘이 같은 방향으로 작용하면 합력의 크기는 두 힘의 합이고, 방향은 두 힘의 방향과 같다. 40 N + 6 N = 46 N.',
+    conceptText: '두 힘이 같은 방향으로 작용하면 합력의 크기는 두 힘의 합이고, 방향은 두 힘의 방향과 같다. 11 N + 2 N = 13 N.',
   },
   reactionRounds: {
     id: 'reactionRounds',
@@ -312,11 +312,11 @@ export const PATCHES = {
     tier: 'normal',
     cooldown: 24,
     duration: 10,
-    hp: 220,
+    hp: 60, // 소총 약 6발 (총 위력을 낮춘 만큼 함께 낮춤)
     width: 2.2,
     height: 2.0,
     short: '부유 방탄판 전개 · 10초',
-    desc: '전방 2m에 떠 있는 방탄판을 전개한다. 내구도 220, 10초 유지. 양 팀의 탄을 모두 막는다.',
+    desc: '전방 2m에 떠 있는 방탄판을 전개한다. 내구도 60 (소총 약 6발), 10초 유지. 양 팀의 탄을 모두 막는다.',
     concept: '부력',
     conceptText: '액체나 기체가 그 속의 물체를 위쪽으로 밀어 올리는 힘. 기체 속에서도 작용한다(풍선). 방탄판은 부력 장치로 공중에 떠 있다.',
   },
@@ -381,7 +381,7 @@ export const PATCHES = {
     tier: 'ultimate',
     duration: 8,
     short: '분대 전원 공격력 +15% · 8초',
-    desc: '생존한 아군 전원의 총기 공격력을 8초간 강화한다 (벡터 R-24: 40 → 46).',
+    desc: '생존한 아군 전원의 총기 공격력을 8초간 강화한다 (벡터 R-24: 11 → 13).',
     concept: '합력',
     conceptText: '여러 힘이 같은 방향으로 작용하면 합력은 각 힘의 합이 된다. 분대 전원의 화력을 한 방향으로 집중한다.',
   },

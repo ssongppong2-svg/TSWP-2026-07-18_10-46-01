@@ -46,6 +46,13 @@ const WEATHER = {
   day: {
     fog: ['#bcd3e6', 60, 220], top: '#3d7fd0', horizon: '#cfe2f1', glow: '#ffe3b0', overcast: 0, moon: 3.0, hemi: 1.6,
     sun: '#fff0d8', sky: '#d6e8ff', ground: '#8a7860', exposure: 1.1, env: 0.55, lamps: 0.15, sunDir: [0.45, 0.82, 0.35],
+    sunCol: '#fff6e6', cloudLit: '#ffffff', cloudShade: '#aab6c6', clouds: 0.4,
+  },
+  // 노을(골든아워): 낮게 뜬 주황 해 · 긴 그림자 · 붉게 물든 구름 · 푸른 하늘빛으로 그늘을 채움
+  sunset: {
+    fog: ['#c99a86', 55, 230], top: '#28406e', horizon: '#f0a466', glow: '#ff9a52', overcast: 0, moon: 2.7, hemi: 1.05,
+    sun: '#ffb36e', sky: '#a9b8e0', ground: '#7d5a44', exposure: 1.08, env: 0.5, lamps: 0.55, sunDir: [-0.78, 0.2, 0.42],
+    sunCol: '#ffd29a', cloudLit: '#ffb27e', cloudShade: '#6d5a78', clouds: 0.48, sunSize: 0.0016,
   },
   museum: {
     fog: ['#e3ddd0', 60, 200], top: '#7aa9de', horizon: '#efe8da', glow: '#fff0cc', overcast: 0, moon: 2.4, hemi: 1.7,
@@ -61,18 +68,51 @@ const SKY_VERT = /* glsl */ `
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
+// 하늘: 높이에 따른 색 · 해 원반과 빛무리 · 수평선 대기 · 흘러가는 구름(값 잡음 FBM) · 비구름·번개
 const SKY_FRAG = /* glsl */ `
   uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform vec3 moonDir;
-  uniform float overcast; uniform float bolt;
+  uniform vec3 sunCol; uniform vec3 cloudLit; uniform vec3 cloudShade;
+  uniform float overcast; uniform float bolt; uniform float time; uniform float clouds; uniform float sunSize;
   varying vec3 vDir;
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
+    return v;
+  }
   void main() {
-    float h = vDir.y;
-    vec3 col = mix(horizon, top, smoothstep(-0.02, 0.5, h));
-    col += glow * pow(1.0 - clamp(abs(h) * 4.0, 0.0, 1.0), 3.0) * 0.6;
-    float m = max(dot(normalize(vDir), normalize(moonDir)), 0.0);
-    col += vec3(0.75, 0.8, 0.9) * (smoothstep(0.9993, 0.9997, m) * 0.9 + pow(m, 80.0) * 0.08) * (1.0 - overcast);
+    vec3 d = normalize(vDir);
+    float h = d.y;
+    vec3 s = normalize(moonDir);
+    float m = max(dot(d, s), 0.0);
+    // 하늘 색: 수평선 → 꼭대기 (수평선 근처를 넓게), 해 쪽 수평선은 더 뜨겁게
+    vec3 col = mix(horizon, top, pow(smoothstep(-0.02, 0.62, h), 0.7));
+    float band = pow(1.0 - clamp(abs(h) * 3.2, 0.0, 1.0), 3.0);
+    col += glow * band * (0.25 + 0.75 * pow(m, 3.0)) * 0.7;
+    // 해: 원반 + 가까운 빛무리 + 넓은 산란
+    float disc = smoothstep(1.0 - sunSize, 1.0 - sunSize * 0.55, m);
+    col += sunCol * (disc * 6.0 + pow(m, 220.0) * 1.4 + pow(m, 18.0) * 0.35) * (1.0 - overcast);
+    // 구름: 하늘 높이로 펼친 평면 위의 잡음 (수평선 쪽은 납작하게 사라짐)
+    if (clouds > 0.001 && h > -0.02) {
+      vec2 p = d.xz / (h + 0.18) * 1.6 + vec2(time * 0.006, time * 0.002);
+      float n = fbm(p);
+      float n2 = fbm(p * 2.3 + 4.0);
+      float dens = smoothstep(1.0 - clouds, 1.25 - clouds * 0.6, n) * smoothstep(-0.02, 0.18, h);
+      // 해를 향한 가장자리는 밝게 물들고, 두꺼운 아랫부분은 그늘
+      float lit = clamp(0.35 + 0.65 * pow(m, 4.0) + (n2 - 0.5) * 0.6, 0.0, 1.0);
+      vec3 cc = mix(cloudShade, cloudLit, lit);
+      cc += sunCol * pow(m, 12.0) * 0.6 * (1.0 - dens);
+      col = mix(col, cc, dens * 0.92);
+    }
+    // 수평선 아래: 땅 안개
+    col = mix(col, horizon * 0.8, smoothstep(0.0, -0.08, h));
     // 비구름: 낮게 깔린 구름 결 + 번개 때 구름이 밝아짐
-    float cloud = sin(vDir.x * 7.0 + vDir.z * 3.0) * sin(vDir.z * 5.0 - vDir.x * 2.0) * 0.5 + 0.5;
+    float cloud = sin(d.x * 7.0 + d.z * 3.0) * sin(d.z * 5.0 - d.x * 2.0) * 0.5 + 0.5;
     col += vec3(0.05, 0.055, 0.06) * cloud * overcast * smoothstep(0.0, 0.4, h);
     col += vec3(0.55, 0.6, 0.75) * bolt * (0.4 + cloud * 0.6) * smoothstep(-0.05, 0.3, h);
     gl_FragColor = vec4(col, 1.0);
@@ -152,13 +192,13 @@ export const BodycamShader = {
         col = (col + sampleCA(uv + vec2(px.x, 0.0), ca) + sampleCA(uv - vec2(px.x, 0.0), ca) + sampleCA(uv + vec2(0.0, px.y), ca) + sampleCA(uv - vec2(0.0, px.y), ca)) / 5.0;
       }
       col *= 1.0 - rim * 0.35 * rain;
-      // 체력이 낮을수록 색이 빠지고 붉게 어두워짐
+      // 체력이 낮을수록 색이 조금 빠지고 가장자리가 붉게 물듦 (화면 가운데는 늘 잘 보이게 — 어둡게 가리지 않음)
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
-      col = mix(col, vec3(lum), damage * 0.8);
+      col = mix(col, vec3(lum), damage * 0.4);
       float r = length((vUv - 0.5) * vec2(aspect, 1.0));
       float v = smoothstep(0.95, 0.25, r);
-      col *= mix(1.0 - vignette - damage * 0.35, 1.0, v);
-      col = mix(col, col * vec3(1.15, 0.35, 0.3) + vec3(0.06, 0.0, 0.0), damage * (1.0 - v) * (0.55 + 0.45 * pulse));
+      col *= mix(1.0 - vignette - damage * 0.12, 1.0, v);
+      col = mix(col, col * vec3(1.2, 0.55, 0.5) + vec3(0.05, 0.0, 0.0), damage * (1.0 - v) * (0.35 + 0.25 * pulse));
       // 센서 노이즈
       float g = rand(vUv * vec2(1931.0, 1087.0) + fract(time * 17.0)) - 0.5;
       col += g * grain * (1.0 + damage * 1.5);
@@ -197,6 +237,12 @@ export class Stage {
           moonDir: { value: moonDir },
           overcast: { value: 0 },
           bolt: { value: 0 },
+          time: { value: 0 },
+          sunCol: { value: new THREE.Color('#fff4e0') },
+          cloudLit: { value: new THREE.Color('#ffffff') },
+          cloudShade: { value: new THREE.Color('#9aa6b4') },
+          clouds: { value: 0 },
+          sunSize: { value: 0.0012 },
         },
         vertexShader: SKY_VERT,
         fragmentShader: SKY_FRAG,
@@ -288,6 +334,14 @@ export class Stage {
     u.horizon.value.set(w.horizon);
     u.glow.value.set(w.glow);
     u.overcast.value = w.overcast;
+    u.sunCol.value.set(w.sunCol ?? '#000000');
+    u.cloudLit.value.set(w.cloudLit ?? '#ffffff');
+    u.cloudShade.value.set(w.cloudShade ?? '#9aa6b4');
+    u.clouds.value = w.clouds ?? 0;
+    u.sunSize.value = w.sunSize ?? 0.0012;
+    // 완전한 실내 맵(과학관): 하늘을 그리지 않고, 해 그림자도 끔 (지붕이 모든 빛을 막지 않게 — 천장 등이 빛을 대신함)
+    this.indoor = !!this.map.def.indoor;
+    this.sky.visible = !this.indoor;
     this.moon.intensity = w.moon;
     this.hemi.intensity = w.hemi;
     if (this.rain) {
@@ -341,7 +395,7 @@ export class Stage {
     r.shadowMap.type = THREE.PCFShadowMap;
     r.shadowMap.autoUpdate = false;
     r.shadowMap.needsUpdate = true;
-    this.moon.castShadow = q.shadows;
+    this.moon.castShadow = q.shadows && !this.indoor;
     if (q.shadows) {
       this.moon.shadow.mapSize.set(q.shadowSize, q.shadowSize);
       this.moon.shadow.map?.dispose();
@@ -480,6 +534,7 @@ export class Stage {
     this.time += dt;
     this.bodycam.uniforms.time.value = this.time;
     this.sky.position.copy(this.camera.position);
+    this.sky.material.uniforms.time.value = this.time;
     // 비와 번개: 번개가 치면 하늘과 주변이 잠깐 밝아짐
     const w = this.weather ?? WEATHER.clear;
     if (this.rain) {

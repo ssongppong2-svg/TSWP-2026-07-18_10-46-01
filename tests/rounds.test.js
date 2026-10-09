@@ -78,13 +78,13 @@ test('상점: 크레딧 차감 · 같은 것을 다시 누르면 환불 · 돈�
   // 진행 중에는 못 삼
   m.phase = 'live';
   assert.equal(m.buy(me, 'sheriff'), false);
-  // 방탄 피해 흡수: 소총 몸통 3발(120)은 중량 방탄(150)이면 버팀
+  // 보호막 피해 흡수: 소총 몸통 10발(110)은 중량 보호막(150)이면 버팀
   const enemy = m.agents.find((a) => a.team === TEAMS.FORCE);
   enemy.armor = 50;
-  for (let i = 0; i < 3; i++) m.applyDamage(enemy, WEAPONS.rifle.damage, me);
+  for (let i = 0; i < 10; i++) m.applyDamage(enemy, WEAPONS.rifle.damage, me);
   assert.ok(enemy.alive);
   assert.equal(enemy.armor, 0);
-  assert.equal(enemy.hp, 30);
+  assert.equal(enemy.hp, 40);
 });
 
 test('라운드 결과: 점수·크레딧(승리 3000, 패배 1900·2400·2900, 처치 200), 살아남은 요원은 총·방탄 유지', () => {

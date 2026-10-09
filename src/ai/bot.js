@@ -615,8 +615,11 @@ export class BotBrain {
       }
     }
     let hold = this.hold;
-    if (armed.length === 1 && this.homeSite !== armed[0].id) {
-      const list = match.map.holds[armed[0].id] ?? [];
+    // 교전이 길어 수가 많은 쪽이 이기므로: 공격팀 둘 이상이 한 구역에 보이면 다른 구역 수비도 그쪽으로 모임
+    const hot = armed.length > 1 ? this.hotSite(match, a, armed) : null;
+    const rally = armed.length === 1 ? armed[0] : hot;
+    if (rally && this.homeSite !== rally.id && !(a.visibleEnemies ?? []).length) {
+      const list = match.map.holds[rally.id] ?? [];
       hold = list[this.index % Math.max(1, list.length)] ?? hold;
       // 같은 자리에 겹치지 않게 살짝 비킴
       hold = { ...hold, x: hold.x + ((this.index % 3) - 1) * 1.4 };
@@ -633,6 +636,19 @@ export class BotBrain {
     }
     const atHold = dist2(hold, a.pos) < 2;
     this.goal = { point: { x: hold.x, y: hold.y, z: hold.z }, arrive: 0.6, look: { x: hold.lookX, y: hold.lookY, z: hold.lookZ }, quiet: atHold, crouchAtGoal: this.holdCrouch };
+  }
+
+  // 아군이 최근 4초 안에 본 적이 둘 이상 몰려 있는 폭탄 구역
+  hotSite(match, a, armed) {
+    let best = null, bestN = 1;
+    for (const b of armed) {
+      const n = match.agents.filter((e) => e.alive && e.team !== a.team && match.time - e.spottedT < 4 && dist2(e.pos, b) < 24).length;
+      if (n > bestN) {
+        bestN = n;
+        best = b;
+      }
+    }
+    return best;
   }
 
   considerPatches(match, a, target, visible) {

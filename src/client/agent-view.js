@@ -23,6 +23,9 @@ const KIT = {
     helmet: '#454b54',
     helmetCamo: false,
     furn: '#2a2c30',
+    mask: '#25282d', // 방독 반면 마스크 고무
+    filter: '#59616b', // 정화통
+    lab: '#a3abb3', // 연구소 장비 외장 (밝은 회색 경질 플라스틱)
   },
   force: {
     camoBase: '#8c7a5b',
@@ -37,6 +40,9 @@ const KIT = {
     helmet: '#8a7a5c',
     helmetCamo: true,
     furn: '#8b7558',
+    mask: '#38372e',
+    filter: '#6c6855',
+    lab: '#b8ad95',
   },
 };
 
@@ -229,6 +235,11 @@ export function teamMaterials(team) {
     furn: std({ color: k.furn, roughness: 0.68, metalness: 0.04 }),
     steel: std({ color: '#9aa0a6', roughness: 0.28, metalness: 0.9 }),
     accent: std({ color: accent, roughness: 0.6, emissive: accent, emissiveIntensity: 0.1 }),
+    mask: std({ color: k.mask, roughness: 0.78 }),
+    filter: std({ color: k.filter, roughness: 0.45, metalness: 0.35 }),
+    lab: std({ color: k.lab, roughness: 0.42, metalness: 0.08 }),
+    lensTint: std({ color: '#2a3236', roughness: 0.05, metalness: 0.7 }),
+    cable: std({ color: '#151619', roughness: 0.6 }),
   };
   TEAM_MATS[team] = M;
   return M;
@@ -475,24 +486,43 @@ function buildTorso() {
     P.add('poly', rbox(0.062, 0.012, 0.026, 0.004), [x, 0.226, -0.173], [0.06, 0, 0]);
   }
   P.add('pouch', rbox(0.2, 0.072, 0.032, 0.01), [0, 0.29, -0.166]);
-  P.add('hard', rbox(0.075, 0.045, 0.006, 0.002), [0, 0.292, -0.184]);
+  // 연구소 요원: 가슴 힘 측정기 (밝은 외장 · 팀 색 화면 · 조절 손잡이)
+  P.add('lab', rbox(0.1, 0.056, 0.014, 0.005), [0, 0.292, -0.186]);
+  P.add('screen', rbox(0.074, 0.032, 0.004, 0.002), [-0.006, 0.294, -0.194]);
+  P.add('hard', cylG(0.006, 0.006, 0.008, 8), [0.04, 0.294, -0.195], [Math.PI / 2, 0, 0]);
   // 왼쪽: 무전기 주머니 + 무전기 + 안테나, 가슴 송신 버튼
   P.add('pouch', rbox(0.055, 0.12, 0.072, 0.012), [-0.206, 0.17, 0.05]);
   P.add('hard', rbox(0.046, 0.06, 0.056, 0.008), [-0.206, 0.25, 0.05]);
   P.add('hard', cylG(0.008, 0.008, 0.02, 8), [-0.21, 0.29, 0.065]);
   P.rod('rubber', [-0.21, 0.29, 0.065], [-0.245, 0.56, 0.09], 0.0045, 0.003, 6);
-  P.add('hard', rbox(0.03, 0.04, 0.016, 0.005), [-0.095, 0.365, -0.15]);
+  // 왼쪽 어깨끈 앞: 바디캠 (렌즈 · 빨간 녹화등)
+  P.add('hard', rbox(0.046, 0.062, 0.024, 0.007), [-0.092, 0.362, -0.158]);
+  P.add('lens', cylG(0.012, 0.013, 0.01, 14), [-0.092, 0.37, -0.172], [Math.PI / 2, 0, 0]);
+  P.add('rec', sphG(0.0045, 8, 6), [-0.076, 0.386, -0.171]);
   // 오른쪽 어깨끈: 지혈대
   P.add('strap', cylG(0.017, 0.017, 0.085, 10), [0.098, 0.36, -0.148]);
   P.add('hard', rbox(0.012, 0.03, 0.012, 0.003), [0.098, 0.405, -0.157]);
   // 오른쪽 옆: 섬광탄 주머니
   P.add('pouch', rbox(0.05, 0.1, 0.05, 0.012), [0.21, 0.13, 0.04]);
   P.add('hard', cylG(0.018, 0.018, 0.03, 10), [0.21, 0.19, 0.04]);
-  // 등: 수분 공급 배낭 + 압축끈 + 손잡이
-  P.add('pouch', rbox(0.24, 0.3, 0.085, 0.028), [0, 0.235, 0.197]);
-  for (const x of [-0.075, 0.075]) P.add('strap', rbox(0.014, 0.29, 0.088, 0.004), [x, 0.235, 0.198]);
-  P.add('pouch', rbox(0.15, 0.09, 0.035, 0.012), [0, 0.15, 0.25]);
+  // 등: 연구소 전원 팩 (경질 외장 · 양옆 정화·냉각 통 · 팀 색 상태 띠) + 고정끈 + 손잡이
+  P.add('lab', rbox(0.22, 0.27, 0.075, 0.022), [0, 0.245, 0.197]);
+  P.add('hard', rbox(0.2, 0.05, 0.08, 0.012), [0, 0.13, 0.2]);
+  for (const s of [-1, 1]) {
+    P.add('filter', cylG(0.028, 0.028, 0.22, 14), [s * 0.118, 0.245, 0.212]);
+    P.add('hard', cylG(0.031, 0.031, 0.02, 14), [s * 0.118, 0.36, 0.212]);
+    P.add('hard', cylG(0.031, 0.031, 0.02, 14), [s * 0.118, 0.13, 0.212]);
+    P.add('strap', rbox(0.014, 0.25, 0.082, 0.004), [s * 0.06, 0.245, 0.199]);
+  }
+  P.add('screen', rbox(0.014, 0.15, 0.004, 0.002), [0, 0.26, 0.236]);
+  // 전원 팩 겉면: 통풍 홈 · 노란 경고 표지
+  for (let i = 0; i < 4; i++) P.add('hard', rbox(0.05, 0.006, 0.004, 0.002), [0.06, 0.32 - i * 0.016, 0.236]);
+  P.add('furn', rbox(0.045, 0.03, 0.003, 0.001), [-0.06, 0.32, 0.236]);
   P.add('strap', new THREE.TorusGeometry(0.03, 0.007, sg(4), sg(10, 5), Math.PI), [0, 0.39, 0.16]);
+  // 전원 팩 → 어깨 너머 → 가슴 측정기로 이어지는 케이블
+  P.rod('cable', [0.07, 0.375, 0.2], [0.095, 0.445, 0.07], 0.007, 0.007, 6);
+  P.rod('cable', [0.095, 0.445, 0.07], [0.1, 0.43, -0.09], 0.007, 0.007, 6);
+  P.rod('cable', [0.1, 0.43, -0.09], [0.045, 0.31, -0.19], 0.007, 0.007, 6);
   return P;
 }
 
@@ -517,13 +547,24 @@ function highCutShell(r) {
 
 function buildHead() {
   const P = new Parts();
-  // 복면 머리 · 턱 · 코
+  // 복면 머리 · 턱 (얼굴은 방독 반면 마스크와 보호 안경이 가림)
   P.add('bala', sphG(0.1, 20, 14), [0, 0, 0], [0, 0, 0], [0.8, 1.04, 0.95]);
   P.add('bala', rbox(0.112, 0.07, 0.11, 0.034), [0, -0.068, -0.02]);
-  P.add('bala', rbox(0.024, 0.036, 0.03, 0.01), [0, -0.024, -0.091]);
-  // 눈 트임 (어두운 피부) + 눈
-  P.add('skin', new THREE.SphereGeometry(0.1, sg(18, 6), 3, Math.PI * 1.5 - 0.6, 1.2, Math.PI / 2 - 0.21, 0.27), [0, 0.0, -0.002], [0, 0, 0], [0.82, 1.06, 0.975]);
-  for (const s of [-1, 1]) P.add('eye', sphG(0.011, 8, 6), [s * 0.03, 0.008, -0.091], [0, 0, 0], [1.3, 0.7, 0.6]);
+  // 보호 안경: 감싸는 색 렌즈 + 위 테 + 다리
+  P.add('lensTint', rbox(0.132, 0.034, 0.01, 0.009), [0, 0.012, -0.094], [0.05, 0, 0], 1, bend(3.6));
+  P.add('hard', rbox(0.136, 0.007, 0.013, 0.003), [0, 0.031, -0.093], [0.05, 0, 0], 1, bend(3.6));
+  for (const s of [-1, 1]) P.rod('hard', [s * 0.062, 0.02, -0.083], [s * 0.088, 0.018, -0.02], 0.0035, 0.0035, 5);
+  // 방독 반면 마스크: 코·입을 덮는 고무 몸체 + 앞 배기 밸브 + 양 볼의 정화통 + 머리끈
+  P.add('mask', sphG(0.062, 16, 12), [0, -0.047, -0.07], [0, 0, 0], [1.08, 0.86, 0.78]);
+  P.add('mask', rbox(0.07, 0.03, 0.03, 0.012), [0, -0.012, -0.104], [-0.3, 0, 0]);
+  P.add('hard', cylG(0.017, 0.02, 0.02, 14), [0, -0.062, -0.122], [Math.PI / 2, 0, 0]);
+  P.add('filter', cylG(0.011, 0.011, 0.004, 12), [0, -0.062, -0.133], [Math.PI / 2, 0, 0]);
+  for (const s of [-1, 1]) {
+    P.add('filter', cylG(0.027, 0.027, 0.03, 16), [s * 0.06, -0.06, -0.097], [Math.PI / 2, s * 0.62, 0, 'YXZ']);
+    P.add('hard', cylG(0.029, 0.029, 0.008, 16), [s * 0.052, -0.06, -0.087], [Math.PI / 2, s * 0.62, 0, 'YXZ']);
+    P.add('rubber', cylG(0.02, 0.02, 0.003, 12), [s * 0.069, -0.06, -0.109], [Math.PI / 2, s * 0.62, 0, 'YXZ']);
+    P.rod('strap', [s * 0.07, -0.03, -0.072], [s * 0.088, -0.005, 0.045], 0.005, 0.005, 5);
+  }
   // 하이컷 방탄 헬멧
   P.add('helmet', highCutShell(0.124), [0, 0.024, 0.006], [0, 0, 0], [0.97, 0.93, 1.07]);
   // 측면 레일
@@ -534,13 +575,18 @@ function buildHead() {
     P.add('rubber', cylG(0.028, 0.03, 0.008, 14), [s * 0.118, -0.006, 0.008], [0, 0, Math.PI / 2]);
     P.add('hard', rbox(0.009, 0.05, 0.016, 0.003), [s * 0.112, 0.032, 0.006], [0, 0, s * -0.12]);
   }
+  // 왼쪽 레일: 팀 색 표시등 띠 · 오른쪽 레일: 연구소 센서 모듈 (렌즈 · 상태 표시)
+  P.add('screen', rbox(0.005, 0.006, 0.075, 0.002), [-0.125, 0.062, 0.004], [0.08, 0, 0.22]);
+  P.add('lab', rbox(0.03, 0.034, 0.064, 0.007), [0.133, 0.056, -0.006], [0.08, 0, -0.22]);
+  P.add('lens', cylG(0.0095, 0.0095, 0.006, 12), [0.134, 0.058, -0.04], [Math.PI / 2, 0, 0]);
+  P.add('screen', rbox(0.003, 0.008, 0.03, 0.001), [0.15, 0.06, 0.0], [0.08, 0, -0.22]);
   // 왼쪽 마이크 붐
-  P.rod('rubber', [-0.1, -0.025, -0.02], [-0.045, -0.058, -0.097], 0.0035, 0.0035, 6);
-  P.add('rubber', sphG(0.008, 8, 6), [-0.042, -0.06, -0.1]);
+  P.rod('rubber', [-0.1, -0.025, -0.02], [-0.07, -0.04, -0.07], 0.0035, 0.0035, 6);
   // 야간투시경 거치대 (슈라우드 + 접힌 마운트)
   P.add('hard', rbox(0.05, 0.036, 0.016, 0.005), [0, 0.078, -0.128], [0.42, 0, 0]);
   P.add('hard', rbox(0.034, 0.03, 0.04, 0.008), [0, 0.08, -0.148], [0.42, 0, 0]);
-  // 뒤: 평형추 주머니 · 피아식별 적외선 점멸등
+  // 위: 찍찍이 식별 패치 · 뒤: 평형추 주머니 · 피아식별 적외선 점멸등
+  P.add('pouch', rbox(0.07, 0.006, 0.06, 0.003), [0, 0.146, -0.02], [-0.12, 0, 0]);
   P.add('pouch', rbox(0.085, 0.052, 0.03, 0.01), [0, 0.058, 0.142], [-0.4, 0, 0]);
   P.add('strobe', rbox(0.024, 0.016, 0.03, 0.005), [0, 0.146, 0.05], [-0.35, 0, 0]);
   P.add('hard', rbox(0.03, 0.006, 0.036, 0.002), [0, 0.139, 0.05], [-0.35, 0, 0]);
@@ -560,20 +606,23 @@ function buildNeck() {
 // 넓적다리 (원점 = 고관절, -y 방향으로 무릎까지 0.43)
 function buildThigh(side) {
   const P = new Parts();
-  P.add('uniform', lathe([[0, -0.475], [0.036, -0.468], [0.058, -0.44], [0.066, -0.37], [0.075, -0.26], [0.083, -0.14], [0.088, -0.05], [0.082, 0.02], [0.05, 0.06], [0, 0.07]], 14));
+  P.add('uniform', lathe([[0, -0.475], [0.036, -0.468], [0.058, -0.44], [0.066, -0.37], [0.075, -0.26], [0.083, -0.14], [0.088, -0.05], [0.082, 0.02], [0.05, 0.06], [0, 0.07]], 14), [0, 0, 0], [0, 0, 0], [1.1, 1, 1.12]);
   // 카고 주머니 + 덮개
-  P.add('uniform', rbox(0.03, 0.15, 0.12, 0.012), [side * 0.074, -0.205, 0.004], [0, 0, side * -0.05]);
-  P.add('uniform', rbox(0.034, 0.032, 0.126, 0.01), [side * 0.08, -0.135, 0.004], [0, 0, side * -0.05]);
+  P.add('uniform', rbox(0.03, 0.15, 0.12, 0.012), [side * 0.081, -0.205, 0.004], [0, 0, side * -0.05]);
+  P.add('uniform', rbox(0.034, 0.032, 0.126, 0.01), [side * 0.087, -0.135, 0.004], [0, 0, side * -0.05]);
+  // 무릎 위 보강 천 · 넓적다리 고정끈 2줄
+  P.add('uniform', rbox(0.15, 0.09, 0.03, 0.012), [0, -0.4, -0.066], [0, 0, 0], 1, bend(2.4));
+  for (const y of [-0.08, -0.31]) P.add('strap', cylG(y > -0.1 ? 0.098 : 0.087, y > -0.1 ? 0.097 : 0.086, 0.02, 16, true), [0, y, 0], [0, 0, 0], [1, 1, 1.02]);
   return P;
 }
 
 // 정강이 (원점 = 무릎, -y 방향으로 발목까지 0.41) + 무릎 보호대
 function buildShin() {
   const P = new Parts();
-  P.add('uniform', lathe([[0, -0.305], [0.046, -0.298], [0.06, -0.272], [0.053, -0.225], [0.055, -0.15], [0.061, -0.075], [0.06, 0.0], [0.054, 0.04], [0, 0.06]], 14));
-  P.add('hard', rbox(0.1, 0.12, 0.036, 0.016), [0, -0.012, -0.062], [0, 0, 0], 1, bend(2.6));
-  P.add('strap', cylG(0.0625, 0.0625, 0.024, 14, true), [0, -0.07, 0.002]);
-  P.add('strap', cylG(0.062, 0.062, 0.02, 14, true), [0, 0.045, 0.002]);
+  P.add('uniform', lathe([[0, -0.305], [0.046, -0.298], [0.06, -0.272], [0.053, -0.225], [0.055, -0.15], [0.061, -0.075], [0.06, 0.0], [0.054, 0.04], [0, 0.06]], 14), [0, 0, 0], [0, 0, 0], [1.08, 1, 1.1]);
+  P.add('hard', rbox(0.104, 0.12, 0.036, 0.016), [0, -0.012, -0.067], [0, 0, 0], 1, bend(2.6));
+  P.add('strap', cylG(0.0675, 0.0675, 0.024, 14, true), [0, -0.07, 0.002], [0, 0, 0], [1, 1, 1.02]);
+  P.add('strap', cylG(0.067, 0.067, 0.02, 14, true), [0, 0.045, 0.002], [0, 0, 0], [1, 1, 1.02]);
   return P;
 }
 
@@ -596,8 +645,15 @@ function buildUpperArm() {
 }
 
 // 아래팔 (원점 = 팔꿈치, 손목까지 0.26)
-function buildForearm() {
+function buildForearm(side = 1) {
   const P = new Parts();
+  // 왼팔: 손목 단말기 (밝은 외장 + 팀 색 화면)
+  if (side < 0) {
+    P.add('lab', rbox(0.06, 0.07, 0.018, 0.006), [0, -0.185, 0.048], [0, 0, 0], 1, bend(-6));
+    P.add('screen', rbox(0.044, 0.05, 0.004, 0.002), [0, -0.185, 0.058], [0, 0, 0], 1, bend(-6));
+    P.add('strap', cylG(0.047, 0.045, 0.014, 12, true), [0, -0.155, 0]);
+    P.add('strap', cylG(0.045, 0.043, 0.014, 12, true), [0, -0.215, 0]);
+  }
   P.add('uniform', lathe([[0, -0.268], [0.03, -0.266], [0.039, -0.248], [0.043, -0.19], [0.05, -0.1], [0.053, -0.04], [0.049, 0.0], [0.036, 0.03], [0, 0.04]], 14));
   P.add('uniform', cylG(0.046, 0.044, 0.028, 14, true), [0, -0.215, 0]);
   P.add('hard', rbox(0.07, 0.085, 0.03, 0.012), [0, -0.005, 0.045], [0, 0, 0], 1, bend(-4)); // 팔꿈치 보호대
@@ -810,7 +866,6 @@ function buildKnife() {
   return P;
 }
 
-if (typeof window !== 'undefined') window.__AV = { THREE, lathe, Parts, buildTorso, fixNormals, boxUV, makeCamo, makeMolle, makeCordura, buildHead, buildPelvis, buildRifle, buildHand, buildBoot, buildThigh, buildShin, buildUpperArm, buildForearm, buildNeck, buildKnife, buildPistol, buildRifleMag }; // DEBUG-TEMP
 // ───────── 수학 도우미 ─────────
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const smooth = (x) => {
@@ -1013,6 +1068,9 @@ function skinGeometry(team, level, builds) {
   const out = mergeSkinned(entries, (mat) => {
     if (TEXTURED.has(mat)) return { cls: mat };
     if (mat === 'strobe') return { cls: 'solid', color: accent, rme: [0.4, 0, 1] };
+    // 연구소 장비 화면·표시등 (팀 색으로 은은하게 빛남) · 바디캠 녹화등
+    if (mat === 'screen') return { cls: 'solid', color: accent.clone().lerp(new THREE.Color('#ffffff'), 0.25), rme: [0.3, 0, 0.55] };
+    if (mat === 'rec') return { cls: 'solid', color: new THREE.Color('#ff2a1a'), rme: [0.3, 0, 1.2] };
     const src = T[mat];
     return { cls: 'solid', color: src?.color ?? new THREE.Color('#808080'), rme: [src?.roughness ?? 0.7, src?.metalness ?? 0, 0] };
   });
@@ -1083,7 +1141,7 @@ export class AgentView {
       const hand = new THREE.Group();
       this.spine.add(upper, fore, hand);
       this.mount(upper, 'upperArm', buildUpperArm);
-      this.mount(fore, 'forearm', buildForearm);
+      this.mount(fore, `forearm${side}`, () => buildForearm(side));
       this.mount(hand, `hand${side}`, () => buildHand(side));
       return { side, upper, fore, hand, shoulder: new V3(side * 0.172, 0.358, 0.012), S: new V3(), W: new V3(), E: new V3(), pole: side > 0 ? new V3(0.55, -1, -0.1) : new V3(-0.4, -1, 0.05) };
     });

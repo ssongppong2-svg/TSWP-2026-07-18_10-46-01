@@ -300,6 +300,108 @@ export function createTextures() {
 
 // 철제 통로 발판 (2m × 2m 한 장): 격자 철판 + 가장자리 테두리 + 녹 얼룩
 let grateCache = null;
+// 공장 지붕 밑: 골진 철판 데크 (UV 1 = 4m → 골 16개) — 밝은 아연 도금 + 녹 얼룩
+export function deckTexture() {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const n = 16, w = S / n;
+  for (let i = 0; i < n; i++) {
+    const grad = g.createLinearGradient(i * w, 0, (i + 1) * w, 0);
+    grad.addColorStop(0, '#8e959b');
+    grad.addColorStop(0.3, '#b9c0c6');
+    grad.addColorStop(0.55, '#a4abb1');
+    grad.addColorStop(1, '#727a81');
+    g.fillStyle = grad;
+    g.fillRect(i * w, 0, w, S);
+  }
+  const r = rng(53);
+  for (let i = 0; i < 18; i++) {
+    const x = r() * S, y = r() * S;
+    const grd = g.createRadialGradient(x, y, 0, x, y, 8 + r() * 26);
+    grd.addColorStop(0, 'rgba(120,70,40,0.35)');
+    grd.addColorStop(1, 'rgba(120,70,40,0)');
+    g.fillStyle = grd;
+    g.fillRect(x - 40, y - 40, 80, 80);
+  }
+  g.fillStyle = 'rgba(40,40,40,0.35)';
+  g.fillRect(0, 0, S, 2);
+  g.fillRect(0, S / 2, S, 2);
+  return toTexture(c, { repeat: [1, 1] });
+}
+
+// 공장 건물 바깥벽: 골진 금속 외장판 (UV 가로 1 = 4m, 세로 1 = 4.8m) — 도장 + 녹물 + 아래 콘크리트 턱
+export function claddingTexture() {
+  const W = 256, H = 308;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  g.fillStyle = '#5e6d76';
+  g.fillRect(0, 0, W, H);
+  const ribs = 20, rw = W / ribs;
+  for (let i = 0; i < ribs; i++) {
+    const grad = g.createLinearGradient(i * rw, 0, (i + 1) * rw, 0);
+    grad.addColorStop(0, 'rgba(0,0,0,0.28)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,0.16)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.04)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+    g.fillStyle = grad;
+    g.fillRect(i * rw, 0, rw, H);
+  }
+  // 판 이음매 (2.4m마다) · 볼트 줄
+  for (const y of [0, H / 2]) {
+    g.fillStyle = 'rgba(20,24,28,0.6)';
+    g.fillRect(0, y, W, 3);
+    g.fillStyle = 'rgba(210,215,220,0.35)';
+    for (let x = rw / 2; x < W; x += rw) g.fillRect(x - 1, y + 5, 2, 2);
+  }
+  // 녹물 자국 (위에서 흘러내림)
+  const r = rng(61);
+  for (let i = 0; i < 22; i++) {
+    const x = r() * W, len = 30 + r() * 200, wd = 1 + r() * 4;
+    const grd = g.createLinearGradient(0, 0, 0, len);
+    grd.addColorStop(0, 'rgba(130,70,35,0.5)');
+    grd.addColorStop(1, 'rgba(130,70,35,0)');
+    g.fillStyle = grd;
+    g.fillRect(x, r() < 0.5 ? 0 : H / 2, wd, len);
+  }
+  // 아래 콘크리트 턱 (0.45m) + 때
+  const base = H - 29;
+  g.fillStyle = '#7d7b76';
+  g.fillRect(0, base, W, H - base);
+  g.fillStyle = 'rgba(30,26,20,0.45)';
+  g.fillRect(0, base - 2, W, 3);
+  const grime = g.createLinearGradient(0, H, 0, base - 40);
+  grime.addColorStop(0, 'rgba(30,26,20,0.6)');
+  grime.addColorStop(1, 'rgba(30,26,20,0)');
+  g.fillStyle = grime;
+  g.fillRect(0, base - 40, W, H - base + 40);
+  return toTexture(c, { repeat: [1, 1] });
+}
+
+// 과학관 천장: 흡음 천장판 격자 (UV 1 = 4m → 0.67m 판 6×6) + 잔 구멍 무늬
+export function ceilingTileTexture() {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  g.fillStyle = '#ebe7df';
+  g.fillRect(0, 0, S, S);
+  const r = rng(41);
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = `rgba(120,112,100,${0.08 + r() * 0.12})`;
+    g.fillRect(r() * S, r() * S, 1, 1);
+  }
+  const n = 6, step = S / n;
+  for (let i = 0; i <= n; i++) {
+    g.fillStyle = 'rgba(150,143,132,0.85)';
+    g.fillRect(i * step - 1, 0, 2, S);
+    g.fillRect(0, i * step - 1, S, 2);
+    g.fillStyle = 'rgba(255,255,255,0.5)';
+    g.fillRect(i * step + 1, 0, 1, S);
+    g.fillRect(0, i * step + 1, S, 1);
+  }
+  return toTexture(c, { repeat: [1, 1] });
+}
+
 export function grateTexture() {
   if (grateCache) return grateCache;
   const S = 256;

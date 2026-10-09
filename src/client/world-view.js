@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 import { TILES, STORY, KIND } from '../sim/map.js';
-import { grateTexture, museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { ceilingTileTexture, claddingTexture, deckTexture, grateTexture, museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { buildCeilingFixtures } from './ceiling.js';
+import { buildWallProps } from './wall-props.js';
 import { buildLabProps, buildMuseumProps } from './exhibits.js';
 import { puddleRoughness } from './weather.js';
 import { buildStructure, shadeFn } from './structure.js';
@@ -26,7 +28,7 @@ export function buildWorld(map, baseTex) {
   // 비가 오면 모든 표면이 젖어 어둡고 매끈해짐 (등불이 바닥에 번져 반사)
   const wet = map.weather === 'rain' || map.weather === 'wet';
   // 밝은 낮 조명 맵: 질감은 그대로 두고 표면 색을 밝게 (색 값 1 이상 = 질감을 밝힘)
-  const day = map.def.light === 'day' || map.def.light === 'museum';
+  const day = map.def.light === 'day' || map.def.light === 'museum' || map.def.light === 'sunset';
   const bright = (r, g, b) => new THREE.Color().setRGB(r, g, b);
 
   // ── 바닥
@@ -76,8 +78,9 @@ export function buildWorld(map, baseTex) {
     wall: wallMat,
     wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
     ceil: museum
-      ? new THREE.MeshStandardMaterial({ ...V, color: '#c4beb2', roughness: 0.92 })
-      : new THREE.MeshStandardMaterial({ ...V, map: worldTex(tex.floor), roughness: 0.95, color: day ? bright(1.3, 1.28, 1.25) : '#8e9196' }),
+      ? new THREE.MeshStandardMaterial({ ...V, map: ceilingTileTexture(), color: '#d8d2c6', roughness: 0.92 })
+      : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
+    clad: museum ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
     slabTop: new THREE.MeshStandardMaterial({ ...V, map: slabTex, bumpMap: worldTex(tex.floorBump), bumpScale: museum ? 0.6 : 1.2, roughness: museum ? 0.4 : 0.9, metalness: 0.02, color: floorCol }),
     grate: new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
     edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
@@ -102,6 +105,11 @@ export function buildWorld(map, baseTex) {
       : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.6, metalness: 0.1 }),
   };
   group.add(buildStructure(map, mats, { museum }));
+  // 천장 등 (아트리움 광천장 자리는 따로 꾸밈)
+  const ac = map.def.decor?.atriumCeiling;
+  group.add(buildCeilingFixtures(map, { museum, skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
+  // 벽에 붙은 소품 (배관·배전함·환풍구·소화기·표지 / 과학관: 소화전함·설명판·안내 화면·비상구)
+  group.add(buildWallProps(map, { museum }));
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
   const kinds = museum ? {} : {
@@ -157,7 +165,8 @@ export function buildWorld(map, baseTex) {
 
   const lamps = addLamps(group, map);
   addDecor(group, map, museum);
-  group.add(buildSkyline(map, day));
+  // 맵 밖 원경 (완전한 실내 맵은 밖이 보이지 않으므로 만들지 않음)
+  if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
   group.userData.lamps = lamps;
   return group;
 }
@@ -697,8 +706,9 @@ function facadeTextures(day) {
   return { map: tex(base), emissive: tex(lit) };
 }
 
-function buildSkyline(map, day = false) {
+function buildSkyline(map, mode = 'night') {
   const g = new THREE.Group();
+  const day = mode !== 'night';
   const T = facadeTextures(day);
   const walls = [], roofs = [], units = [];
   const M = THREE.Matrix4;
@@ -710,7 +720,9 @@ function buildSkyline(map, day = false) {
     geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
     return geo;
   };
-  const DAY_TINT = ['#d2d4d6', '#c9c2b6', '#b8c2ca', '#d6cfc2', '#aeb6bd', '#c4c9cf'];
+  const DAY_TINT = mode === 'sunset'
+    ? ['#c9b6a8', '#bba796', '#a9a8b4', '#cbb39e', '#9d9aa6', '#b7aba3'] // 노을: 따뜻하게 물들고 그늘은 보랏빛
+    : ['#d2d4d6', '#c9c2b6', '#b8c2ca', '#d6cfc2', '#aeb6bd', '#c4c9cf'];
   const R = Math.max(map.width, map.depth) * 0.75;
   const count = 40;
   let seed = 11;
@@ -759,7 +771,10 @@ function buildSkyline(map, day = false) {
       }
     }
   }
-  const wallMat = day
+  // 노을: 해 질 녘이라 몇몇 창에 불이 켜짐
+  const wallMat = mode === 'sunset'
+    ? new THREE.MeshStandardMaterial({ map: T.map, vertexColors: true, roughness: 0.82, metalness: 0.05, emissive: '#ffffff', emissiveMap: T.emissive, emissiveIntensity: 0.45 })
+    : day
     ? new THREE.MeshStandardMaterial({ map: T.map, vertexColors: true, roughness: 0.82, metalness: 0.05 })
     : new THREE.MeshStandardMaterial({ map: T.map, color: '#ffffff', roughness: 0.95, emissive: '#ffffff', emissiveMap: T.emissive, emissiveIntensity: 0.6 });
   g.add(new THREE.Mesh(mergeGeometries(walls), wallMat));

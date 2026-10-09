@@ -138,12 +138,15 @@ export class GameMap {
     };
     const below = STORY - SLAB;
     const open = up === ' ' || up === '.';
+    // 지붕 덮인 건물 안: 위가 빈 벽도 지붕까지 (벽과 천장 사이로 하늘이 보이지 않게)
+    const roofed = this.roofs.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1);
+    const tall = roofed ? ROOF : WALL;
     // 1층
-    if (ch === '#') add(0, open ? WALL : below, KIND.wall);
+    if (ch === '#') add(0, open ? tall : below, KIND.wall);
     else if (ch === 'w') {
       // 창문 벽: 창턱 아래·창 위만 막힘 (창으로 보고 쏠 수 있음)
       add(0, 0.9, KIND.sill);
-      add(2.2, open ? WALL : below, KIND.lintel);
+      add(2.2, open ? tall : below, KIND.lintel);
     } else if (TILES[ch]) {
       const t = TILES[ch];
       add(0, t.h, KIND[t.kind]);
@@ -167,7 +170,7 @@ export class GameMap {
       }
     }
     // 지붕: 지정된 사각형(건물) 안에서 지붕까지 닿는 벽이 아닌 칸 (2층 바닥 위든 트인 홀 위든)
-    if (up !== '#' && up !== 'w' && this.roofs.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1)) add(ROOF - SLAB, ROOF, KIND.roof);
+    if (roofed && up !== '#' && up !== 'w' && !(ch === '#' && open)) add(ROOF - SLAB, ROOF, KIND.roof);
     // 막힌 구간을 아래부터 정렬하고, 바닥에서 이어진 높이 (예전 heightAt)
     this.sortSpans(i);
     this.staticSpans[i] = this.spansAt(c, r);

@@ -141,15 +141,15 @@ test('마찰 폭풍: 구역 안의 적은 느려지고 점프할 수 없음', ()
   assert.equal(enemy.pos.y, 0, '점프 불가');
 });
 
-test('칼: 정면 50, 등 뒤에서 찌르면 1.5배', () => {
+test('칼: 정면 25 (4번), 등 뒤에서 베면 1.5배', () => {
   const { match, me, enemy } = duel(undefined, 1.5);
   match.melee(me, false);
-  assert.equal(enemy.hp, 50);
+  assert.equal(enemy.hp, 75);
   enemy.hp = 100;
   enemy.yaw = -Math.PI / 2; // 나와 같은 방향(등을 보임)
   me.meleeCd = 0;
   match.melee(me, false);
-  assert.equal(enemy.hp, 25);
+  assert.equal(enemy.hp, 62, '25 × 1.5 = 37.5 → 반올림 38');
 });
 
 test('앉기: 서 있을 때 머리 높이로 날아온 탄이 앉은 요원 위로 지나감', () => {

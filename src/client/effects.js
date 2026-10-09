@@ -24,8 +24,8 @@ const FRESNEL_VERT = /* glsl */ `
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
     vP = position;
-    vN = normalize(mat3(modelMatrix) * normal);
-    vV = normalize(cameraPosition - wp.xyz);
+    vN = mat3(modelMatrix) * normal; // 크기 0으로 줄인 물체도 NaN이 나지 않게 (조각 셰이더에서 안전하게 정규화)
+    vV = cameraPosition - wp.xyz;
     gl_Position = projectionMatrix * viewMatrix * wp;
   }
 `;
@@ -38,8 +38,10 @@ function domeMaterial(color) {
       uniform vec3 color; uniform float time; uniform float opacity;
       varying vec3 vN; varying vec3 vV; varying vec3 vP;
       void main() {
-        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.0);
-        float rings = pow(0.5 + 0.5 * sin(length(vP) * 2.0 + vP.y * 6.0 - time * 4.0), 12.0);
+        // pow의 밑이 반올림 오차로 음수가 되면 실제 GPU에서 NaN → 빛번짐(블룸)이 화면 전체를 검게 만듦 → 0~1로 묶음
+        vec3 n = vN / max(length(vN), 1e-4), v = vV / max(length(vV), 1e-4);
+        float f = pow(clamp(1.0 - abs(dot(n, v)), 0.0, 1.0), 3.0);
+        float rings = pow(clamp(0.5 + 0.5 * sin(length(vP) * 2.0 + vP.y * 6.0 - time * 4.0), 0.0, 1.0), 12.0);
         float a = (f * 0.55 + rings * 0.05 + 0.015) * opacity;
         gl_FragColor = vec4(color * (0.5 + f), a);
       }
@@ -62,7 +64,7 @@ function sheenMaterial(color) {
         float r = length(p);
         if (r > 1.0) discard;
         float rim = smoothstep(0.9, 1.0, r) * 0.6;
-        float streak = pow(0.5 + 0.5 * sin((p.x * 0.8 + p.y * 0.3) * 22.0 + time * 0.8), 14.0);
+        float streak = pow(clamp(0.5 + 0.5 * sin((p.x * 0.8 + p.y * 0.3) * 22.0 + time * 0.8), 0.0, 1.0), 14.0);
         float a = (0.1 + rim + streak * 0.12) * opacity * (1.0 - smoothstep(0.85, 1.0, r) * 0.3);
         gl_FragColor = vec4(color * (0.6 + streak * 0.8 + rim), a);
       }
@@ -76,6 +78,27 @@ function sheenMaterial(color) {
 }
 
 // 파티클 풀: additive = 불꽃·빛, normal = 먼지·연기
+// 카메라 가까이 오면 서서히 투명해지는 재질 (연기·먼지·검은 핵이 눈앞을 덮어 화면이 암전되지 않게).
+// near0 m 안쪽은 안 보이고 near1 m부터 원래대로. 점 입자는 화면 크기에도 상한을 둠.
+export function nearFade(material, near0 = 0.3, near1 = 1.3, maxPointPx = 0) {
+  material.transparent = true;
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (sh, r) => {
+    prev?.(sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vNearFade;')
+      .replace(
+        '#include <fog_vertex>',
+        `#include <fog_vertex>\nvNearFade = smoothstep(${near0.toFixed(3)}, ${near1.toFixed(3)}, -mvPosition.z);${maxPointPx ? `\ngl_PointSize = min(gl_PointSize, ${maxPointPx.toFixed(1)});` : ''}`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vNearFade;')
+      .replace('#include <alphatest_fragment>', 'diffuseColor.a *= vNearFade;\n#include <alphatest_fragment>');
+  };
+  material.customProgramCacheKey = () => `nearFade${near0}-${near1}-${maxPointPx}`;
+  return material;
+}
+
 class Particles {
   constructor(scene, max, { additive = true, size = 0.12, map }) {
     this.max = max;
@@ -105,6 +128,8 @@ class Particles {
         sizeAttenuation: true,
       }),
     );
+    // 눈앞의 입자는 지우고 화면 크기에 상한 (연기·먼지가 화면을 통째로 덮던 문제)
+    nearFade(this.points.material, additive ? 0.15 : 0.35, additive ? 0.6 : 1.6, 240);
     this.points.frustumCulled = false;
     scene.add(this.points);
     for (let i = 0; i < max; i++) this.pos[i * 3 + 1] = -999;
@@ -829,14 +854,23 @@ export class Effects {
   makeShield(sh) {
     const root = new THREE.Group();
     const w = sh.halfW * 2, h = sh.y1 - sh.y0;
-    const plate = new THREE.Mesh(new RoundedBoxGeometry(w, h, 0.07, 2, 0.03), new THREE.MeshStandardMaterial({ color: '#3a4046', metalness: 0.8, roughness: 0.4 }));
-    plate.castShadow = true;
+    // 방탄 판: 비쳐 보이는 강화 수지 판 (가까이 볼수록 더 투명) — 전개한 사람의 화면을 검게 가리지 않게.
+    // 탄은 그대로 막고, 둘레의 틀·부력 장치·빛 띠로 판이 어디 있는지 알 수 있음
+    const plate = new THREE.Mesh(
+      new RoundedBoxGeometry(w, h, 0.05, 2, 0.02),
+      nearFade(new THREE.MeshStandardMaterial({ color: '#8fc2d2', metalness: 0.2, roughness: 0.06, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }), 0.5, 2.6),
+    );
+    plate.renderOrder = 2;
+    const frameMat = new THREE.MeshStandardMaterial({ color: '#3a4046', metalness: 0.8, roughness: 0.4 });
+    for (const [fw, fh, x, y] of [[w, 0.06, 0, h / 2 - 0.03], [w, 0.06, 0, -h / 2 + 0.03], [0.06, h, -w / 2 + 0.03, 0], [0.06, h, w / 2 - 0.03, 0]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.08), frameMat);
+      bar.position.set(x, y, 0);
+      root.add(bar);
+    }
     const edge = new THREE.MeshStandardMaterial({ color: '#7fb2c4', emissive: '#7fb2c4', emissiveIntensity: 0.9 });
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.03, 0.08), edge);
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.03, 0.09), edge);
     strip.position.y = h / 2 - 0.08;
-    const view = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.08), new THREE.MeshStandardMaterial({ color: '#0c1216', metalness: 0.5, roughness: 0.1 }));
-    view.position.y = h * 0.22;
-    root.add(plate, strip, view);
+    root.add(plate, strip);
     // 네 귀퉁이 부력 장치
     for (const [x, y] of [[-w / 2, -h / 2], [w / 2, -h / 2], [-w / 2, h / 2], [w / 2, h / 2]]) {
       const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.22, 12), new THREE.MeshStandardMaterial({ color: '#2a2e33', metalness: 0.6, roughness: 0.4 }));
@@ -932,7 +966,8 @@ export class Effects {
       root.add(disc, label);
       Object.assign(e, { disc, label });
     } else if (z.type === 'collapse') {
-      const core = new THREE.Mesh(new THREE.SphereGeometry(0.6, 32, 16), new THREE.MeshBasicMaterial({ color: '#030304' }));
+      // 검은 핵: 끌려가 가까이 붙은 사람의 화면을 가리지 않게 가까우면 투명해짐
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.6, 32, 16), nearFade(new THREE.MeshBasicMaterial({ color: '#030304', depthWrite: false }), 1.2, 3.0));
       core.position.set(z.x, z.y, z.z);
       const rim = new THREE.Mesh(new THREE.SphereGeometry(0.6, 32, 16), domeMaterial(PATCH_COLORS.gravityCollapse));
       rim.position.copy(core.position);

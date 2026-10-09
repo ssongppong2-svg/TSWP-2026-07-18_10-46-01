@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
-import { TILES, ROOF } from '../sim/map.js';
+import { TILES } from '../sim/map.js';
 import { makeSolidMaterial } from './agent-view.js';
+import { CEILING_Y } from './ceiling.js';
 
 // 과학 전시물·실험 장비. 모양이 같은 것끼리 InstancedMesh로 한 번에 그린다.
 // 단색 부품은 정점 색 + 정점별 거칠기·금속성(makeSolidMaterial) → 종류당 그리기 호출 1번.
@@ -10,7 +11,7 @@ import { makeSolidMaterial } from './agent-view.js';
 const V3 = THREE.Vector3;
 
 // 부품 하나: 형상을 옮기고 정점 색·거칠기·금속성을 붙임
-function part(geo, color, rough = 0.6, metal = 0, p = [0, 0, 0], r = [0, 0, 0], s = 1, emit = 0) {
+export function part(geo, color, rough = 0.6, metal = 0, p = [0, 0, 0], r = [0, 0, 0], s = 1, emit = 0) {
   let g = geo.index ? geo.toNonIndexed() : geo.clone();
   for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
   const sc = Array.isArray(s) ? s : [s, s, s];
@@ -302,24 +303,52 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     group.add(water);
   }
 
-  // 아트리움 천창: 지붕이 빈 사각형 위에 유리 + 철골 격자 (부딪힘 없음, 보기만)
-  const sky = decor.skylight;
-  if (sky) {
-    const x0 = map.originX + sky.c0 * CELL, x1 = map.originX + (sky.c1 + 1) * CELL;
-    const z0 = map.originZ + sky.r0 * CELL, z1 = map.originZ + (sky.r1 + 1) * CELL;
-    const y = ROOF - 0.05;
-    const glassTop = new THREE.Mesh(
-      new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(Math.PI / 2).translate((x0 + x1) / 2, y, (z0 + z1) / 2),
-      new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.18, roughness: 0.05, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false }),
+  // 아트리움 천장: 막힌 천장에 매립한 광천장(빛나는 판 + 격자 보) · 둘레의 내림 천장 · 현수막 (부딪힘 없음, 보기만)
+  const ac = decor.atriumCeiling;
+  if (ac) {
+    const x0 = map.originX + ac.c0 * CELL, x1 = map.originX + (ac.c1 + 1) * CELL;
+    const z0 = map.originZ + ac.r0 * CELL, z1 = map.originZ + (ac.r1 + 1) * CELL;
+    const y = CEILING_Y;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const W = x1 - x0, D = z1 - z0;
+    const band = 0.7; // 둘레 내림 천장 폭
+    const lum = new THREE.Mesh(
+      new THREE.PlaneGeometry(W - band * 2, D - band * 2).rotateX(Math.PI / 2).translate(cx, y - 0.01, cz),
+      new THREE.MeshBasicMaterial({ color: '#fff7ea', side: THREE.DoubleSide }),
     );
-    glassTop.renderOrder = 3;
-    group.add(glassTop);
-    const beams = [];
-    for (let xx = x0; xx <= x1 + 1e-3; xx += CELL) beams.push(part(box(0.12, 0.3, z1 - z0), DARK, 0.5, 0.6, [xx, y - 0.15, (z0 + z1) / 2]));
-    for (let zz = z0; zz <= z1 + 1e-3; zz += CELL) beams.push(part(box(x1 - x0, 0.3, 0.12), DARK, 0.5, 0.6, [(x0 + x1) / 2, y - 0.15, zz]));
-    const frame = new THREE.Mesh(mergeGeometries(beams), solid);
-    frame.castShadow = true;
-    group.add(frame);
+    group.add(lum);
+    const parts = [];
+    // 격자 보 (조명판 사이)
+    for (let xx = x0 + band + CELL; xx < x1 - band - 0.1; xx += CELL) parts.push(part(box(0.09, 0.14, D - band * 2), '#cfc9bd', 0.5, 0.1, [xx, y - 0.07, cz]));
+    for (let zz = z0 + band + CELL; zz < z1 - band - 0.1; zz += CELL) parts.push(part(box(W - band * 2, 0.14, 0.09), '#cfc9bd', 0.5, 0.1, [cx, y - 0.07, zz]));
+    // 둘레 내림 천장 (단) + 아래 모서리 금속 띠
+    for (const [w, d, px, pz] of [[W, band, cx, z0 + band / 2], [W, band, cx, z1 - band / 2], [band, D - band * 2, x0 + band / 2, cz], [band, D - band * 2, x1 - band / 2, cz]]) {
+      parts.push(part(box(w, 0.55, d), '#e4dfd4', 0.85, 0, [px, y - 0.275, pz]));
+    }
+    for (const [w, d, px, pz] of [[W - band * 2, 0.04, cx, z0 + band], [W - band * 2, 0.04, cx, z1 - band], [0.04, D - band * 2, x0 + band, cz], [0.04, D - band * 2, x1 - band, cz]]) {
+      parts.push(part(box(w, 0.05, d), BRASS, 0.3, 0.85, [px, y - 0.55, pz]));
+    }
+    group.add(new THREE.Mesh(mergeGeometries(parts), solid));
+    // 현수막: 내림 천장 안쪽 긴 두 변에 걸림 (2층 눈높이보다 위라 시야를 가리지 않음)
+    const banners = [
+      { title: '국립 힘 과학관', sub: 'NATIONAL FORCE SCIENCE HALL', color: '#1f3b5c' },
+      { title: '중력 · 탄성력', sub: 'GRAVITY · ELASTIC FORCE', color: '#5c2f1f' },
+      { title: '마찰력 · 부력', sub: 'FRICTION · BUOYANCY', color: '#1f4c45' },
+      { title: '합력 · 작용 반작용', sub: 'RESULTANT · ACTION-REACTION', color: '#3f2d5c' },
+    ];
+    const BH = 1.15, BW = 0.62;
+    banners.forEach((bn, i) => {
+      const side = i % 2 ? 1 : -1;
+      const t = (Math.floor(i / 2) + 1) / 3;
+      const bx = x0 + W * t, bz = side < 0 ? z0 + band + 0.05 : z1 - band - 0.05;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), new THREE.MeshStandardMaterial({ map: bannerTexture(bn), roughness: 0.85, side: THREE.DoubleSide }));
+      m.position.set(bx, y - 0.62 - BH / 2, bz);
+      m.rotation.y = side < 0 ? 0 : Math.PI;
+      group.add(m);
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, BW + 0.08, 6).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: BRASS, roughness: 0.3, metalness: 0.9 }));
+      rod.position.set(bx, y - 0.6, bz);
+      group.add(rod);
+    });
   }
 
   // 푸코 진자: 팔각 탑 위로 긴 줄에 매달린 추가 흔들리고, 흔들리는 면이 천천히 돈다
@@ -335,8 +364,13 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     const t = new THREE.Mesh(tower, solid);
     t.castShadow = true;
     group.add(t);
-    // 아트리움 천창의 철골 보에 매달림 (줄 길이 = 지붕 높이 - 추 높이)
-    const L = ROOF - 0.3 - (KH + 1.1);
+    // 아트리움 천장(광천장 가운데)에 매달림 (줄 길이 = 천장 높이 - 추 높이) + 천장 고정 장식
+    const L = CEILING_Y - 0.02 - (KH + 1.1);
+    const rosette = new THREE.Mesh(
+      mergeGeometries([part(cyl(0.34, 0.4, 0.07, 24), BRASS, 0.3, 0.9, [x, CEILING_Y - 0.035, z]), part(cyl(0.06, 0.06, 0.22, 10), DARK, 0.4, 0.7, [x, CEILING_Y - 0.13, z])]),
+      solid,
+    );
+    group.add(rosette);
     const pivot = new THREE.Group();
     pivot.position.set(x, KH + 1.1 + L, z);
     const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, L, 6).translate(0, -L / 2, 0), new THREE.MeshStandardMaterial({ color: '#8d9298', roughness: 0.4, metalness: 0.8 }));
@@ -351,6 +385,56 @@ export function buildMuseumProps(map, { atlas, panelCount }) {
     };
   }
   return group;
+}
+
+// 현수막 무늬 (세로로 긴 천: 위 띠 · 큰 제목 · 영문 · 아래 술)
+function bannerTexture({ title, sub, color }) {
+  const W = 256, H = 512;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = color;
+  g.fillRect(0, 0, W, H);
+  const grad = g.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, 'rgba(0,0,0,0.25)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.06)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.25)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = '#d9b45a';
+  g.fillRect(0, 18, W, 6);
+  g.fillRect(0, H - 60, W, 4);
+  g.fillStyle = '#f4efe4';
+  g.textAlign = 'center';
+  const words = title.split(' · ');
+  words.forEach((w, i) => {
+    let px = 40;
+    do g.font = `700 ${px}px 'IBM Plex Sans KR', 'Noto Sans KR', sans-serif`;
+    while (g.measureText(w).width > W - 36 && --px > 20);
+    g.fillText(w, W / 2, 150 + i * 70);
+  });
+  g.font = "600 15px 'IBM Plex Mono', monospace";
+  g.fillStyle = 'rgba(244,239,228,0.75)';
+  sub.split(' · ').forEach((w, i) => g.fillText(w, W / 2, 330 + i * 24));
+  // 지구·화살표 기호 (힘의 표현)
+  g.strokeStyle = '#d9b45a';
+  g.lineWidth = 5;
+  g.beginPath();
+  g.moveTo(W / 2 - 50, 410);
+  g.lineTo(W / 2 + 40, 410);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(W / 2 + 50, 410);
+  g.lineTo(W / 2 + 30, 398);
+  g.lineTo(W / 2 + 30, 422);
+  g.closePath();
+  g.fillStyle = '#d9b45a';
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }
 
 // 아틀라스(가로 4칸 × 세로 2칸)에서 panel번째 칸을 쓰도록 UV 지정. crop = 위에서부터 쓸 높이 비율

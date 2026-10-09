@@ -54,35 +54,50 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
   assert.ok(patchUses > 0, '봇이 포스 패치를 써야 함');
 });
 
-test('합력 강화장치: 소총 40 → 46, 경량 방탄 상대 몸통 4발 → 3발', () => {
+test('합력 강화장치: 소총 11 → 13, 경량 보호막 상대 몸통 12발 → 10발', () => {
   const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const p = match.player;
   const victim = match.agents.find((a) => a.team === TEAMS.FORCE);
   victim.armor = victim.armorMax = ARMOR.light.value;
-  for (let i = 0; i < 3; i++) match.applyDamage(victim, WEAPONS.rifle.damage, p);
-  assert.ok(victim.alive, '평소에는 3발로 쓰러지지 않음 (120 < 125)');
-  assert.equal(victim.armor, 0, '방탄이 먼저 깎임');
+  for (let i = 0; i < 11; i++) match.applyDamage(victim, WEAPONS.rifle.damage, p);
+  assert.ok(victim.alive, '평소에는 11발로 쓰러지지 않음 (121 < 125)');
+  assert.equal(victim.armor, 0, '보호막이 먼저 깎임');
+  match.applyDamage(victim, WEAPONS.rifle.damage, p);
+  assert.ok(!victim.alive, '12발째에 쓰러짐');
+  victim.alive = true;
   victim.hp = 100;
   victim.armor = ARMOR.light.value;
   assert.ok(match.usePatch(p, 0));
   assert.equal(p.ampT, 5);
   const amped = WEAPONS.rifle.damage + WEAPONS.rifle.ampBonus;
-  assert.equal(amped, 46);
-  for (let i = 0; i < 2; i++) match.applyDamage(victim, amped, p);
-  assert.ok(victim.alive);
+  assert.equal(amped, 13);
+  for (let i = 0; i < 9; i++) match.applyDamage(victim, amped, p);
+  assert.ok(victim.alive, '9발(117)은 버팀');
   match.applyDamage(victim, amped, p);
-  assert.ok(!victim.alive);
+  assert.ok(!victim.alive, '10발째에 쓰러짐');
 });
 
-test('한 발의 위력: 소총 머리 1발 · 몸통 3발(중량 방탄 4발), 권총 머리 78, 저격총 몸통 1발', () => {
-  const r = WEAPONS.rifle;
-  assert.ok(r.damage * r.headMult >= 100 + ARMOR.heavy.value, '소총 머리 1발 (방탄 포함)');
-  assert.ok(r.damage * 2 < 100 && r.damage * 3 >= 100, '방탄 없으면 몸통 3발');
-  assert.ok(r.damage * 3 < 150 && r.damage * 4 >= 150, '중량 방탄이면 몸통 4발');
-  assert.equal(Math.round(WEAPONS.pistol.damage * WEAPONS.pistol.headMult), 78);
-  assert.ok(WEAPONS.sniper.damage >= 100 + ARMOR.heavy.value, '저격총 몸통 1발');
-  assert.ok(WEAPONS.sheriff.damage * WEAPONS.sheriff.headMult >= 150, '리볼버 머리 1발');
+test('오래 싸우는 교전: 기준 총(소총·기관단총·권총) 몸통 10발·머리 7발, 다른 총은 비율 유지 (보호막 없을 때)', () => {
+  // 피해는 한 발마다 반올림해서 들어감 (applyDamage)
+  const hits = (id, head = false, ehp = 100) => {
+    const w = WEAPONS[id];
+    const per = Math.round(w.damage * (head ? w.headMult : 1)) * (w.pellets ?? 1);
+    return Math.ceil(ehp / per);
+  };
+  for (const id of ['rifle', 'smg', 'pistol']) {
+    assert.equal(hits(id), 10, `${id} 몸통 10발`);
+    assert.equal(hits(id, true), 7, `${id} 머리 7발`);
+  }
+  assert.equal(hits('sheriff'), 4, '리볼버 몸통 4발');
+  assert.equal(hits('sheriff', true), 3, '리볼버 머리 3발');
+  assert.equal(hits('sniper'), 3, '저격총 몸통 3발');
+  assert.equal(hits('sniper', true), 2, '저격총 머리 2발');
+  assert.equal(hits('shotgun'), 3, '산탄총: 가까이서 몸통에 다 맞으면 3번');
+  // 보호막: 경량 +2~3발, 중량 +5발
+  assert.equal(hits('rifle', false, 100 + ARMOR.light.value), 12);
+  assert.equal(hits('rifle', false, 100 + ARMOR.heavy.value), 14);
+  assert.equal(hits('pistol', false, 100 + ARMOR.heavy.value), 15);
   for (const id of ['pistol', 'sheriff', 'smg', 'shotgun', 'rifle', 'sniper']) assert.ok(WEAPONS[id].price >= 0 && WEAPONS[id].slot, id);
 });
 
