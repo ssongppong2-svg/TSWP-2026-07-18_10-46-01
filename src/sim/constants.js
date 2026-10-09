@@ -30,7 +30,6 @@ export const ECON = {
   defuse: 300,
   quiz: 200, // 구매 시간 개념 점검 정답 보너스 (사람만, 라운드마다 한 문제)
 };
-// 개념 숙달: 그 개념을 맞힌 횟수가 이만큼이면 관련 패치 재사용 대기가 줄어듦
 // 개념 숙달: need번 맞히면 숙달 → 관련 패치 재사용 대기 ×cooldownMult,
 // 해체 문제의 개념이면 그 잠금은 계산 결과가 바로 보이고 돌아가는 시간 ×turnMult
 export const MASTERY = { need: 2, cooldownMult: 0.85, turnMult: 0.6 };
