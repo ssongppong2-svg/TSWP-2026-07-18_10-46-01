@@ -914,22 +914,38 @@ const IDENTITY = new THREE.Matrix4();
 const skinCache = new Map();
 
 // 단색 부품용 재질: 색은 정점 색, 거칠기·금속성·발광은 정점 속성 (aRME)으로
-export function makeSolidMaterial({ strobe = 2 } = {}) {
+// grain > 0: 표면 결 (부품 좌표 1/grain m 간격의 잔무늬 — 거친 천·고무일수록 진하게, 금속은 옅게).
+//            가까이서 보는 1인칭 손·총에만 씀 (멀리 있는 요원에 쓰면 반짝거림)
+export function makeSolidMaterial({ strobe = 2, grain = 0 } = {}) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   const u = { value: strobe };
   m.userData.strobe = u;
+  const G = grain > 0;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uStrobe = u;
+    sh.uniforms.uGrain = { value: grain };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aRME;\nvarying vec3 vRME;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRME = aRME;');
+      .replace('#include <common>', `#include <common>\nattribute vec3 aRME;\nvarying vec3 vRME;${G ? '\nuniform float uGrain;\nvarying vec3 vGrainP;' : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvRME = aRME;${G ? '\nvGrainP = position * uGrain;' : ''}`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRME;\nuniform float uStrobe;')
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vRME.x;')
+      .replace('#include <common>', `#include <common>\nvarying vec3 vRME;\nuniform float uStrobe;${G ? '\nvarying vec3 vGrainP;' : ''}`)
+      .replace(
+        '#include <color_fragment>',
+        G
+          ? `#include <color_fragment>
+          vec3 gq = floor(vGrainP);
+          float gh = fract(sin(dot(gq, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+          float gw = sin(vGrainP.x * 3.1 + vGrainP.y * 3.1) * sin(vGrainP.z * 3.1 - vGrainP.y * 3.1);
+          float gN = (gh - 0.5) * 0.6 + gw * 0.4;
+          float gAmt = mix(0.05, 0.28, smoothstep(0.55, 0.92, vRME.x));
+          diffuseColor.rgb *= 1.0 + gN * gAmt;`
+          : '#include <color_fragment>\nfloat gN = 0.0;',
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = clamp(vRME.x + gN * 0.08, 0.04, 1.0);')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vRME.y;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vRME.z * uStrobe;');
   };
-  m.customProgramCacheKey = () => 'agentSolid';
+  m.customProgramCacheKey = () => (G ? 'agentSolidGrain' : 'agentSolid');
   return m;
 }
 

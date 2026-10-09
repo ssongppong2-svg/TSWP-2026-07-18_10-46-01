@@ -269,7 +269,14 @@ function buildPistolFrame() {
 }
 function buildPistolSlide() {
   const P = new Parts();
-  P.add('metal', profile([[-0.036, 0.018], [0.15, 0.018], [0.153, 0.03], [0.146, 0.049], [-0.031, 0.049], [-0.037, 0.042]], 0.0255, 0.0022));
+  P.add('slide', profile([[-0.036, 0.018], [0.15, 0.018], [0.153, 0.03], [0.146, 0.049], [-0.031, 0.049], [-0.037, 0.042]], 0.0255, 0.0022));
+  // 윗면 모서리·앞 끝의 닳은 자국 (어두운 슬라이드가 한 덩어리로 보이지 않게) — 바깥 면(모서리 반경 0.0022)에 살짝 걸침
+  for (const s of [-1, 1]) P.add('wear', rbox(0.0022, 0.0022, 0.166, 0.0008), [s * 0.0114, 0.0502, -0.058], [0, 0, Math.PI / 4]);
+  P.add('wear', rbox(0.019, 0.0022, 0.0022, 0.0008), [0, 0.0488, -0.1545]);
+  // 뒤판 (공이 덮개) · 가운데 홈 — 뒷면(z 0.0382) 바로 밖
+  P.add('wear', rbox(0.017, 0.023, 0.0016, 0.0006), [0, 0.0335, 0.0389]);
+  P.add('dark', rbox(0.004, 0.012, 0.0008, 0.0003), [0, 0.0335, 0.0399]);
+  for (const s of [-1, 1]) P.add('dark', rbox(0.0012, 0.02, 0.0008, 0.0003), [s * 0.0058, 0.0335, 0.0399]);
   for (let i = 0; i < 7; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.0012, 0.022, 0.0016, 0.0005), [s * 0.0128, 0.034, 0.012 + i * 0.0035]);
   for (let i = 0; i < 4; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.0012, 0.02, 0.0016, 0.0005), [s * 0.0128, 0.034, -0.114 - i * 0.0035]);
   P.add('dark', rbox(0.011, 0.002, 0.04, 0.001), [0.005, 0.0495, -0.03]); // 배출구
@@ -277,8 +284,9 @@ function buildPistolSlide() {
   P.add('metal', rbox(0.0035, 0.007, 0.004, 0.001), [0, 0.0525, -0.139]); // 가늠쇠
   P.add('metal', rbox(0.0075, 0.007, 0.006, 0.0012), [-0.0068, 0.0525, 0.02]); // 가늠자 (가운데 홈)
   P.add('metal', rbox(0.0075, 0.007, 0.006, 0.0012), [0.0068, 0.0525, 0.02]);
-  P.add('metal', cylG(0.0068, 0.0068, 0.004, 14), [0, PB, -0.152], [Math.PI / 2, 0, 0]);
-  P.add('dark', cylG(0.0046, 0.0046, 0.0045, 12), [0, PB, -0.152], [Math.PI / 2, 0, 0]);
+  // 총구: 앞면(z −0.155) 바로 밖에 총열 끝 · 구멍
+  P.add('metal', cylG(0.0068, 0.0068, 0.0016, 14), [0, PB, -0.1556], [Math.PI / 2, 0, 0]);
+  P.add('dark', cylG(0.0044, 0.0044, 0.0008, 12), [0, PB, -0.1566], [Math.PI / 2, 0, 0]);
   P.add('tritium', new THREE.SphereGeometry(0.0013, 8, 6), [0, 0.0545, -0.1365]);
   for (const x of [-0.0068, 0.0068]) P.add('tritium', new THREE.SphereGeometry(0.0012, 8, 6), [x, 0.0535, 0.0232]);
   return P;
@@ -506,6 +514,8 @@ export class ViewModel {
     const std = (o) => new THREE.MeshStandardMaterial(o);
     this.mats = {
       metal: std({ color: '#25272b', roughness: 0.5, metalness: 0.25 }),
+      slide: std({ color: '#2d3035', roughness: 0.36, metalness: 0.55 }), // 권총 슬라이드: 프레임(폴리머)보다 매끈한 금속
+      wear: std({ color: '#7d828a', roughness: 0.38, metalness: 0.4 }), // 모서리 닳은 자국 (환경맵이 없어 금속성을 낮춰야 밝게 보임)
       dark: std({ color: '#0e0f10', roughness: 0.7, metalness: 0.1 }),
       poly: std({ color: '#25262a', roughness: 0.74, metalness: 0.0 }),
       furn: std({ color: force ? '#86714f' : '#3f4247', roughness: 0.72, metalness: 0.02 }),
@@ -529,7 +539,7 @@ export class ViewModel {
     this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff3a26', transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 
     // 손·총 부품은 총마다 스킨 메시 몇 개로 합쳐 그림 (그리기 호출 54 → 약 5)
-    this.solidMat = makeSolidMaterial({ strobe: 1 });
+    this.solidMat = makeSolidMaterial({ strobe: 1, grain: 520 });
     this.skeletons = [];
     this.guns = {};
     const GUNS = [

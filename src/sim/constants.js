@@ -10,7 +10,7 @@ export const ROUND_TIME = 120; // 폭탄 폭발까지 2분
 export const PRE_ROUND_TIME = 4; // 작전 개시 전 대기 (한 판짜리 규칙)
 export const DRAFT_TIME = 20; // 포스 패치 선택 시간
 
-// 라운드제 (발로란트식): 7라운드 먼저 이기면 승리, 6라운드가 끝나면 공수 교대
+// 라운드제: 7라운드 먼저 이기면 승리, 6라운드가 끝나면 공수 교대
 export const ROUNDS = {
   winTo: 7,
   half: 6,
@@ -20,7 +20,7 @@ export const ROUNDS = {
   halftimeTime: 7,
 };
 
-// 크레딧: 처치·해체·라운드 결과로 받고, 구매 시간에 상점에서 씀
+// 에너지(J, 코드에서는 credits): 처치·해체·라운드 결과·보급 점검으로 받고, 구매 시간에 보급 단말기에서 씀
 export const ECON = {
   start: 800,
   max: 9000,

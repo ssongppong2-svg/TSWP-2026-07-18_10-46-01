@@ -624,50 +624,191 @@ function addDecor(group, map, museum = false) {
   }
 }
 
-// 맵 밖: 어두운 공장 건물 실루엣
-function buildSkyline(map, day = false) {
-  const g = new THREE.Group();
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  geo.translate(0, 0.5, 0);
-  const winCanvas = document.createElement('canvas');
-  winCanvas.width = 64;
-  winCanvas.height = 128;
-  const wg = winCanvas.getContext('2d');
-  wg.fillStyle = '#000';
-  wg.fillRect(0, 0, 64, 128);
-  let s = 3;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let y = 4; y < 128; y += 12) {
-    for (let x = 4; x < 64; x += 12) {
-      if (rnd() < 0.08) {
-        wg.fillStyle = rnd() < 0.8 ? '#ffb35c' : '#cfe0ff';
-        wg.fillRect(x, y, 5, 4);
+// 맵 밖 원경: 창문 줄이 있는 건물들 + 옥상 설비 + 타워 크레인 하나 (낮: 콘크리트·유리, 밤: 띄엄띄엄 불 켜진 창)
+// 한 장의 그림 = 창 4개 × 4층 (가로 12.8 m · 세로 14.4 m), 건물 크기에 맞춰 반복해서 창 크기가 늘 같음
+const FACADE = { w: 12.8, h: 14.4 };
+function facadeTextures(day) {
+  const S = 256;
+  const make = () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    return [c, c.getContext('2d')];
+  };
+  const [base, g] = make();
+  const [lit, e] = make();
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  g.fillStyle = day ? '#c4c8cc' : '#15181c';
+  g.fillRect(0, 0, S, S);
+  // 콘크리트 얼룩
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = day ? `rgba(${rnd() < 0.5 ? '90,96,104' : '235,238,240'},${0.05 + rnd() * 0.06})` : 'rgba(40,46,52,0.12)';
+    g.fillRect(rnd() * S, rnd() * S, 2 + rnd() * 14, 2 + rnd() * 10);
+  }
+  e.fillStyle = '#000';
+  e.fillRect(0, 0, S, S);
+  const cw = S / 4, ch = S / 4;
+  for (let fy = 0; fy < 4; fy++) {
+    // 층 띠 (슬래브)
+    g.fillStyle = day ? 'rgba(80,86,94,0.35)' : 'rgba(0,0,0,0.4)';
+    g.fillRect(0, fy * ch + ch - 6, S, 6);
+    for (let fx = 0; fx < 4; fx++) {
+      const x = fx * cw + 9, y = fy * ch + 12, w = cw - 18, h = ch - 26;
+      const grad = g.createLinearGradient(x, y, x + w, y + h);
+      if (day) {
+        grad.addColorStop(0, '#5d6f7d');
+        grad.addColorStop(0.55, '#33414d');
+        grad.addColorStop(1, '#4a5a67');
+      } else {
+        grad.addColorStop(0, '#0b0e12');
+        grad.addColorStop(1, '#07090b');
+      }
+      g.fillStyle = grad;
+      g.fillRect(x, y, w, h);
+      // 창틀 · 가운데 창살
+      g.strokeStyle = day ? 'rgba(220,226,230,0.55)' : 'rgba(60,66,72,0.6)';
+      g.lineWidth = 2;
+      g.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      g.beginPath();
+      g.moveTo(x + w / 2, y);
+      g.lineTo(x + w / 2, y + h);
+      g.stroke();
+      // 블라인드 (일부 창)
+      if (rnd() < 0.35) {
+        g.fillStyle = day ? 'rgba(210,206,196,0.55)' : 'rgba(30,30,30,0.6)';
+        g.fillRect(x + 2, y + 2, w - 4, h * (0.2 + rnd() * 0.5));
+      }
+      // 밤: 불 켜진 창
+      if (rnd() < 0.14) {
+        e.fillStyle = rnd() < 0.75 ? '#ffb35c' : '#cfe0ff';
+        e.globalAlpha = 0.5 + rnd() * 0.5;
+        e.fillRect(x + 2, y + 2, w - 4, h - 4);
+        e.globalAlpha = 1;
       }
     }
   }
-  const winTex = new THREE.CanvasTexture(winCanvas);
-  winTex.colorSpace = THREE.SRGBColorSpace;
-  winTex.wrapS = winTex.wrapT = THREE.RepeatWrapping;
-  winTex.repeat.set(2, 3);
-  // 낮에는 창문 불빛 없이 밝은 회색 건물
-  const mat = day
-    ? new THREE.MeshStandardMaterial({ color: '#9aa6b2', roughness: 0.9 })
-    : new THREE.MeshStandardMaterial({ color: '#111418', roughness: 0.95, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 0.6 });
-  const count = 40;
-  const mesh = new THREE.InstancedMesh(geo, mat, count);
-  const m = new THREE.Matrix4();
+  const tex = (c) => {
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    return t;
+  };
+  return { map: tex(base), emissive: tex(lit) };
+}
+
+function buildSkyline(map, day = false) {
+  const g = new THREE.Group();
+  const T = facadeTextures(day);
+  const walls = [], roofs = [], units = [];
+  const M = THREE.Matrix4;
+  const tint = (geo, hex) => {
+    const c = new THREE.Color(hex);
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) arr.set([c.r, c.g, c.b], i * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    return geo;
+  };
+  const DAY_TINT = ['#d2d4d6', '#c9c2b6', '#b8c2ca', '#d6cfc2', '#aeb6bd', '#c4c9cf'];
   const R = Math.max(map.width, map.depth) * 0.75;
+  const count = 40;
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + Math.sin(i * 12.9) * 0.05;
     const r = R + 18 + ((i * 37) % 50);
-    const w = 14 + ((i * 13) % 20), d = 10 + ((i * 7) % 14), h = 10 + ((i * 29) % 30);
-    m.compose(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a), new THREE.Vector3(w, h, d));
-    mesh.setMatrixAt(i, m);
+    const w = 14 + ((i * 13) % 20), d = 10 + ((i * 7) % 14);
+    // 높이는 4층 단위로 맞춰 창 줄이 지붕에서 잘리지 않게
+    const h = FACADE.h * (1 + ((i * 29) % 3)) * (0.75 + 0.25 * ((i * 5) % 2));
+    const place = new M().compose(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -a + Math.PI / 2), new THREE.Vector3(1, 1, 1));
+    const color = day ? DAY_TINT[i % DAY_TINT.length] : '#ffffff';
+    const off = rnd();
+    // 벽 4면 (창 크기가 늘 같도록 UV를 건물 크기에 맞춤)
+    for (const [len, rotY, px, pz] of [[w, 0, 0, d / 2], [w, Math.PI, 0, -d / 2], [d, Math.PI / 2, w / 2, 0], [d, -Math.PI / 2, -w / 2, 0]]) {
+      const pg = new THREE.PlaneGeometry(len, h);
+      const uv = pg.attributes.uv;
+      for (let k = 0; k < uv.count; k++) uv.setXY(k, off + uv.getX(k) * (len / FACADE.w), uv.getY(k) * (h / FACADE.h));
+      pg.applyMatrix4(new M().makeRotationY(rotY).premultiply(new M().makeTranslation(px, h / 2, pz)));
+      pg.applyMatrix4(place);
+      walls.push(tint(pg, color));
+    }
+    // 지붕 슬래브 · 난간 턱
+    const roof = new THREE.BoxGeometry(w + 0.5, 0.7, d + 0.5);
+    roof.translate(0, h + 0.2, 0);
+    roof.applyMatrix4(place);
+    roofs.push(roof);
+    // 옥상 설비: 실외기 · 물탱크 · 계단실
+    const nUnits = 2 + (i % 3);
+    for (let k = 0; k < nUnits; k++) {
+      const ux = (rnd() - 0.5) * (w - 4), uz = (rnd() - 0.5) * (d - 4);
+      const kind = (i + k) % 3;
+      const geo = kind === 1 ? new THREE.CylinderGeometry(1.4, 1.4, 2.6, 10) : kind === 2 ? new THREE.BoxGeometry(3.4, 3, 3) : new THREE.BoxGeometry(2.2, 1.3, 1.6);
+      const hh = kind === 1 ? 2.6 : kind === 2 ? 3 : 1.3;
+      geo.translate(ux, h + 0.55 + hh / 2 + (kind === 1 ? 1.2 : 0), uz);
+      geo.applyMatrix4(place);
+      units.push(geo);
+      if (kind === 1) {
+        // 물탱크 다리
+        for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          const leg = new THREE.BoxGeometry(0.2, 1.2, 0.2);
+          leg.translate(ux + lx * 0.9, h + 1.15, uz + lz * 0.9);
+          leg.applyMatrix4(place);
+          units.push(leg);
+        }
+      }
+    }
   }
-  g.add(mesh);
+  const wallMat = day
+    ? new THREE.MeshStandardMaterial({ map: T.map, vertexColors: true, roughness: 0.82, metalness: 0.05 })
+    : new THREE.MeshStandardMaterial({ map: T.map, color: '#ffffff', roughness: 0.95, emissive: '#ffffff', emissiveMap: T.emissive, emissiveIntensity: 0.6 });
+  g.add(new THREE.Mesh(mergeGeometries(walls), wallMat));
+  g.add(new THREE.Mesh(mergeGeometries(roofs), new THREE.MeshStandardMaterial({ color: day ? '#8f959b' : '#101215', roughness: 0.9 })));
+  g.add(new THREE.Mesh(mergeGeometries(units.map((u) => u.toNonIndexed())), new THREE.MeshStandardMaterial({ color: day ? '#7b8187' : '#0d0f12', roughness: 0.7, metalness: 0.2 })));
+  g.add(buildCrane(R, day));
   const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 48), new THREE.MeshStandardMaterial({ color: day ? '#6c6a64' : '#16181b', roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   g.add(ground);
   return g;
+}
+
+// 원경 타워 크레인 (격자 기둥 · 지브 · 균형추 · 운전실 · 늘어진 줄) — 하늘에 걸리는 랜드마크
+function buildCrane(R, day) {
+  const parts = [];
+  const box = (w, h, d, x, y, z, rx = 0, rz = 0) => {
+    const b = new THREE.BoxGeometry(w, h, d);
+    b.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, 0, rz)));
+    b.translate(x, y, z);
+    parts.push(b);
+  };
+  const H = 46, S = 1.8;
+  // 기둥: 네 모서리 + 지그재그 가새
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(0.22, H, 0.22, (x * S) / 2, H / 2, (z * S) / 2);
+  for (let y = 1.2; y < H - 1; y += 2.4) {
+    const flip = Math.round(y / 2.4) % 2 ? 1 : -1;
+    box(0.12, 2.9, 0.12, 0, y + 1.2, S / 2, 0, 0.64 * flip);
+    box(0.12, 2.9, 0.12, 0, y + 1.2, -S / 2, 0, -0.64 * flip);
+    box(0.12, 2.9, 0.12, S / 2, y + 1.2, 0, 0.64 * flip, 0);
+    box(0.12, 2.9, 0.12, -S / 2, y + 1.2, 0, -0.64 * flip, 0);
+  }
+  // 지브 (앞) · 균형 지브 (뒤) · 꼭대기 탑 · 균형추 · 운전실
+  box(34, 0.9, 1.1, 17, H + 0.6, 0);
+  box(12, 0.9, 1.4, -6.5, H + 0.6, 0);
+  box(3.2, 3, 1.8, -11, H - 0.6, 0);
+  box(0.4, 7, 0.4, 0, H + 4, 0);
+  box(2.4, 2, 2, 1.6, H - 1.4, 0);
+  for (const [x0, x1] of [[0, 28], [0, -11]]) {
+    const len = Math.hypot(x1 - x0, 6.4);
+    const ang = Math.atan2(-6.4, x1 - x0);
+    box(len, 0.08, 0.08, (x0 + x1) / 2, H + 4 + -3.2, 0, 0, ang);
+  }
+  box(0.06, 18, 0.06, 22, H - 8.5, 0);
+  box(1.2, 0.6, 1.2, 22, H - 17.6, 0);
+  const geo = mergeGeometries(parts.map((p) => p.toNonIndexed()));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: day ? '#d79a2b' : '#3a2c16', roughness: 0.6, metalness: 0.3 }));
+  const a = 0.7;
+  mesh.position.set(Math.cos(a) * (R + 30), 0, Math.sin(a) * (R + 30));
+  mesh.rotation.y = 2.3;
+  return mesh;
 }
