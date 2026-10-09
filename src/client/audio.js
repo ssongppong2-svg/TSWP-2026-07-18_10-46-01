@@ -630,7 +630,7 @@ const SOUNDS = {
     a.noise(o, t + 0.04, 0.05, { type: 'bandpass', freq: 3800, q: 6, gain: 0.25 }); // 장비 흔들림
     if (a.wet && surface !== 'tile') a.noise(o, t + 0.02, 0.18, { type: 'bandpass', freq: 2600, q: 1.4, gain: 0.45, sweepTo: 1200 });
   },
-  // ───────── 내가 맞혔을 때 (몸통 · 보호막 · 머리 · 보호막 깨짐) ─────────
+  // ───────── 내가 맞혔을 때 (몸통 · 방탄에 막힘 · 머리 · 방탄 부서짐) ─────────
   hit(a, t) {
     const o = a.out(null, 0.26, 0.12, 0);
     a.noise(o, t, 0.03, { type: 'bandpass', freq: 1700, q: 1.6, gain: 0.9, attack: 0.0006 });

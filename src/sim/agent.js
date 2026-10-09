@@ -44,8 +44,10 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     primary: full ? 'rifle' : null,
     secondary: 'pistol',
     weapon: full ? 'rifle' : 'pistol',
-    armor: 0, // 방탄 (체력보다 먼저 깎임)
+    armor: 0, // 방탄 내구도 (ARMOR[armorKind].dur에서 닳아 감, 0이면 부서짐)
     armorMax: 0,
+    armorKind: null, // 'light' | 'heavy' (등급·헬멧)
+    ammo: 'fmj', // 이번 라운드 탄종 (AMMO)
     credits: 0,
     fireCd: 0,
     reloadT: 0,

@@ -57,6 +57,10 @@ export const GEAR_ICONS = {
   // 에너지(J): 번개 모양 계기 표시
   credit: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 1 4 13.5h6.5L9 23l11-13.5h-6.8z"/></svg>`,
   spike: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 16 9h-3v6h3l-4 8-4-8h3V9H8z"/></svg>`,
+  // 탄종: 둥근 탄두(일반) · 뾰족한 강철 탄심(관통) · 끝이 패인 탄두(확장)
+  fmj: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 10.5C9 6 10.5 2.5 12 2.5S15 6 15 10.5z"/><path d="M8.5 11.5h7V21h-7z" fill-opacity=".55"/><path d="M8 21.5h8v1H8z"/></svg>`,
+  ap: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 10.5 12 1.5l3 9z"/><path d="M10.4 6.5h3.2l.5 1.6h-4.2z" fill="#08151a"/><path d="M8.5 11.5h7V21h-7z" fill-opacity=".55"/><path d="M8 21.5h8v1H8z"/></svg>`,
+  hp: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 10.5c0-3 .6-5.6 1.6-7.2L12 6l1.4-2.7c1 1.6 1.6 4.2 1.6 7.2z"/><path d="M8.5 11.5h7V21h-7z" fill-opacity=".55"/><path d="M8 21.5h8v1H8z"/></svg>`,
 };
 
 export const UI_ICONS = {

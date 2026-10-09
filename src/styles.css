@@ -1727,6 +1727,11 @@ button {
   animation: hitIn 0.25s ease-out forwards;
 }
 
+.hitmarker[data-kind='block'] i {
+  background: #8fb4c8;
+  width: 7px;
+}
+
 .hitmarker[data-kind='head'] i {
   background: #ffe08a;
 }
@@ -1981,10 +1986,81 @@ button {
   margin-top: 14px;
 }
 
+.shop-main {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
 .shop-cols {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
   gap: 10px;
+}
+
+/* 총: 한 칸에 두 자루를 나란히 */
+.shop-cols.big .sc-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.shop-cols.big .shop-item {
+  margin-bottom: 0;
+}
+
+/* 방탄·탄종·장비: 작은 가로 칸 */
+.shop-cols.small {
+  padding-top: 10px;
+  border-top: 1px dashed var(--term-line);
+}
+
+.shop-item.small {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 10px;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+}
+
+.shop-item.small .si-icon {
+  grid-row: 1 / 3;
+  height: 32px;
+  margin-top: 0;
+}
+
+.shop-item.small .si-icon svg {
+  max-height: 28px;
+}
+
+.shop-item.small .si-name b {
+  display: inline;
+  font-size: 13px;
+}
+
+.shop-item.small .si-name small {
+  display: none; /* 칸 제목이 이미 종류를 알려 줌 */
+}
+
+.shop-item.small .si-stats {
+  grid-column: 2;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.shop-item.small .si-price {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: end;
+  font-size: 13px;
+}
+
+.shop-item.small .si-badge {
+  top: 5px;
+  right: 8px;
 }
 
 .shop-col h4 {
@@ -2091,6 +2167,10 @@ button {
 
 .shop-item[data-state='mine'] .si-badge {
   background: var(--warn);
+}
+
+.shop-item[data-state='worn'] .si-badge {
+  background: rgba(227, 179, 65, 0.85);
 }
 
 .shop-item[data-state='poor'] {
@@ -2279,8 +2359,8 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .shop-cols {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .shop-cols.big {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .shop-side {
@@ -4202,6 +4282,16 @@ button {
 .hud .vt-row.hp[data-level='bad'] .vt-num { color: var(--bad); }
 .hud .vt-row.hp[data-level='bad'] .vt-bar i { background: var(--bad); }
 
+.hud .va-lbl em {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: 0.02em;
+  color: var(--instr);
+  white-space: nowrap;
+}
+
 .hud .vt-row.ar.none {
   opacity: 0.45;
 }
@@ -4505,4 +4595,28 @@ button {
   .hud .am-mag { font-size: 30px; }
   .hud .ps-icon { width: 44px; height: 44px; }
   .hud .st-label, .hud .cam-id { display: none; }
+}
+
+/* 탄종 표시 (관통·확장) */
+.am-type {
+  margin-right: 6px;
+  padding: 1px 5px;
+  font: 600 11px var(--mono);
+  vertical-align: middle;
+  color: #08151a;
+  background: var(--warn);
+  border-radius: 2px;
+}
+
+.am-type:empty {
+  display: none;
+}
+
+.am-type[data-ammo='hp'] {
+  background: #e08a8a;
+}
+
+/* 닳은 방탄 */
+.hud .vt-row.ar[data-level='worn'] .vt-bar i {
+  background: var(--warn);
 }

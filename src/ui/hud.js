@@ -1,6 +1,6 @@
 import { TEAM_INFO, TEAMS, BOMB, ULT } from '../sim/constants.js';
 import { PATCH_CONCEPT } from '../sim/concepts.js';
-import { LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
+import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
 import { COMMANDS } from '../client/input.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
@@ -25,7 +25,7 @@ const BOMB_STATE = { armed: '무장', picking: '해체 중', defused: '해체됨
 
 // 경기 중 화면 = 연구소 요원 바디캠의 계기판.
 // 왼쪽 위: 녹화 표시·요원 식별 + 미니맵 · 위 가운데: 분대 생존(점)·점수·시간·폭탄 상태 · 오른쪽 위: 제압 기록
-// 아래 왼쪽: 생체 신호·보호막 · 아래 가운데: 포스 패치 계기(충전 고리) · 아래 오른쪽: 에너지(J)·탄약·무기
+// 아래 왼쪽: 생체 신호·방탄(등급·내구도) · 아래 가운데: 포스 패치 계기(충전 고리) · 아래 오른쪽: 에너지(J)·탄약·무기
 export class Hud {
   constructor(root, match, localId, settings = {}) {
     this.match = match;
@@ -71,13 +71,13 @@ export class Hud {
       <div class="vh-buyhint"><kbd>B</kbd> 보급 단말기 <span class="bh-e">에너지 <b class="bh-money"></b> J</span><span class="bh-quiz">점검 문제 +200 J</span></div>
       <div class="vh-vitals">
         <div class="vt-row hp"><small>생체</small><b class="vt-num">100</b><div class="vt-bar"><i></i></div></div>
-        <div class="vt-row ar"><small>보호막</small><b class="vt-num">0</b><div class="vt-bar"><i></i></div><span class="va-icon"></span></div>
+        <div class="vt-row ar"><small class="va-lbl">방탄</small><b class="vt-num">0</b><div class="vt-bar"><i></i></div><span class="va-icon"></span></div>
       </div>
       <div class="hud-bottom"><div class="patch-bar"></div></div>
       <div class="vh-weapon">
         <div class="amp-badge">합력 강화</div>
         <div class="vw-energy">${GEAR_ICONS.credit}<b></b><span>J</span></div>
-        <div class="vw-ammo"><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
+        <div class="vw-ammo"><span class="am-type"></span><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
         <div class="vw-name"></div>
       </div>
       <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
@@ -121,6 +121,7 @@ export class Hud {
       buyQuiz: $('.bh-quiz'),
       armor: $('.vt-row.ar'),
       armorIcon: $('.va-icon'),
+      armorLbl: $('.va-lbl'),
       armorNum: $('.vt-row.ar .vt-num'),
       armorBar: $('.vt-row.ar .vt-bar i'),
       hp: $('.vt-row.hp'),
@@ -137,6 +138,7 @@ export class Hud {
       res: $('.am-res'),
       wname: $('.vw-name'),
       ammo: $('.vh-weapon'),
+      ammoType: $('.am-type'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -243,7 +245,7 @@ export class Hud {
     while (this.els.feed.children.length > 6) this.els.feed.firstChild.remove();
   }
 
-  // 명중 표시: kind = hit / head / kill
+  // 명중 표시: kind = hit / head / kill / block (방탄이 막음)
   hitmark(kind) {
     const h = this.els.hitmarker;
     h.dataset.kind = kind;
@@ -362,13 +364,20 @@ export class Hud {
       E.hpBar.style.transform = `scaleX(${v / 100})`;
       E.hp.dataset.level = v > 50 ? 'ok' : v > 25 ? 'mid' : 'bad';
     });
+    // 방탄: 내구도(숫자·막대) + 등급 (닳을수록 막대가 줄고, 0이면 부서져 사라짐)
     const armor = a.alive ? Math.round(a.armor ?? 0) : 0;
-    this.set('armor', armor, (v) => {
-      E.armorNum.textContent = v;
-      E.armor.classList.toggle('none', v <= 0);
-      E.armorBar.style.transform = `scaleX(${Math.min(1, v / 50)})`;
+    const kind = armor > 0 ? ARMOR[a.armorKind] : null;
+    const amax = a.armorMax || kind?.dur || 1;
+    this.set('armor', `${armor}/${amax}`, () => {
+      E.armorNum.textContent = armor;
+      E.armor.classList.toggle('none', armor <= 0);
+      E.armorBar.style.transform = `scaleX(${Math.min(1, armor / amax)})`;
+      E.armor.dataset.level = armor / amax > 0.5 ? 'ok' : 'worn';
     });
-    this.set('armorKind', (a.armorMax ?? 0) > 25 ? 'heavy' : (a.armorMax ?? 0) > 0 ? 'light' : 'none', (v) => (E.armorIcon.innerHTML = GEAR_ICONS[v] ?? GEAR_ICONS.light));
+    this.set('armorKind', kind?.id ?? 'none', (v) => {
+      E.armorIcon.innerHTML = GEAR_ICONS[v] ?? '';
+      E.armorLbl.innerHTML = kind ? `방탄<em>${kind.cls}등급${kind.helmet ? '·헬멧' : ''}</em>` : '방탄';
+    });
 
     // 탄약·무기
     const w = WEAPONS[a.weapon];
@@ -380,6 +389,12 @@ export class Hud {
       E.mag.classList.toggle('low', !w.melee && typeof v === 'number' && v <= Math.ceil(w.magSize * 0.25));
     });
     this.set('res', w.melee || !ws ? '' : `/ ${ws.reserve}`, (v) => (E.res.textContent = v));
+    // 탄종 (일반탄이 아니면 탄약 앞에 표시)
+    const ammoId = w.melee ? 'fmj' : a.ammo ?? 'fmj';
+    this.set('ammoType', ammoId, (v) => {
+      E.ammoType.textContent = v === 'fmj' ? '' : AMMO[v]?.short ?? '';
+      E.ammoType.dataset.ammo = v;
+    });
     this.set('reloading', a.reloadT > 0 && !w.melee, (v) => E.ammo.classList.toggle('reloading', v));
     this.set('amp', a.ampT > 0 && !w.melee, (v) => E.amp.classList.toggle('show', v));
     const credits = me.credits ?? 0;

@@ -5,7 +5,8 @@ import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWea
 import {
   BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
-import { ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
+import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
+import { hitArmor } from './ballistics.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
@@ -237,10 +238,12 @@ export class Match {
         a.primary = null;
         a.secondary = 'pistol';
         a.armor = a.armorMax = 0;
+        a.armorKind = null;
       } else {
         for (const id of Object.keys(a.weapons)) a.weapons[id] = freshAmmo(id);
       }
       a.weapon = a.primary ?? a.secondary;
+      a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
       a.alive = true;
       a.hp = PLAYER.maxHp;
       a.deadT = 0;
@@ -322,24 +325,51 @@ export class Match {
     const armor = ARMOR[item];
     if (armor) {
       const mine = a.bought.find((b) => ARMOR[b.item]);
-      const before = mine ? a.bought.prevArmor : { v: a.armor, max: a.armorMax };
+      const before = mine ? a.bought.prevArmor : { v: a.armor, max: a.armorMax, kind: a.armorKind };
       if (mine?.item === item) {
         // 같은 방탄을 다시 누르면 환불하고 원래 방탄으로
         refund((b) => b === mine);
         a.armor = before.v;
         a.armorMax = before.max;
+        a.armorKind = before.kind;
         this.emit('buy', { agent: a, item, sold: true });
         return true;
       }
-      if (before.v >= armor.value || a.credits + (mine?.price ?? 0) < armor.price) {
-        this.emit('buyDenied', { agent: a, item, reason: before.v >= armor.value ? 'have' : 'money' });
+      // 이미 입은 방탄이 같거나 더 높은 등급이고 새것과 같은 상태면 살 필요 없음 (닳았으면 새것으로 바꿀 수 있음)
+      const have = before.kind && before.v > 0 ? ARMOR[before.kind] : null;
+      const better = have && (have.cls > armor.cls || (have.cls === armor.cls && before.v >= armor.dur));
+      if (better || a.credits + (mine?.price ?? 0) < armor.price) {
+        this.emit('buyDenied', { agent: a, item, reason: better ? 'have' : 'money' });
         return false;
       }
       if (mine) refund((b) => b === mine);
       else a.bought.prevArmor = before;
       a.credits -= armor.price;
-      a.armor = a.armorMax = armor.value;
+      a.armor = a.armorMax = armor.dur;
+      a.armorKind = item;
       a.bought.push({ item, price: armor.price });
+      this.emit('buy', { agent: a, item });
+      return true;
+    }
+    // 탄종: 이번 라운드 가진 모든 총에. 같은 것을 다시 누르거나 일반탄을 고르면 환불
+    const ammo = AMMO[item];
+    if (ammo) {
+      const mine = a.bought.find((b) => AMMO[b.item]);
+      if (mine && (mine.item === item || item === 'fmj')) {
+        refund((b) => b === mine);
+        a.ammo = 'fmj';
+        this.emit('buy', { agent: a, item: mine.item, sold: true });
+        return true;
+      }
+      if (item === 'fmj' || a.ammo === item) return false;
+      if (a.credits + (mine?.price ?? 0) < ammo.price) {
+        this.emit('buyDenied', { agent: a, item, reason: 'money' });
+        return false;
+      }
+      if (mine) refund((b) => b === mine);
+      a.credits -= ammo.price;
+      a.ammo = item;
+      a.bought.push({ item, price: ammo.price });
       this.emit('buy', { agent: a, item });
       return true;
     }
@@ -752,7 +782,8 @@ export class Match {
     if (a.held) spread += w.spreadMove * 0.5;
     const aim = dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch);
     const amp = a.ampT > 0 && (w.ampBonus ?? 0) > 0;
-    const damage = w.damage + (amp ? w.ampBonus : 0);
+    const ammo = AMMO[a.ammo] ?? AMMO.fmj;
+    const damage = (w.damage + (amp ? w.ampBonus : 0)) * ammo.dmg;
     const origin = eyePos(a);
     const pellets = w.pellets ?? 1;
     let first = null;
@@ -765,6 +796,9 @@ export class Match {
         weapon: w.id,
         damage,
         amp,
+        pen: (w.pen ?? 0) + ammo.pen, // 관통력 (방탄 등급과 비교)
+        wear: ammo.wear,
+        ammo: ammo.id,
         bounces: a.bounceT > 0 ? 1 : 0,
         pos: copy(origin),
         prev: copy(origin),
@@ -822,7 +856,7 @@ export class Match {
     const tx = best.pos.x - a.pos.x, tz = best.pos.z - a.pos.z;
     const tl = Math.hypot(tx, tz) || 1;
     const backstab = (fx * tx + fz * tz) / tl > 0.5;
-    this.applyDamage(best, m.damage * (backstab ? w.backstabMult : 1), a, { weapon: 'knife', pos: chestPos(best), backstab });
+    this.applyDamage(best, m.damage * (backstab ? w.backstabMult : 1), a, { weapon: 'knife', pos: chestPos(best), backstab, pen: w.pen });
   }
 
   // ───────────────────────── 온라인 참가자 화면 ─────────────────────────
@@ -936,7 +970,7 @@ export class Match {
         const w = WEAPONS[p.weapon];
         const mult = (head ? w.headMult : 1) * falloffAt(w, p.from ? dist(p.from, hitPos) : 0);
         this.emit('impact', { ...hitPos, kind: 'flesh', projectile: p, headshot: head });
-        this.applyDamage(target, p.damage * mult, owner, { headshot: head, weapon: p.weapon, pos: hitPos, pellet: p.pellet });
+        this.applyDamage(target, p.damage * mult, owner, { headshot: head, weapon: p.weapon, pos: hitPos, pellet: p.pellet, pen: p.pen ?? 0, wear: p.wear ?? 1 });
         continue;
       }
       if (shield) {
@@ -975,14 +1009,25 @@ export class Match {
     this.projectiles = keep;
   }
 
-  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false, pellet = false } = {}) {
+  // pen: 탄의 관통력, wear: 방탄을 닳게 하는 배율 (탄종). 방탄이 덮는 곳(몸통, 중량은 머리도)에 맞으면 관통 판정
+  applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false, pellet = false, pen = 0, wear = 1 } = {}) {
     if (!t.alive || this.phase !== 'live') return;
     amount = Math.round(amount);
-    // 방탄이 먼저 받음
-    const toArmor = Math.min(t.armor ?? 0, amount);
-    t.armor = (t.armor ?? 0) - toArmor;
-    const dealt = toArmor + Math.min(t.hp, amount - toArmor);
-    t.hp -= amount - toArmor;
+    let hpLoss = amount, armorLoss = 0, armorHit = null;
+    const kind = ARMOR[t.armorKind];
+    if ((t.armor ?? 0) > 0 && kind && (!headshot || kind.helmet)) {
+      const r = hitArmor({ damage: amount, pen, wear, cls: kind.cls, dur: t.armor, max: t.armorMax || kind.dur }, this.rng.next());
+      hpLoss = Math.round(r.hp);
+      armorLoss = Math.min(t.armor, r.wear);
+      t.armor -= armorLoss;
+      if (t.armor < 0.5) {
+        t.armor = 0; // 부서짐
+        t.armorKind = null;
+      }
+      armorHit = r.penetrated ? 'pen' : 'block';
+    }
+    const dealt = Math.round(armorLoss) + Math.min(Math.max(0, t.hp), hpLoss);
+    t.hp -= hpLoss;
     t.lastHurtT = this.time;
     t.lastHurtBy = attacker?.id ?? null;
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
@@ -997,7 +1042,8 @@ export class Match {
       if (t.round && attacker.team !== t.team) t.round.by[attacker.id] = (t.round.by[attacker.id] ?? 0) + dealt;
     }
     const killed = t.hp <= 0;
-    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos, backstab, armor: toArmor > 0 });
+    // armor: 방탄에 맞음 · blocked: 방탄이 막음(충격만) · armorBroke: 이번 탄으로 방탄이 부서짐
+    this.emit('hit', { target: t, attacker, amount: dealt, headshot, killed, weapon, pos, backstab, armor: !!armorHit, blocked: armorHit === 'block', armorBroke: !!armorHit && t.armor <= 0 });
     if (killed) this.kill(t, attacker, { headshot, weapon });
   }
 
@@ -1005,6 +1051,7 @@ export class Match {
     t.alive = false;
     t.hp = 0;
     t.armor = 0;
+    t.armorKind = null;
     t.deadT = 0;
     t.held = null;
     t.slippery = false;

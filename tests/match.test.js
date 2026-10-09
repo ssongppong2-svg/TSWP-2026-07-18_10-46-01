@@ -6,7 +6,7 @@ import { TeamDraft } from '../src/sim/draft.js';
 import { attachBots } from '../src/ai/bot.js';
 import { DT, TEAMS } from '../src/sim/constants.js';
 import { emptyIntent } from '../src/sim/agent.js';
-import { ARMOR, PATCHES, WEAPONS } from '../src/sim/data.js';
+import { PATCHES, WEAPONS } from '../src/sim/data.js';
 
 function draftAll(seed, playerTeam = null) {
   const rng = createRng(seed);
@@ -54,28 +54,25 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
   assert.ok(patchUses > 0, '봇이 포스 패치를 써야 함');
 });
 
-test('합력 강화장치: 소총 11 → 13, 경량 보호막 상대 몸통 12발 → 10발', () => {
+test('합력 강화장치: 소총 11 → 13, 맨몸 몸통 10발 → 8발', () => {
   const match = new Match({ seed: 3, playerTeam: TEAMS.DEFUSE, loadouts: new Map([['defuse-0', ['resultantAmp', 'elasticPad', 'frictionZero', 'gravityCollapse']]]) });
   match.phase = 'live';
   const p = match.player;
   const victim = match.agents.find((a) => a.team === TEAMS.FORCE);
-  victim.armor = victim.armorMax = ARMOR.light.value;
-  for (let i = 0; i < 11; i++) match.applyDamage(victim, WEAPONS.rifle.damage, p);
-  assert.ok(victim.alive, '평소에는 11발로 쓰러지지 않음 (121 < 125)');
-  assert.equal(victim.armor, 0, '보호막이 먼저 깎임');
+  for (let i = 0; i < 9; i++) match.applyDamage(victim, WEAPONS.rifle.damage, p);
+  assert.ok(victim.alive, '평소에는 9발(99)로 쓰러지지 않음');
   match.applyDamage(victim, WEAPONS.rifle.damage, p);
-  assert.ok(!victim.alive, '12발째에 쓰러짐');
+  assert.ok(!victim.alive, '10발째에 쓰러짐');
   victim.alive = true;
   victim.hp = 100;
-  victim.armor = ARMOR.light.value;
   assert.ok(match.usePatch(p, 0));
   assert.equal(p.ampT, 5);
   const amped = WEAPONS.rifle.damage + WEAPONS.rifle.ampBonus;
   assert.equal(amped, 13);
-  for (let i = 0; i < 9; i++) match.applyDamage(victim, amped, p);
-  assert.ok(victim.alive, '9발(117)은 버팀');
+  for (let i = 0; i < 7; i++) match.applyDamage(victim, amped, p);
+  assert.ok(victim.alive, '7발(91)은 버팀');
   match.applyDamage(victim, amped, p);
-  assert.ok(!victim.alive, '10발째에 쓰러짐');
+  assert.ok(!victim.alive, '8발째에 쓰러짐');
 });
 
 test('오래 싸우는 교전: 기준 총(소총·기관단총·권총) 몸통 10발·머리 7발, 다른 총은 비율 유지 (보호막 없을 때)', () => {
@@ -94,10 +91,7 @@ test('오래 싸우는 교전: 기준 총(소총·기관단총·권총) 몸통 1
   assert.equal(hits('sniper'), 3, '저격총 몸통 3발');
   assert.equal(hits('sniper', true), 2, '저격총 머리 2발');
   assert.equal(hits('shotgun'), 3, '산탄총: 가까이서 몸통에 다 맞으면 3번');
-  // 보호막: 경량 +2~3발, 중량 +5발
-  assert.equal(hits('rifle', false, 100 + ARMOR.light.value), 12);
-  assert.equal(hits('rifle', false, 100 + ARMOR.heavy.value), 14);
-  assert.equal(hits('pistol', false, 100 + ARMOR.heavy.value), 15);
+  // 방탄을 입었을 때는 ballistics.test.js (관통 확률이 있어 평균으로 확인)
   for (const id of ['pistol', 'sheriff', 'smg', 'shotgun', 'rifle', 'sniper']) assert.ok(WEAPONS[id].price >= 0 && WEAPONS[id].slot, id);
 });
 

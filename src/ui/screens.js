@@ -419,7 +419,7 @@ export function clickToStart({ team, loadout, mapId, onClick, online = false }) 
           <li><b>라운드제</b> — ${ROUNDS.winTo}라운드 먼저 이기면 승리 · ${ROUNDS.half}라운드 뒤 공수 교대 · 한쪽 전멸 시 라운드 종료</li>
           <li><b>보급</b> — 구매 시간(시작 구역)에 <kbd>B</kbd> 보급 단말기 · 에너지(J)는 처치·해체·라운드 결과로 · <b>보급 점검</b> 정답 +${ECON.quiz} J</li>
           <li><b>힘 장치</b> — 탄성 발판(올라서면 2층으로) · 승강기 · 지레 셔터(<kbd>F</kbd>) · 마찰 미끄럼틀 · 여럿이 밀면 빨라지는 상자(합력)</li>
-          <li><b>사격</b> — 멈춰 서서 쏘면 정확, 달리며 쏘면 빗나감 · 소총 몸통 10발·머리 7발 (보호막이 있으면 더 버팀)</li>
+          <li><b>사격</b> — 멈춰 서서 쏘면 정확, 달리며 쏘면 빗나감 · 소총 몸통 10발·머리 7발 (방탄을 입으면 더 버팀 · 관통탄은 방탄을 잘 뚫음)</li>
           <li><kbd>1·2·3</kbd> 무기 · <kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>M</kbd> 지도 · <kbd>Tab</kbd> 전황 · <kbd>Shift</kbd> 보행(무음)</li>
         </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
@@ -501,7 +501,7 @@ export function controlsModal({ onClose }) {
         <div class="key-groups">${groups.map(([title, rows]) => `<div class="key-group"><h4>${title}</h4>${rows.map(([k, v]) => `<div class="key-row"><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>`).join('')}</div>
         <div class="tip"><b>힘 잠금 해체</b> ${Object.values(PUZZLE_INFO).map((p) => p.title).join(' · ')}. 문제를 읽고 필요한 힘을 계산해 힘 카드를 고름. 오른쪽·위쪽 +, 왼쪽·아래쪽 −. 해체 중 피격 시 처음부터.</div>
         <div class="tip"><b>라운드제</b> ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대 · 구매 시간 ${ROUNDS.buyTime}초(전·후반 첫 라운드 ${ROUNDS.buyTimeFirst}초) · 라운드 2분 · 한쪽이 전멸하면 바로 끝남.</div>
-        <div class="tip"><b>에너지 (J)</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더) · 보급 점검 정답 ${ECON.quiz}. 살아남으면 받은 총·보호막이 다음 라운드까지 남음. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
+        <div class="tip"><b>에너지 (J)</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더) · 보급 점검 정답 ${ECON.quiz}. 살아남으면 받은 총·방탄(닳은 그대로)이 다음 라운드까지 남음. 탄종(관통탄·확장탄)은 라운드마다 새로. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
         <div class="tip"><b>개념 숙달</b> 한 개념을 ${MASTERY.need}번 맞히면(보급 점검·해체 문제·경기 뒤 점검) 그 힘을 쓰는 포스 패치의 재사용 대기 −${Math.round((1 - MASTERY.cooldownMult) * 100)}% · 그 개념의 해체 잠금은 계산 결과가 바로 보이고 더 빨리 풀림.</div>
         <div class="tip"><b>참고</b> 브라우저 특성상 <kbd>Ctrl</kbd>+<kbd>W</kbd>는 탭 닫기로 처리될 수 있음. 전체 화면에서 플레이 권장.</div>
       </div>

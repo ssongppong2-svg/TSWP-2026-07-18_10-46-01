@@ -4,7 +4,7 @@ import { Match } from '../src/sim/match.js';
 import { attachBots } from '../src/ai/bot.js';
 import { BOT_NAMES, DT, ECON, ROUNDS, TEAMS } from '../src/sim/constants.js';
 import { emptyIntent } from '../src/sim/agent.js';
-import { ARMOR, WEAPONS } from '../src/sim/data.js';
+import { AMMO, ARMOR, WEAPONS } from '../src/sim/data.js';
 import { TeamDraft } from '../src/sim/draft.js';
 import { createRng } from '../src/core/rng.js';
 import { ClientSync, HostSync, InputRecorder, RemoteController, planMatch, rosterFor } from '../src/net/protocol.js';
@@ -56,19 +56,40 @@ test('상점: 크레딧 차감 · 같은 것을 다시 누르면 환불 · 돈�
   assert.equal(me.credits, 4000);
   assert.equal(me.primary, null);
   assert.equal(me.weapon, 'pistol');
-  // 방탄
+  // 방탄: 등급·내구도
   assert.ok(m.buy(me, 'heavy'));
-  assert.equal(me.armor, ARMOR.heavy.value);
+  assert.equal(me.armor, ARMOR.heavy.dur);
+  assert.equal(me.armorKind, 'heavy');
   assert.ok(m.buy(me, 'light'), '이번에 산 방탄은 다른 방탄으로 바꿀 수 있음');
-  assert.equal(me.armor, ARMOR.light.value);
+  assert.equal(me.armor, ARMOR.light.dur);
+  assert.equal(me.armorKind, 'light');
   assert.equal(me.credits, 4000 - ARMOR.light.price);
   assert.ok(m.buy(me, 'light'), '환불');
   assert.equal(me.armor, 0);
+  assert.equal(me.armorKind, null);
   assert.equal(me.credits, 4000);
-  // 전 라운드부터 입고 있던 방탄이 더 좋으면 사지 않음
-  me.armor = me.armorMax = ARMOR.heavy.value;
+  // 전 라운드부터 입고 있던 방탄이 더 높은 등급이면 사지 않음, 닳았으면 같은 것을 새로 살 수 있음
+  me.armor = me.armorMax = ARMOR.heavy.dur;
+  me.armorKind = 'heavy';
   assert.equal(m.buy(me, 'light'), false);
+  assert.equal(m.buy(me, 'heavy'), false, '새것과 같으면 살 필요 없음');
+  me.armor = 20;
+  assert.ok(m.buy(me, 'heavy'), '닳은 방탄은 새것으로');
+  assert.equal(me.armor, ARMOR.heavy.dur);
+  assert.ok(m.buy(me, 'heavy'), '환불하면 닳은 방탄으로 돌아감');
+  assert.equal(me.armor, 20);
   me.armor = me.armorMax = 0;
+  me.armorKind = null;
+  // 탄종: 이번 라운드 모든 총에. 같은 것을 다시 누르거나 일반탄을 고르면 환불
+  assert.ok(m.buy(me, 'ap'));
+  assert.equal(me.ammo, 'ap');
+  assert.equal(me.credits, 4000 - AMMO.ap.price);
+  assert.ok(m.buy(me, 'hp'), '다른 탄종으로 바꿈');
+  assert.equal(me.ammo, 'hp');
+  assert.equal(me.credits, 4000 - AMMO.hp.price);
+  assert.ok(m.buy(me, 'fmj'), '일반탄 = 환불');
+  assert.equal(me.ammo, 'fmj');
+  assert.equal(me.credits, 4000);
   // 돈이 모자람
   me.credits = 1000;
   let denied = 0;
@@ -78,13 +99,17 @@ test('상점: 크레딧 차감 · 같은 것을 다시 누르면 환불 · 돈�
   // 진행 중에는 못 삼
   m.phase = 'live';
   assert.equal(m.buy(me, 'sheriff'), false);
-  // 보호막 피해 흡수: 소총 몸통 10발(110)은 중량 보호막(150)이면 버팀
+  // 방탄: 소총 일반탄 몸통 10발이면 맨몸은 쓰러지지만 중량 방탄은 버팀 (막히면 충격만, 방탄이 닳음)
   const enemy = m.agents.find((a) => a.team === TEAMS.FORCE);
-  enemy.armor = 50;
-  for (let i = 0; i < 10; i++) m.applyDamage(enemy, WEAPONS.rifle.damage, me);
+  enemy.armor = enemy.armorMax = ARMOR.heavy.dur;
+  enemy.armorKind = 'heavy';
+  let blocked = 0;
+  m.events.on('hit', (e) => e.target === enemy && e.blocked && blocked++);
+  for (let i = 0; i < 10; i++) m.applyDamage(enemy, WEAPONS.rifle.damage, me, { pen: WEAPONS.rifle.pen });
   assert.ok(enemy.alive);
-  assert.equal(enemy.armor, 0);
-  assert.equal(enemy.hp, 40);
+  assert.ok(blocked > 0, '일부는 방탄이 막음');
+  assert.ok(enemy.hp > 0 && enemy.hp < 100);
+  assert.ok(enemy.armor < ARMOR.heavy.dur, '방탄이 닳음');
 });
 
 test('라운드 결과: 점수·크레딧(승리 3000, 패배 1900·2400·2900, 처치 200), 살아남은 요원은 총·방탄 유지', () => {

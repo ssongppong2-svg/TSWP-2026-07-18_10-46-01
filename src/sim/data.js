@@ -12,7 +12,8 @@ export const WEAPONS = {
     kind: '권총',
     auto: false,
     rpm: 400,
-    damage: 10, // 몸통 10발 · 머리 15 → 7발 (보호막 없을 때)
+    damage: 10, // 몸통 10발 · 머리 15 → 7발 (방탄 없을 때)
+    pen: 1, // 관통력 (방탄 등급과 비교, ballistics.js)
     headMult: 1.45,
     falloff: [[30, 0.85]],
     ampBonus: 2,
@@ -47,6 +48,7 @@ export const WEAPONS = {
     auto: false,
     rpm: 240,
     damage: 25, // 몸통 4발 · 머리 35 → 3발
+    pen: 3,
     headMult: 1.4,
     falloff: [[30, 0.85]],
     ampBonus: 4,
@@ -83,6 +85,7 @@ export const WEAPONS = {
     pellets: 12,
     pelletSpread: 0.075,
     damage: 3.5, // 한 알 (반올림 4), 가까이서 몸통에 다 맞으면 48 → 3번
+    pen: 0, // 작은 산탄 알갱이는 방탄을 거의 못 뚫음 (대신 방탄을 빨리 망가뜨림)
     headMult: 1.5,
     falloff: [[8, 0.7], [12, 0.4]],
     ampBonus: 1,
@@ -118,6 +121,7 @@ export const WEAPONS = {
     auto: true,
     rpm: 800,
     damage: 10, // 몸통 10발 · 머리 15 → 7발
+    pen: 2,
     headMult: 1.45,
     falloff: [[20, 0.85]],
     ampBonus: 2,
@@ -152,6 +156,7 @@ export const WEAPONS = {
     auto: true,
     rpm: 585,
     damage: 11, // 몸통 10발 · 머리 16 → 7발 (어느 거리든)
+    pen: 3,
     headMult: 1.45,
     ampBonus: 2,
     magSize: 25,
@@ -187,6 +192,7 @@ export const WEAPONS = {
     scope: true, // 정조준 = 조준경 (화면 확대, 조준하지 않으면 크게 빗나감)
     rpm: 37.5,
     damage: 34, // 몸통 3발 · 머리 51 → 2발
+    pen: 6,
     headMult: 1.5,
     ampBonus: 5,
     magSize: 5,
@@ -222,6 +228,7 @@ export const WEAPONS = {
     kind: '근접',
     melee: true,
     draw: 0.3,
+    pen: 2, // 칼날이 좁은 면적에 힘을 모음
     light: { damage: 25, rate: 0.55, range: 2.1 },
     heavy: { damage: 40, rate: 1.0, range: 1.9 },
     backstabMult: 1.5,
@@ -231,11 +238,22 @@ export const WEAPONS = {
 // 상점에 놓이는 순서 (보조무기 → 주무기 싼 것부터)
 export const SHOP_WEAPONS = ['pistol', 'sheriff', 'shotgun', 'smg', 'rifle', 'sniper'];
 
-// 방탄: 체력 앞에 붙는 보호막 (피해를 먼저 받음). 살아남으면 다음 라운드까지 남음
+// 방탄 (타르코프식): 등급(cls)과 내구도(dur). 탄의 관통력이 등급보다 높을수록 잘 뚫림 (ballistics.js)
+// 막히면 충격만 조금 들어가고 방탄이 닳음, 내구도 0이면 부서짐. 살아남으면 닳은 그대로 다음 라운드까지
 export const ARMOR = {
-  light: { id: 'light', name: '경량 방탄', price: 400, value: 25 },
-  heavy: { id: 'heavy', name: '중량 방탄', price: 1000, value: 50 },
+  light: { id: 'light', name: '경량 방탄조끼', short: '경량', price: 400, cls: 2, dur: 40, helmet: false },
+  heavy: { id: 'heavy', name: '중량 방탄복·헬멧', short: '중량', price: 1000, cls: 4, dur: 70, helmet: true }, // 헬멧이 머리도 막음
 };
+
+// 탄종 (이번 라운드에 가진 모든 총에 장전). pen: 관통력 더하기, dmg: 피해 배율, wear: 방탄을 닳게 하는 배율
+// 과학: 같은 힘이라도 좁은 면적에 모이면 누르는 효과(압력)가 커짐 → 뾰족한 관통탄은 방탄을 뚫고,
+//       맞으면 넓게 퍼지는 확장탄은 방탄은 못 뚫지만 맨몸에는 큰 피해
+export const AMMO = {
+  fmj: { id: 'fmj', name: '일반탄', short: '일반', price: 0, pen: 0, dmg: 1, wear: 1, desc: '기본 지급 탄' },
+  ap: { id: 'ap', name: '관통탄', short: '관통', price: 400, pen: 3, dmg: 1, wear: 1.4, desc: '강철 탄심 · 좁은 면적에 힘이 모여 방탄을 뚫음' },
+  hp: { id: 'hp', name: '확장탄', short: '확장', price: 250, pen: -3, dmg: 1.25, wear: 0.45, desc: '맞으면 넓게 퍼짐 · 방탄은 거의 못 뚫음' },
+};
+export const AMMO_ORDER = ['fmj', 'ap', 'hp'];
 
 // 거리에 따른 피해 배율
 export function falloffAt(w, d) {
@@ -291,7 +309,7 @@ export const PATCHES = {
     cooldown: 18,
     duration: 5,
     short: '총기 공격력 +15% · 5초',
-    desc: '5초간 총알에 같은 방향의 힘을 더한다 (벡터 R-24: 11 → 13). 경량 보호막 상대 몸통 12발 → 10발.',
+    desc: '5초간 총알에 같은 방향의 힘을 더한다 (벡터 R-24: 11 → 13). 맨몸 상대 몸통 10발 → 8발.',
     concept: '합력',
     conceptText: '두 힘이 같은 방향으로 작용하면 합력의 크기는 두 힘의 합이고, 방향은 두 힘의 방향과 같다. 11 N + 2 N = 13 N.',
   },

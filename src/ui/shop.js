@@ -1,16 +1,27 @@
-import { ARMOR, WEAPONS } from '../sim/data.js';
+import { AMMO, ARMOR, WEAPONS } from '../sim/data.js';
 import { CONCEPT_BY_ID } from '../sim/concepts.js';
 import { ECON } from '../sim/constants.js';
 import { GEAR_ICONS, WEAPON_ICONS } from './icons.js';
 
 // 보급 단말기 (구매 시간에 B): 에너지(J)로 장비를 받고, 보급 점검 문제를 맞히면 에너지를 더 받음.
-// 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~8로도 받음.
-const COLS = [
-  { title: '보조무기', items: ['pistol', 'sheriff'] },
-  { title: '근접 화기', items: ['shotgun', 'smg'] },
-  { title: '소총', items: ['rifle'] },
-  { title: '저격총', items: ['sniper'] },
-  { title: '보호막', items: ['light', 'heavy'] },
+// 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~8로도 받음 (총·방탄).
+// 위 줄: 총 (큰 칸) / 아래 줄: 방탄·탄종 (작은 칸)
+const SECTIONS = [
+  {
+    kind: 'big',
+    cols: [
+      { title: '보조무기', items: ['pistol', 'sheriff'] },
+      { title: '근접 화기', items: ['shotgun', 'smg'] },
+      { title: '소총 · 저격총', items: ['rifle', 'sniper'] },
+    ],
+  },
+  {
+    kind: 'small',
+    cols: [
+      { title: '방탄 · 등급과 내구도', items: ['light', 'heavy'] },
+      { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'] },
+    ],
+  },
 ];
 const MARK = ['①', '②', '③', '④'];
 export const SHOP_KEYS = { pistol: 1, sheriff: 2, shotgun: 3, smg: 4, rifle: 5, sniper: 6, light: 7, heavy: 8 };
@@ -18,23 +29,57 @@ const BY_KEY = Object.fromEntries(Object.entries(SHOP_KEYS).map(([k, v]) => [v, 
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const money = (n) => Math.round(n).toLocaleString('en-US');
+const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 
-function itemInfo(id) {
+// 상점 물건 하나의 가격·이름·설명
+export function itemInfo(id) {
   const w = WEAPONS[id];
   if (w) {
     const head = Math.round(w.damage * w.headMult);
     const dmg = w.pellets ? `${w.damage}×${w.pellets}` : `${w.damage}`;
     return {
+      type: 'weapon',
       name: w.name,
       kind: w.kind,
       price: w.price,
       icon: WEAPON_ICONS[id],
-      stats: [`몸통 ${dmg}`, `머리 ${head}`, `${w.auto ? '자동' : '단발'} · ${w.magSize}발`],
+      stats: [`몸통 ${dmg} · 머리 ${head}`, `관통력 ${w.pen ?? 0}`, `${w.auto ? '자동' : '단발'} · ${w.magSize}발`],
     };
   }
   const a = ARMOR[id];
-  return { name: a.name, kind: '보호막', price: a.price, icon: GEAR_ICONS[id], stats: [`보호막 +${a.value}`, '생체보다 먼저 깎임', '살아남으면 유지'] };
+  if (a) {
+    return {
+      type: 'armor',
+      name: a.name,
+      kind: `${a.cls}등급`,
+      price: a.price,
+      icon: GEAR_ICONS[id],
+      stats: [`${a.cls}등급 · 내구 ${a.dur}`, a.helmet ? '몸통 + 머리(헬멧)' : '몸통만 막음'],
+    };
+  }
+  const m = AMMO[id];
+  return {
+    type: 'ammo',
+    name: m.name,
+    kind: '탄종',
+    price: m.price,
+    icon: GEAR_ICONS[id],
+    stats: id === 'fmj' ? ['관통력 그대로', '기본 지급'] : [`관통력 ${signed(m.pen)}${m.dmg !== 1 ? ` · 맨몸 피해 ×${m.dmg}` : ''}`, m.desc],
+  };
 }
+
+const card = (id, small) => {
+  const it = itemInfo(id);
+  const key = SHOP_KEYS[id];
+  return `<button class="shop-item ${small ? 'small' : ''}" data-item="${id}" title="${esc(it.stats.join(' · '))}">
+    ${key ? `<kbd>${key}</kbd>` : ''}
+    <span class="si-badge"></span>
+    <div class="si-icon">${it.icon}</div>
+    <div class="si-name"><b>${esc(it.name)}</b><small>${esc(it.kind)}</small></div>
+    <div class="si-stats">${it.stats.map((x) => `<span>${esc(x)}</span>`).join('')}</div>
+    <div class="si-price">${it.price ? `${money(it.price)} J` : '기본 지급'}</div>
+  </button>`;
+};
 
 export class Shop {
   constructor(root, match, localId, { onBuy, onQuiz } = {}) {
@@ -55,18 +100,10 @@ export class Shop {
           <div class="sh-stat energy"><small>에너지</small><b class="shop-credits">0</b><span>J</span></div>
         </header>
         <div class="shop-body">
-          <div class="shop-cols">${COLS.map((col) => `
-            <div class="shop-col"><h4>${col.title}</h4>${col.items.map((id) => {
-              const it = itemInfo(id);
-              return `<button class="shop-item" data-item="${id}">
-                <kbd>${SHOP_KEYS[id]}</kbd>
-                <span class="si-badge"></span>
-                <div class="si-icon">${it.icon}</div>
-                <div class="si-name"><b>${esc(it.name)}</b><small>${it.kind}</small></div>
-                <div class="si-stats">${it.stats.map((x) => `<span>${x}</span>`).join('')}</div>
-                <div class="si-price">${it.price ? `${money(it.price)} J` : '기본 지급'}</div>
-              </button>`;
-            }).join('')}</div>`).join('')}
+          <div class="shop-main">${SECTIONS.map((sec) => `
+            <div class="shop-cols ${sec.kind}" style="--n:${sec.cols.length}">${sec.cols.map((col) => `
+              <div class="shop-col"><h4>${col.title}</h4><div class="sc-items">${col.items.map((id) => card(id, sec.kind === 'small')).join('')}</div></div>`).join('')}
+            </div>`).join('')}
           </div>
           <aside class="shop-side">
             <section class="shop-quiz"><h4>보급 점검 <span>정답 +${ECON.quiz} J</span></h4><div class="qz-body"></div></section>
@@ -175,20 +212,31 @@ export class Shop {
     this.set('time', t, (v) => (this.timeEl.textContent = `0:${String(v).padStart(2, '0')}`));
     this.set('credits', me.credits, (v) => (this.creditEl.textContent = money(v)));
     const bought = new Set((me.bought ?? []).map((b) => b.item));
+    // 같은 종류(같은 칸의 총 / 방탄 / 탄종)에서 이번에 산 것을 환불하고 살 수 있으면 살 수 있음
+    const priceOf = (item) => itemInfo(item).price;
+    const backFor = (match) => (me.bought ?? []).filter((b) => match(b.item)).reduce((s, b) => s + (b.price ?? priceOf(b.item)), 0);
     for (const [id, btn] of this.items) {
-      const w = WEAPONS[id];
-      const price = w ? w.price : ARMOR[id].price;
-      const owned = w ? me.primary === id || me.secondary === id : me.armor >= ARMOR[id].value && me.armorMax === ARMOR[id].value;
+      const info = itemInfo(id);
+      let owned = false, back = 0, note = '';
+      if (info.type === 'weapon') {
+        const w = WEAPONS[id];
+        owned = me.primary === id || me.secondary === id;
+        back = backFor((x) => WEAPONS[x]?.slot === w.slot);
+      } else if (info.type === 'armor') {
+        const worn = me.armorKind === id && me.armor > 0;
+        owned = worn && me.armor >= ARMOR[id].dur;
+        if (worn && !owned) note = `닳음 ${Math.round(me.armor)}/${ARMOR[id].dur}`;
+        back = backFor((x) => !!ARMOR[x]);
+      } else {
+        owned = (me.ammo ?? 'fmj') === id;
+        back = backFor((x) => !!AMMO[x]);
+      }
       const mine = bought.has(id);
-      // 같은 칸에서 이번에 산 것을 환불하고 살 수 있으면 살 수 있음
-      const slotBack = w
-        ? (me.bought ?? []).filter((b) => WEAPONS[b.item]?.slot === w.slot).reduce((s, b) => s + (b.price ?? WEAPONS[b.item]?.price ?? 0), 0)
-        : (me.bought ?? []).filter((b) => ARMOR[b.item]).reduce((s, b) => s + (b.price ?? ARMOR[b.item]?.price ?? 0), 0);
-      const afford = me.credits + slotBack >= price;
-      const state = mine ? 'mine' : owned ? 'owned' : afford ? 'ok' : 'poor';
-      this.set(`it${id}`, state, (v) => {
-        btn.dataset.state = v;
-        btn.querySelector('.si-badge').textContent = v === 'mine' ? '환불 가능' : v === 'owned' ? '보유' : '';
+      const afford = me.credits + back >= info.price;
+      const state = mine ? 'mine' : owned ? 'owned' : afford ? (note ? 'worn' : 'ok') : 'poor';
+      this.set(`it${id}`, `${state}|${note}`, () => {
+        btn.dataset.state = state;
+        btn.querySelector('.si-badge').textContent = state === 'mine' ? '환불 가능' : state === 'owned' ? (info.type === 'ammo' ? '장전됨' : '보유') : note;
       });
     }
     // 보급 점검 문제 (사람만, 라운드마다 한 문제)
@@ -196,13 +244,13 @@ export class Shop {
     this.set('quiz', q ? `${q.id}|${q.done}|${q.ok}|${q.choice}` : '', () => this.renderQuiz(q));
     // 분대원 에너지·주무기 (보급 계획 맞추기)
     const mates = m.agents.filter((a) => a.team === me.team);
-    const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armor}`).join('|');
+    const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armorKind}:${a.ammo}`).join('|');
     this.set('team', sig, () => {
       this.teamEl.innerHTML = mates.map((a) => `
         <div class="st-row ${a.id === me.id ? 'me' : ''}">
           <b>${esc(a.name)}</b>
           <span class="st-w">${a.primary ? WEAPON_ICONS[a.primary] : WEAPON_ICONS[a.secondary] ?? ''}</span>
-          <span class="st-a">${a.armor > 25 ? GEAR_ICONS.heavy : a.armor > 0 ? GEAR_ICONS.light : ''}</span>
+          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}</span>
           <span class="st-c">${money(a.credits ?? 0)} J</span>
         </div>`).join('');
     });

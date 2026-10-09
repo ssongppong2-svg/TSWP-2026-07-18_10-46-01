@@ -274,10 +274,11 @@ export class GameClient {
       // 내가 맞힘: 조준점 명중 표시 + 명중음 (산탄은 한 번만)
       if (e.attacker && viewing(e.attacker) && e.attacker.team !== e.target.team && (this.hitSoundT <= 0 || e.killed)) {
         this.hitSoundT = 0.03;
-        this.hud.hitmark(e.killed ? 'kill' : e.headshot ? 'head' : 'hit');
-        if (!e.killed) A.play(e.headshot ? 'headshot' : e.armor ? 'armorHit' : 'hit');
-        // 보호막(방탄)이 이번 탄으로 다 깨짐
-        if (e.armor && !e.killed && (e.target.armor ?? 0) <= 0) A.play('armorBreak');
+        // 방탄이 막은 탄은 회색 표시 + 쇳소리, 뚫은 탄은 보통 명중
+        this.hud.hitmark(e.killed ? 'kill' : e.blocked ? 'block' : e.headshot ? 'head' : 'hit');
+        if (!e.killed) A.play(e.blocked ? 'armorHit' : e.headshot ? 'headshot' : 'hit');
+        // 방탄이 이번 탄으로 부서짐
+        if (e.armorBroke && !e.killed) A.play('armorBreak');
       }
       // 내가 맞음: 맞은 방향 표시 + 짧은 충격
       if (viewing(e.target)) {

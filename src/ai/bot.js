@@ -1,7 +1,7 @@
 import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
 import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
 import { TEAMS } from '../sim/constants.js';
-import { ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
+import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 
 export const DIFFICULTY = {
   easy: { name: '신병', reaction: 0.65, aimError: 0.08, turnSpeed: 4.5, headChance: 0.06, burst: [2, 3], lead: 0.3, recoilComp: 0.4, patchSkill: 0.45, holdFireVeil: false, hearing: 0.75 },
@@ -777,13 +777,17 @@ export function botBuy(match, a, plan, rng) {
   if (!match.rounds || match.phase !== 'buy') return;
   const pistolRound = match.round === 1 || match.round === 7;
   const buy = (id) => match.buy(a, id);
+  // 입고 있는 방탄이 같은 등급 이상이고 반 넘게 남았으면 그대로
   const armorTo = (want) => {
-    if (a.armor >= ARMOR[want].value) return;
+    const have = a.armor > 0 ? ARMOR[a.armorKind] : null;
+    if (have && have.cls >= ARMOR[want].cls && a.armor >= ARMOR[want].dur * 0.5) return;
     if (a.credits >= ARMOR[want].price) buy(want);
   };
   if (pistolRound) {
     if (rng.chance(0.5)) buy('sheriff');
     else armorTo('light');
+    // 첫 라운드는 상대 방탄이 거의 없으므로 확장탄을 가끔
+    if (a.credits >= AMMO.hp.price && rng.chance(0.35)) buy('hp');
     return;
   }
   if (!a.primary) {
@@ -800,6 +804,8 @@ export function botBuy(match, a, plan, rng) {
   }
   if (a.credits >= ARMOR.heavy.price + (plan === 'eco' ? 1500 : 0)) armorTo('heavy');
   else if (plan !== 'eco' || a.credits >= 1800) armorTo('light');
+  // 남는 에너지로 관통탄 (상대가 방탄을 살 만한 라운드)
+  if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 300 && rng.chance(plan === 'full' ? 0.55 : 0.3)) buy('ap');
 }
 
 // 팀별로 봇 두뇌 붙이기 + 라운드 단위 작전 계획(해체팀 진입 시각·방식, 구매)

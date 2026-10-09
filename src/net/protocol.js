@@ -7,12 +7,13 @@
 import { emptyIntent, freshAmmo } from '../sim/agent.js';
 import { CONCEPTS } from '../sim/concepts.js';
 import { PROJECTILE } from '../sim/constants.js';
-import { WEAPONS } from '../sim/data.js';
+import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
-const ITEMS = [...WEAP, 'light', 'heavy']; // 상점에서 사는 것
+const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
+const ARMOR_KINDS = [null, 'light', 'heavy'];
 const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
 const REASONS = ['폭탄 2기 해체 완료', '해체팀 전원 제압', '포스팀 전원 제압', '제한 시간 종료 — 폭탄 폭발'];
 const BOMB_STATES = ['armed', 'defused', 'exploded'];
@@ -122,6 +123,7 @@ export class HostSync {
         r2(Math.max(0, a.revealedUntil - m.time)), a.held?.zoneId ?? 0, a.lockpick ? (a.lockpick.bombId === 'A' ? 1 : 2) : 0,
         Math.round(a.armor ?? 0), r2(Math.max(-1, Math.min(9, m.time - a.spottedT))),
         a.primary ? WEAP.indexOf(a.primary) : -1, WEAP.indexOf(a.secondary ?? 'pistol'),
+        Math.max(0, ARMOR_KINDS.indexOf(a.armorKind ?? null)),
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
@@ -133,6 +135,7 @@ export class HostSync {
         m: [...ammo(a.primary), ...ammo(a.secondary)],
         $: a.credits ?? 0,
         am: a.armorMax ?? 0,
+        ao: Math.max(0, AMMO_ORDER.indexOf(a.ammo ?? 'fmj')),
         bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
         u: Math.round(a.ult),
@@ -209,12 +212,13 @@ export class ClientSync {
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
       a.hp = hp;
       a.armor = armor ?? 0;
+      a.armorKind = ARMOR_KINDS[ak] ?? null;
       a.team = flags & 32 ? 'force' : 'defuse';
       a.spottedT = spotted >= 0 ? m.time - spotted : -99;
       a.mired = !!(flags & 4);
@@ -281,6 +285,7 @@ export class ClientSync {
       setAmmo(sec, sm, sr);
       a.credits = h.$ ?? 0;
       a.armorMax = h.am ?? 0;
+      a.ammo = AMMO_ORDER[h.ao] ?? 'fmj';
       a.bought = (h.bt ?? []).map((k) => ({ item: ITEMS[k] }));
       h.pc.forEach((p, i) => {
         const mine = a.patches[i];
