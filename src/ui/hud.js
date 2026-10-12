@@ -1,4 +1,5 @@
-import { TEAM_INFO, TEAMS, BOMB, ULT } from '../sim/constants.js';
+import { TEAM_INFO, TEAMS, BOMB, LOAD, ULT } from '../sim/constants.js';
+import { carriedMass, loadFactors } from '../sim/agent.js';
 import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
 import { COMMANDS } from '../client/input.js';
@@ -72,6 +73,7 @@ export class Hud {
       <div class="vh-vitals">
         <div class="vt-row hp"><small>생체</small><b class="vt-num">100</b><div class="vt-bar"><i></i></div></div>
         <div class="vt-row ar"><small class="va-lbl">방탄</small><b class="vt-num">0</b><div class="vt-bar"><i></i></div><span class="va-icon"></span></div>
+        <div class="vt-row st"><small>지구력</small><div class="vt-bar"><i></i></div><span class="vt-load"></span></div>
       </div>
       <div class="hud-bottom"><div class="patch-bar"></div></div>
       <div class="vh-weapon">
@@ -122,6 +124,9 @@ export class Hud {
       armor: $('.vt-row.ar'),
       armorIcon: $('.va-icon'),
       armorLbl: $('.va-lbl'),
+      stamina: $('.vt-row.st'),
+      staminaBar: $('.vt-row.st .vt-bar i'),
+      load: $('.vt-load'),
       armorNum: $('.vt-row.ar .vt-num'),
       armorBar: $('.vt-row.ar .vt-bar i'),
       hp: $('.vt-row.hp'),
@@ -377,6 +382,20 @@ export class Hud {
     this.set('armorKind', kind?.id ?? 'none', (v) => {
       E.armorIcon.innerHTML = GEAR_ICONS[v] ?? '';
       E.armorLbl.innerHTML = kind ? `방탄<em>${kind.cls}등급${kind.helmet ? '·헬멧' : ''}</em>` : '방탄';
+    });
+
+    // 지구력 · 장비 무게 (질량 kg과 무게 N = 질량 × 9.8)
+    const st = a.alive ? Math.round(a.stamina ?? 100) : 0;
+    this.set('stamina', `${st}|${a.tired ? 1 : 0}`, () => {
+      E.staminaBar.style.transform = `scaleX(${st / 100})`;
+      E.stamina.dataset.level = a.tired ? 'tired' : st < 30 ? 'low' : 'ok';
+    });
+    const mass = carriedMass(a);
+    this.set('load', Math.round(mass * 10), () => {
+      const f = loadFactors(mass);
+      E.load.textContent = `${mass.toFixed(1)} kg · ${Math.round(mass * LOAD.g)} N`;
+      E.load.title = f.over > 0 ? `무거움: 이동 ${Math.round((1 - f.speed) * 100)}% 느림 · 출발·멈춤이 둔함(관성)` : '가벼움';
+      E.load.classList.toggle('heavy', f.over > 0);
     });
 
     // 탄약·무기

@@ -8,6 +8,7 @@ export const WEAPONS = {
     id: 'pistol',
     slot: 'secondary',
     price: 0,
+    mass: 0.9, // kg (무게 = 질량 × 9.8 N)
     name: '뉴턴 P-1',
     kind: '권총',
     auto: false,
@@ -43,6 +44,7 @@ export const WEAPONS = {
     id: 'sheriff',
     slot: 'secondary',
     price: 800,
+    mass: 1.4, // kg (무게 = 질량 × 9.8 N)
     name: '줄 M-6',
     kind: '리볼버',
     auto: false,
@@ -78,6 +80,7 @@ export const WEAPONS = {
     id: 'shotgun',
     slot: 'primary',
     price: 900,
+    mass: 3.4, // kg (무게 = 질량 × 9.8 N)
     name: '탄성 SG-12',
     kind: '산탄총',
     auto: false,
@@ -116,6 +119,7 @@ export const WEAPONS = {
     id: 'smg',
     slot: 'primary',
     price: 1600,
+    mass: 2.7, // kg (무게 = 질량 × 9.8 N)
     name: '가속 SMG-9',
     kind: '기관단총',
     auto: true,
@@ -151,6 +155,7 @@ export const WEAPONS = {
     id: 'rifle',
     slot: 'primary',
     price: 2900,
+    mass: 3.6, // kg (무게 = 질량 × 9.8 N)
     name: '벡터 R-24',
     kind: '소총',
     auto: true,
@@ -186,6 +191,7 @@ export const WEAPONS = {
     id: 'sniper',
     slot: 'primary',
     price: 4700,
+    mass: 6.2, // kg (무게 = 질량 × 9.8 N)
     name: '중력 OP-1',
     kind: '저격총',
     auto: false,
@@ -224,6 +230,7 @@ export const WEAPONS = {
     id: 'knife',
     slot: 'melee',
     price: 0,
+    mass: 0.3, // kg (무게 = 질량 × 9.8 N)
     name: '전술 나이프',
     kind: '근접',
     melee: true,
@@ -241,8 +248,8 @@ export const SHOP_WEAPONS = ['pistol', 'sheriff', 'shotgun', 'smg', 'rifle', 'sn
 // 방탄 (타르코프식): 등급(cls)과 내구도(dur). 탄의 관통력이 등급보다 높을수록 잘 뚫림 (ballistics.js)
 // 막히면 충격만 조금 들어가고 방탄이 닳음, 내구도 0이면 부서짐. 살아남으면 닳은 그대로 다음 라운드까지
 export const ARMOR = {
-  light: { id: 'light', name: '경량 방탄조끼', short: '경량', price: 400, cls: 2, dur: 40, helmet: false },
-  heavy: { id: 'heavy', name: '중량 방탄복·헬멧', short: '중량', price: 1000, cls: 4, dur: 70, helmet: true }, // 헬멧이 머리도 막음
+  light: { id: 'light', name: '경량 방탄조끼', short: '경량', price: 400, cls: 2, dur: 40, helmet: false, mass: 3.2 },
+  heavy: { id: 'heavy', name: '중량 방탄복·헬멧', short: '중량', price: 1000, cls: 4, dur: 70, helmet: true, mass: 9.5 }, // 헬멧이 머리도 막음
 };
 
 // 탄종 (이번 라운드에 가진 모든 총에 장전). pen: 관통력 더하기, dmg: 피해 배율, wear: 방탄을 닳게 하는 배율
@@ -250,7 +257,7 @@ export const ARMOR = {
 //       맞으면 넓게 퍼지는 확장탄은 방탄은 못 뚫지만 맨몸에는 큰 피해
 export const AMMO = {
   fmj: { id: 'fmj', name: '일반탄', short: '일반', price: 0, pen: 0, dmg: 1, wear: 1, desc: '기본 지급 탄' },
-  ap: { id: 'ap', name: '관통탄', short: '관통', price: 400, pen: 3, dmg: 1, wear: 1.4, desc: '강철 탄심 · 좁은 면적에 힘이 모여 방탄을 뚫음' },
+  ap: { id: 'ap', name: '관통탄', short: '관통', price: 500, pen: 2, dmg: 1, wear: 1.25, desc: '강철 탄심 · 좁은 면적에 힘이 모여 방탄을 뚫음' },
   hp: { id: 'hp', name: '확장탄', short: '확장', price: 250, pen: -3, dmg: 1.25, wear: 0.45, desc: '맞으면 넓게 퍼짐 · 방탄은 거의 못 뚫음' },
 };
 export const AMMO_ORDER = ['fmj', 'ap', 'hp'];

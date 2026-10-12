@@ -591,6 +591,16 @@ export class GameClient {
         this.audio.play('heartbeat', { vol: 0.4 + damage * 0.6 });
       }
     }
+    // 지구력이 바닥나면 숨이 가쁨 (지칠수록 크게, 빠르게)
+    const stam = va === this.player && va.alive ? va.stamina ?? 100 : 100;
+    if (this.started && !this.paused && (stam < 30 || va.tired)) {
+      this.breathT = (this.breathT ?? 0) - dt;
+      if (this.breathT <= 0) {
+        const k = va.tired ? 1 : 1 - stam / 30;
+        this.breathT = 1.25 - k * 0.35;
+        this.audio.play('breath', { vol: 0.45 + k * 0.55 });
+      }
+    }
     this.stage.render(dt);
   }
 

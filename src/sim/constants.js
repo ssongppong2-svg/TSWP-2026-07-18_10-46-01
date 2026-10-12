@@ -91,6 +91,31 @@ export const PLAYER = {
   quietSpeed: 3.0, // 이보다 느리면 발소리가 거의 나지 않음 (보행·앉아 걷기)
 };
 
+// 장비 무게 (타르코프식): 들고 있는 장비의 질량(kg)이 base를 넘으면 느려지고, 무거울수록 출발·멈춤이 둔해짐(관성)
+// 무게(N) = 질량(kg) × 9.8. 화면에는 둘 다 보여 줌
+export const LOAD = {
+  g: 9.8,
+  base: 8, // 이 질량까지는 느려지지 않음 (권총·소총·경량 조끼 정도)
+  speedPerKg: 0.01,
+  minSpeed: 0.85,
+  inertiaPerKg: 0.025, // 1 kg 더할 때마다 가속·감속이 2.5% 둔해짐
+  minAccel: 0.62,
+};
+
+// 지구력: 달리기·점프에 씀, 다 떨어지면 지쳐서 느려지고 점프 불가 (recover까지 차야 회복)
+export const STAMINA = {
+  max: 100,
+  runDrain: 4, // 달리는 동안 초당
+  jumpCost: 12,
+  regen: 11, // 걷거나 멈춰 있을 때 초당 (regenDelay초 뒤부터)
+  regenDelay: 0.8,
+  perKg: 0.05, // base보다 1 kg 무거울 때마다 소모 5% 증가
+  tiredSpeed: 0.78,
+  recover: 25,
+  swayBelow: 30, // 이보다 적으면 숨이 차서 조준이 흔들림
+  sway: 0.012,
+};
+
 // 소리: 적이 들을 수 있는 거리(m). 정보는 소리로만 얻는다.
 export const NOISE = {
   rifle: 75,

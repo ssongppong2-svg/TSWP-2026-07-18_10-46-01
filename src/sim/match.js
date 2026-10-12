@@ -3,7 +3,7 @@ import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
 import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, TEAM_SIZE, TEAMS, ULT, otherTeam,
+  BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, STAMINA, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
@@ -257,6 +257,8 @@ export class Match {
       a.sprayIndex = 0;
       a.ampT = a.bounceT = a.tagT = 0;
       a.crouch = a.lean = a.leanOffset = 0;
+      a.stamina = STAMINA.max;
+      a.tired = false;
       a.onGround = true;
       a.revealedUntil = a.lastHurtT = a.spottedT = -99;
       a.lastHurtBy = null;
@@ -478,6 +480,11 @@ export class Match {
       if (this.phaseT <= 0) {
         this.phase = 'live';
         this.liveAt = this.time;
+        // 구매 시간에 뛰어다녀 닳은 지구력은 교전 시작 때 다시 가득
+        for (const a of this.agents) {
+          a.stamina = STAMINA.max;
+          a.tired = false;
+        }
         this.emit('roundStart', { round: this.round });
       }
     } else if (this.phase === 'roundEnd') {
@@ -780,6 +787,8 @@ export class Match {
     let spread = w.spreadBase + a.bloom + w.spreadMove * moveFactor(a) + (!a.onGround ? w.spreadAir : 0);
     spread *= (1 + (w.adsSpread - 1) * a.adsT) * (1 + (w.crouchSpread - 1) * a.crouch);
     if (a.held) spread += w.spreadMove * 0.5;
+    // 숨이 차면 조준이 흔들림 (지구력이 바닥날수록)
+    if ((a.stamina ?? STAMINA.max) < STAMINA.swayBelow) spread += ((STAMINA.swayBelow - a.stamina) / STAMINA.swayBelow) * STAMINA.sway;
     const aim = dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch);
     const amp = a.ampT > 0 && (w.ampBonus ?? 0) > 0;
     const ammo = AMMO[a.ammo] ?? AMMO.fmj;

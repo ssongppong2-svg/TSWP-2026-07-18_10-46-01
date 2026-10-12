@@ -804,8 +804,8 @@ export function botBuy(match, a, plan, rng) {
   }
   if (a.credits >= ARMOR.heavy.price + (plan === 'eco' ? 1500 : 0)) armorTo('heavy');
   else if (plan !== 'eco' || a.credits >= 1800) armorTo('light');
-  // 남는 에너지로 관통탄 (상대가 방탄을 살 만한 라운드)
-  if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 300 && rng.chance(plan === 'full' ? 0.55 : 0.3)) buy('ap');
+  // 다음 라운드를 위해 900 J는 남기고, 남는 에너지로 가끔 관통탄 (상대가 방탄을 살 만한 라운드)
+  if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 900 && rng.chance(plan === 'full' ? 0.35 : 0.15)) buy('ap');
 }
 
 // 팀별로 봇 두뇌 붙이기 + 라운드 단위 작전 계획(해체팀 진입 시각·방식, 구매)

@@ -710,6 +710,12 @@ const SOUNDS = {
     a.tone(o, t, 0.12, { type: 'sine', freq: 58, to: 40, gain: 1 });
     a.tone(o, t + 0.18, 0.1, { type: 'sine', freq: 52, to: 38, gain: 0.7 });
   },
+  // 숨 가쁨 (지구력이 바닥날 때): 들이쉼(올라가는 바람 소리) → 내쉼(내려가는 바람 소리)
+  breath(a, t, pos, vol) {
+    const o = a.out(null, 0.32 * vol, 1.2, 0);
+    a.noise(o, t, 0.34, { type: 'bandpass', freq: 700, q: 1.4, gain: 0.5, attack: 0.12, sweepTo: 1300 });
+    a.noise(o, t + 0.45, 0.42, { type: 'bandpass', freq: 1100, q: 1.2, gain: 0.6, attack: 0.05, sweepTo: 520 });
+  },
   death(a, t) {
     const o = a.out(null, 0.5, 2.2, 0.2);
     a.tone(o, t, 1.8, { type: 'sine', freq: 90, to: 40, gain: 0.5 });

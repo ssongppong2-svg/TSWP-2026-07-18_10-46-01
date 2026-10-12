@@ -136,6 +136,7 @@ export class HostSync {
         $: a.credits ?? 0,
         am: a.armorMax ?? 0,
         ao: Math.max(0, AMMO_ORDER.indexOf(a.ammo ?? 'fmj')),
+        sp: Math.round(a.stamina ?? 100),
         bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
         u: Math.round(a.ult),
@@ -286,6 +287,11 @@ export class ClientSync {
       a.credits = h.$ ?? 0;
       a.armorMax = h.am ?? 0;
       a.ammo = AMMO_ORDER[h.ao] ?? 'fmj';
+      // 지구력: 이 화면도 같은 규칙으로 계산하므로 많이 어긋날 때만 맞춤
+      if (h.sp != null && Math.abs(h.sp - (a.stamina ?? 100)) > 8) {
+        a.stamina = h.sp;
+        if (h.sp <= 0) a.tired = true;
+      }
       a.bought = (h.bt ?? []).map((k) => ({ item: ITEMS[k] }));
       h.pc.forEach((p, i) => {
         const mine = a.patches[i];

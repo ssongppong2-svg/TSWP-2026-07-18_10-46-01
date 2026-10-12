@@ -2341,6 +2341,20 @@ button {
   color: var(--muted);
 }
 
+.sf-load {
+  margin-left: auto;
+  color: var(--text);
+}
+
+.sf-load b {
+  font-weight: 600;
+}
+
+.sf-load em {
+  font-style: normal;
+  color: var(--warn);
+}
+
 .shop-cursor {
   position: absolute;
   left: 0;
@@ -4290,6 +4304,34 @@ button {
   letter-spacing: 0.02em;
   color: var(--instr);
   white-space: nowrap;
+}
+
+/* 지구력 막대 + 장비 무게 */
+.hud .vt-row.st {
+  grid-template-columns: 46px 1fr auto;
+}
+
+.hud .vt-row.st .vt-bar {
+  height: 3px;
+}
+
+.hud .vt-row.st .vt-bar i {
+  background: #a9c7a0;
+  transition: transform 0.15s linear;
+}
+
+.hud .vt-row.st[data-level='low'] .vt-bar i { background: var(--warn); }
+.hud .vt-row.st[data-level='tired'] .vt-bar i { background: var(--bad); }
+.hud .vt-row.st[data-level='tired'] small { color: var(--bad); }
+
+.hud .vt-load {
+  font: 500 9.5px var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hud .vt-load.heavy {
+  color: var(--warn);
 }
 
 .hud .vt-row.ar.none {

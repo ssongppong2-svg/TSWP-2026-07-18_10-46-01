@@ -1,6 +1,6 @@
 import { SLIDE } from './devices.js';
-import { PLAYER, ULT } from './constants.js';
-import { LOADOUT_SLOTS, WEAPONS } from './data.js';
+import { LOAD, PLAYER, STAMINA, ULT } from './constants.js';
+import { ARMOR, LOADOUT_SLOTS, WEAPONS } from './data.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -14,6 +14,23 @@ export function giveWeapon(a, id) {
   if (old && old !== id) delete a.weapons[old];
   a[w.slot] = id;
   a.weapons[id] = freshAmmo(id);
+}
+
+// 들고 있는 장비의 질량 (kg): 총 + 방탄 + 투척·장비
+export function carriedMass(a) {
+  let m = 0;
+  for (const id in a.weapons ?? {}) m += WEAPONS[id]?.mass ?? 0;
+  if ((a.armor ?? 0) > 0) m += ARMOR[a.armorKind]?.mass ?? 0;
+  for (const id in a.gear ?? {}) m += (a.gear[id] ?? 0) * (GEAR_MASS[id] ?? 0);
+  return m;
+}
+// 투척·장비 한 개의 질량 (kg) — 장비 정의(gear.js)가 채움
+export const GEAR_MASS = {};
+
+// 질량에 따른 이동 배율 (속도, 가속)
+export function loadFactors(mass) {
+  const over = Math.max(0, mass - LOAD.base);
+  return { speed: Math.max(LOAD.minSpeed, 1 - over * LOAD.speedPerKg), accel: Math.max(LOAD.minAccel, 1 - over * LOAD.inertiaPerKg), over };
 }
 
 // 플레이어와 봇이 똑같이 쓰는 "요원" 데이터. 조종은 controller(사람 입력 / 봇 AI / 나중엔 네트워크)가 한다.
@@ -48,6 +65,9 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     armorMax: 0,
     armorKind: null, // 'light' | 'heavy' (등급·헬멧)
     ammo: 'fmj', // 이번 라운드 탄종 (AMMO)
+    stamina: STAMINA.max, // 지구력 (달리기·점프)
+    tired: false, // 지구력이 바닥나 지친 상태
+    restT: 0,
     credits: 0,
     fireCd: 0,
     reloadT: 0,
@@ -130,7 +150,26 @@ export function moveSpeed(a, intent) {
   if (Math.abs(a.lean) > 0.3) s *= P.leanSpeedMult;
   if (a.tagT > 0) s *= P.tagSlow;
   if (a.mired) s *= P.miredMult;
+  // 무거운 장비 · 지침
+  s *= loadFactors(carriedMass(a)).speed;
+  if (a.tired) s *= STAMINA.tiredSpeed;
   return s;
+}
+
+// 지구력: 달리면 줄고(무거울수록 빨리), 걷거나 멈추면 잠시 뒤 다시 참
+function stepStamina(agent, intent, dt, over) {
+  const S = STAMINA;
+  const hs = Math.hypot(agent.vel.x, agent.vel.z);
+  const running = agent.onGround && hs > PLAYER.quietSpeed && !intent.walk;
+  if (running) {
+    agent.stamina = Math.max(0, agent.stamina - S.runDrain * (1 + over * S.perKg) * dt);
+    agent.restT = 0;
+  } else {
+    agent.restT = (agent.restT ?? 0) + dt;
+    if (agent.restT > S.regenDelay) agent.stamina = Math.min(S.max, agent.stamina + S.regen * dt);
+  }
+  if (agent.stamina <= 0) agent.tired = true;
+  else if (agent.tired && agent.stamina >= S.recover) agent.tired = false;
 }
 
 // 이동 물리: 관성 있는 가속·감속, 앉기·기울이기, 중력, 벽 충돌
@@ -199,6 +238,8 @@ export function stepMovement(agent, intent, map, dt, canMove) {
   // 밀려는 방향 (상자 밀기에 씀)
   agent.wish = { x: wx, z: wz };
   const speed = moveSpeed(agent, intent);
+  // 관성: 무거울수록 빨라지는 데도, 멈추는 데도 오래 걸림
+  const load = loadFactors(carriedMass(agent));
 
   const slide = agent.onGround ? map.slideAt?.(agent.pos.x, agent.pos.z) : null;
   if (slide) {
@@ -224,13 +265,15 @@ export function stepMovement(agent, intent, map, dt, canMove) {
       // 원하는 속도로 다가가되, 빨라질 때는 accel, 느려질 때는 decel 비율 (관성)
       const tx = wx * speed, tz = wz * speed;
       const speeding = tx * vel.x + tz * vel.z > 0 && Math.hypot(tx, tz) >= Math.hypot(vel.x, vel.z);
-      const k = 1 - Math.exp(-(speeding ? P.accel : P.decel) * dt);
+      const k = 1 - Math.exp(-(speeding ? P.accel : P.decel) * load.accel * dt);
       vel.x += (tx - vel.x) * k;
       vel.z += (tz - vel.z) * k;
     }
-    if (canMove && intent.jump && agent.crouch < 0.5 && !agent.mired) {
+    if (canMove && intent.jump && agent.crouch < 0.5 && !agent.mired && !agent.tired) {
       vel.y = P.jumpSpeed;
       agent.onGround = false;
+      agent.stamina = Math.max(0, (agent.stamina ?? STAMINA.max) - STAMINA.jumpCost * (1 + load.over * STAMINA.perKg));
+      agent.restT = 0;
     }
   } else if (ml > 0.01) {
     // 공중: 원하는 방향으로 약간만 조종. 탄성판으로 얻은 빠른 속도는 유지.
@@ -245,6 +288,7 @@ export function stepMovement(agent, intent, map, dt, canMove) {
     }
   }
 
+  if (agent.alive) stepStamina(agent, intent, dt, load.over);
   vel.y -= P.gravity * dt;
 
   agent.pos.x += vel.x * dt;
