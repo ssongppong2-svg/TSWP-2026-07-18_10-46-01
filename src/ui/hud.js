@@ -87,7 +87,10 @@ export class Hud {
       <div class="drone-hud"><div class="dh-frame"><i></i><i></i><i></i><i></i></div><div class="dh-box"></div>
         <div class="dh-top"><b>정찰 드론 · 라이브</b><span class="dh-bat"><i></i></span><em class="dh-sec"></em></div>
         <div class="dh-keys"><kbd>WASD</kbd> 이동 <kbd>Space</kbd> 위 <kbd>Ctrl</kbd> 아래 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>F</kbd> 복귀</div></div>
-      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
+      <div class="mirror-hud"><div class="mh-lens"></div><div class="mh-box"></div>
+        <div class="mh-top"><b>문 밑 카메라</b><span>광각 · 건너편</span></div>
+        <div class="mh-keys"><kbd>마우스</kbd> 둘러보기 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>F</kbd>·이동 거두기</div></div>
+      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치·문 <kbd>F</kbd> 길게 문 행동 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
@@ -151,6 +154,7 @@ export class Hud {
       ammoType: $('.am-type'),
       gear: $('.vw-gear'),
       drone: $('.drone-hud'),
+      mirror: $('.mirror-hud'),
       droneBat: $('.dh-bat i'),
       droneSec: $('.dh-sec'),
       toast: $('.concept-toast'),
@@ -194,13 +198,8 @@ export class Hud {
       return { slot, cd: slot.querySelector('.ps-cd'), num: slot.querySelector('.ps-num') };
     });
 
-    // 지휘 휠
-    this.els.wheel.innerHTML = `<div class="cw-center">지휘</div>${COMMANDS.map((c, i) => {
-      const r = 120;
-      const x = Math.cos((c.angle * Math.PI) / 180) * r, y = Math.sin((c.angle * Math.PI) / 180) * r;
-      return `<div class="cw-item" data-i="${i}" style="transform: translate(calc(-50% + ${x.toFixed(0)}px), calc(-50% + ${y.toFixed(0)}px))"><kbd>${c.key}</kbd><b>${c.label}</b><small>${c.sub}</small></div>`;
-    }).join('')}`;
-    this.wheelItems = [...this.els.wheel.querySelectorAll('.cw-item')];
+    // 지휘 휠 (G) · 문 행동 휠 (문 앞에서 F 길게)
+    this.renderWheel({ title: '지휘', items: COMMANDS });
 
     this.miniMap = new TacticalMap(this.$('.vh-minimap canvas'), match, localId, { scale: 5, mini: true });
     this.tacMap = new TacticalMap(this.els.tacMap.querySelector('canvas'), match, localId, { scale: Math.max(7, Math.min(12, Math.floor((window.innerHeight - 180) / match.map.rows))) });
@@ -215,6 +214,21 @@ export class Hud {
     this.killT = 0;
     this.hintT = 16;
     this.shownConcepts = new Set();
+  }
+
+  // 휠 항목 그리기 (항목·켜짐이 바뀔 때만 다시)
+  renderWheel(def) {
+    const key = `${def.title}|${def.items.map((c) => `${c.label}${c.sub}${c.off ? 0 : 1}`).join('|')}`;
+    if (this.wheelKey === key) return;
+    this.wheelKey = key;
+    this.els.wheel.dataset.kind = def.title === '지휘' ? 'cmd' : 'door';
+    this.els.wheel.innerHTML = `<div class="cw-center">${esc(def.title)}</div>${def.items.map((c, i) => {
+      const r = 120;
+      const x = Math.cos((c.angle * Math.PI) / 180) * r, y = Math.sin((c.angle * Math.PI) / 180) * r;
+      return `<div class="cw-item${c.off ? ' off' : ''}" data-i="${i}" style="transform: translate(calc(-50% + ${x.toFixed(0)}px), calc(-50% + ${y.toFixed(0)}px))"><kbd>${c.key}</kbd><b>${esc(c.label)}</b><small>${esc(c.sub)}</small></div>`;
+    }).join('')}`;
+    this.wheelItems = [...this.els.wheel.querySelectorAll('.cw-item')];
+    if (this.cache) this.cache.wheelSel = undefined; // 새 항목에 선택 표시를 다시 칠함
   }
 
   set(key, value, fn) {
@@ -492,7 +506,13 @@ export class Hud {
         E.drone.classList.toggle('low', v <= 5);
       });
     }
-    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen || drone), (v) => E.crosshair.classList.toggle('hide', v));
+    // 문 밑 카메라 화면
+    const mirror = !!a.mirror && a.alive;
+    this.set('mirror', mirror, (v) => {
+      E.mirror.classList.toggle('show', v);
+      this.root.classList.toggle('mirroring', v);
+    });
+    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen || drone || mirror), (v) => E.crosshair.classList.toggle('hide', v));
     this.hitT -= dt;
     if (this.hitT <= 0) E.hitmarker.classList.remove('show');
 
@@ -507,8 +527,18 @@ export class Hud {
       // 지렛대 (지레 셔터)
       const lever = !near && m.devices?.leverAt(a);
       if (lever) prompt = `<kbd>F</kbd> ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
+      // 문: 열기·닫기 · 길게 누르면 문 행동 (잠긴 문은 발차기·폭약·산탄총)
+      const door = !near && !lever && !a.mirror && m.doors?.doorAt(a);
+      if (door) {
+        const o = m.doors.options(a, door);
+        const what = door.mat === 'steel' ? '철문' : '문';
+        if (o.locked && o.closed) prompt = `잠긴 ${what} · <kbd>F</kbd> 길게: 발차기 · 폭약 · 문 밑 카메라 <small>(산탄총으로 손잡이 쪽을 쏘면 자물쇠가 부서짐)</small>`;
+        else if (o.open) prompt = `<kbd>F</kbd> ${what} 닫기 · <kbd>F</kbd> 길게: 살짝 닫기`;
+        else if (o.cracked) prompt = `<kbd>F</kbd> 활짝 열기 · <kbd>F</kbd> 길게: 살짝 닫기 · 발차기`;
+        else prompt = `<kbd>F</kbd> ${what} 열기 · <kbd>F</kbd> 길게: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약`;
+      }
       // 미는 상자: 붙어서 밀고 있으면 합력 표시
-      if (!near && !lever) {
+      if (!near && !lever && !door) {
         const crate = m.devices?.list.find((d) => d.type === 'crate' && d.st.pushers > 0 && Math.hypot(a.pos.x - m.map.cellX(d.st.c), a.pos.z - m.map.cellZ(d.st.r)) < 1.7);
         if (crate) prompt = `상자 미는 중 · 합력 ${crate.st.pushers}명 <small>(같은 방향으로 함께 밀면 더 빨리)</small>`;
       }
@@ -525,8 +555,10 @@ export class Hud {
       else if ((a.stunT ?? 0) > 0.3) prompt = '이명 · 귀가 울리고 조준이 흔들림';
       else if ((a.gasT ?? 0) > 0) prompt = '최루 가스 · 빠져나가야 함';
     }
+    if (wheel) prompt = ''; // 휠이 열려 있으면 안내는 숨김 (겹치지 않게)
     this.set('prompt', prompt, (v) => {
-      E.prompt.innerHTML = v;
+      // 사라질 때는 글자를 그대로 둔 채 흐려짐 (빈 상자가 남지 않게)
+      if (v) E.prompt.innerHTML = v;
       E.prompt.classList.toggle('show', !!v);
     });
     this.set('exposed', a.alive && a.revealedUntil > m.time, (v) => E.exposed.classList.toggle('show', v));
@@ -545,9 +577,10 @@ export class Hud {
       this.root.classList.toggle('spectating', !!v);
     });
 
-    // 지휘 휠
+    // 지휘 휠 · 문 행동 휠: wheel = { title, items, sel }
+    if (wheel) this.renderWheel(wheel);
     this.set('wheelOpen', wheel !== null, (v) => E.wheel.classList.toggle('show', v));
-    this.set('wheelSel', wheel, (v) => this.wheelItems.forEach((it, i) => it.classList.toggle('on', i === v)));
+    this.set('wheelSel', wheel ? wheel.sel : null, (v) => this.wheelItems.forEach((it, i) => it.classList.toggle('on', i === v)));
 
     // 미니맵 (초당 약 12번) · 작전 지도 (M)
     this.miniT -= dt;

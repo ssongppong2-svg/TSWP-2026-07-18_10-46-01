@@ -2630,6 +2630,20 @@ button {
   background: color-mix(in srgb, var(--team) 22%, rgba(14, 16, 19, 0.95));
 }
 
+/* 문 행동 휠: 지금 못 하는 행동은 흐리게 (골라도 실행 안 됨) */
+.cw-item.off {
+  opacity: 0.42;
+}
+
+.cw-item.off.on {
+  border-color: var(--bad);
+  background: rgba(14, 16, 19, 0.95);
+}
+
+.cmd-wheel[data-kind='door'] .cw-center {
+  color: var(--text);
+}
+
 /* 작전 지도 (M) */
 .tac-map {
   position: absolute;
@@ -4874,6 +4888,83 @@ button {
   color: #d8fff0;
   white-space: nowrap;
   text-shadow: 0 1px 2px #000;
+}
+
+/* 문 밑 카메라: 둥근 광각 렌즈 + 거친 흑백에 가까운 화면 */
+.hud .mirror-hud {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+}
+
+.hud .mirror-hud.show {
+  display: block;
+}
+
+.hud .mh-lens {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 46% 58% at 50% 52%, transparent 0 78%, rgba(0, 0, 0, 0.55) 90%, #000 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+  backdrop-filter: saturate(0.35) contrast(1.15);
+  -webkit-backdrop-filter: saturate(0.35) contrast(1.15);
+}
+
+.hud .mh-box {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 1.5px solid rgba(235, 240, 230, 0.8);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.7);
+}
+
+.hud .mh-top {
+  position: absolute;
+  left: 50%;
+  top: 9%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 600 12px var(--mono);
+  letter-spacing: 0.08em;
+  color: #eef2ea;
+  text-shadow: 0 1px 2px #000;
+}
+
+.hud .mh-top b::before {
+  content: '●';
+  margin-right: 6px;
+  color: #ff5a4f;
+  animation: blink 1s steps(2) infinite;
+}
+
+.hud .mh-top span {
+  color: #b9c2b8;
+  font-weight: 500;
+}
+
+.hud .mh-keys {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  font: 500 11px var(--mono);
+  color: #eef2ea;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+}
+
+.hud.mirroring .vh-weapon,
+.hud.mirroring .hud-bottom,
+.hud.mirroring .hint-keys {
+  opacity: 0.25;
 }
 
 /* 드론을 보는 동안에는 무기·패치 계기를 흐리게 */

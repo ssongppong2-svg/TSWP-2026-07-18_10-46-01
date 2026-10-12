@@ -247,6 +247,9 @@ export class NavGrid {
       for (const [ox, oz] of [[radius, radius], [radius, -radius], [-radius, radius], [-radius, -radius]]) {
         const { c, r } = map.toCell(x + ox, z + oz);
         if (!map.walkableAt(c, r, y)) return false;
+        // 문간: 문틀 사이(문 너비)로만 — 비스듬히 문틀을 스치는 지름길은 안 됨
+        const door = y < 1 ? map.doorCellAt?.(c, r) : null;
+        if (door && Math.abs((x + ox - door.x) * door.u.x + (z + oz - door.z) * door.u.z) > door.w / 2 - 0.02) return false;
       }
     }
     return true;

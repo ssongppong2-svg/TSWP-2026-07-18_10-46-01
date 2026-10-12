@@ -230,6 +230,9 @@ export class GearView {
       }
       const ready = (c.armAt ?? 0) <= m.time;
       v.led.material.color.set(Math.sin(this.time * (ready ? 14 : 5)) > 0 ? '#ff3a26' : '#3a0b08');
+      // 문에 붙인 C4는 문을 따라 움직임
+      v.root.position.set(c.x, c.y, c.z);
+      v.root.quaternion.setFromUnitVectors(this.up, this.tmpV.set(c.nx ?? 0, c.ny ?? 1, c.nz ?? 0).normalize());
     }
     for (const [id, v] of this.c4s) {
       if (cseen.has(id)) continue;

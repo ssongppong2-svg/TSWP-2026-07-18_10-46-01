@@ -158,6 +158,7 @@ export function buildWallProps(map, { museum = false } = {}) {
 
   for (let r = 0; r < map.rows; r++) {
     for (let c = 0; c < map.cols; c++) {
+      if (map.doorCellAt?.(c, r)) continue; // 문간 벽은 문틀이 덮음
       for (const s of map.surfaces(c, r)) {
         DIRS.forEach(([dc, dr], k) => {
           const nc = c + dc, nr = r + dr;

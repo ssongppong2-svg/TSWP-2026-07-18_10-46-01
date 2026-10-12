@@ -10,7 +10,7 @@ import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 6;
+export const PROTOCOL = 7;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
 const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
@@ -22,7 +22,10 @@ const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
 const REASONS = ['폭탄 2기 해체 완료', '해체팀 전원 제압', '포스팀 전원 제압', '제한 시간 종료 — 폭탄 폭발'];
 const BOMB_STATES = ['armed', 'defused', 'exploded'];
 const TEAMS_ = ['defuse', 'force'];
-const IMPACT_KINDS = ['surface', 'flesh', 'shield', 'debris'];
+const IMPACT_KINDS = ['surface', 'flesh', 'shield', 'debris', 'door'];
+const DOOR_MATS = ['wood', 'steel'];
+// 문 행동 (사람 입력 카운터 순서와 같음)
+const DOOR_ACTS = ['crack', 'kick', 'mirror', 'charge'];
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -73,7 +76,7 @@ export class HostSync {
         p = ['f', this.ai(e.agent), e.loud ? 1 : 0];
         break;
       case 'impact':
-        p = ['i', r2(e.x), r2(e.y), r2(e.z), r2(e.nx ?? 0), r2(e.ny ?? 0), r2(e.nz ?? 0), Math.max(0, IMPACT_KINDS.indexOf(e.kind)), e.headshot ? 1 : 0];
+        p = ['i', r2(e.x), r2(e.y), r2(e.z), r2(e.nx ?? 0), r2(e.ny ?? 0), r2(e.nz ?? 0), Math.max(0, IMPACT_KINDS.indexOf(e.kind)), e.headshot ? 1 : 0, Math.max(0, DOOR_MATS.indexOf(e.mat))];
         break;
       case 'ricochet':
         p = ['o', r2(e.x), r2(e.y), r2(e.z), r2(e.nx), r2(e.ny), r2(e.nz)];
@@ -105,6 +108,7 @@ export class HostSync {
     if (v.stats && v.pos && v.team) return { $a: this.ai(v) };
     if ('progress' in v && 'picker' in v) return { $b: v.id };
     if (v.st && v.type && this.match.devices?.list.includes(v)) return { $d: v.id };
+    if (v.st && v.leaves && this.match.doors?.list.includes(v)) return { $o: v.id };
     const o = {};
     for (const k in v) {
       if (k === 'prev' || k === 'projectile') continue;
@@ -129,6 +133,8 @@ export class HostSync {
         a.primary ? WEAP.indexOf(a.primary) : -1, WEAP.indexOf(a.secondary ?? 'pistol'),
         Math.max(0, ARMOR_KINDS.indexOf(a.armorKind ?? null)),
         encEquip(a.equip),
+        a.mirror ? (a.mirror.door + 1) * a.mirror.side : 0, // 문 밑 카메라 (문 번호+1, 부호 = 보는 쪽)
+        a.kickT > 0 ? 1 : 0, // 발차기 동작 중
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
@@ -169,6 +175,7 @@ export class HostSync {
       I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t), r1(i.y ?? 0)])),
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
       D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)
+      X: m.doors.pack(), // 문 (각도·잠김·부서짐)
       G: (m.throwables ?? []).map((t) => [t.id, THROW_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물
       K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz)]), // C4
       Q: (m.drones ?? []).map((d) => [d.id, this.ai(m.agentById(d.ownerId)), r2(d.pos.x), r2(d.pos.y), r2(d.pos.z), r3(d.yaw), r3(d.pitch), r1(d.battery)]), // 드론
@@ -223,7 +230,7 @@ export class ClientSync {
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak, eq] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak, eq, mi, kk] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
@@ -238,6 +245,12 @@ export class ClientSync {
       a.ampT = ampT;
       a.revealedUntil = reveal > 0 ? m.time + reveal : -99;
       a.held = heldZ ? { zoneId: heldZ, x, y, z } : null;
+      // 문 밑 카메라: 이 화면 요원은 카메라 방향(yaw·pitch)을 그대로 두고 문·쪽만 맞춤
+      if (mi) {
+        const door = Math.abs(mi) - 1, side = Math.sign(mi);
+        if (a.mirror?.door !== door || a.mirror?.side !== side) a.mirror = { door, side, home: { yaw: a.yaw, pitch: a.pitch } };
+      } else a.mirror = null;
+      a.kickT = kk ? Math.max(a.kickT ?? 0, 0.01) : 0;
       if (i === this.localIdx) {
         this.reconcile(a, x, y, z, vx, vy, vz, lpBomb);
         return;
@@ -335,6 +348,7 @@ export class ClientSync {
       b.progress = pr;
     });
     if (snap.D) m.devices.unpack(snap.D);
+    if (snap.X) m.doors.unpack(snap.X);
     // 투척물·C4: 같은 번호는 이어서 (화면에서 부드럽게 움직이게 이전 위치를 남김)
     if (snap.G) {
       const old = new Map((m.throwables ?? []).map((t) => [t.id, t]));
@@ -431,6 +445,7 @@ export class ClientSync {
     if ('$a' in v) return this.match.agents[v.$a] ?? null;
     if ('$b' in v) return this.match.bombById(v.$b);
     if ('$d' in v) return this.match.devices?.list[v.$d] ?? null;
+    if ('$o' in v) return this.match.doors?.list[v.$o] ?? null;
     const o = {};
     for (const k in v) o[k] = this.dec(v[k]);
     return o;
@@ -459,7 +474,7 @@ export class ClientSync {
         return;
       }
       case 'i':
-        m.emit('impact', { x: p[1], y: p[2], z: p[3], nx: p[4], ny: p[5], nz: p[6], kind: IMPACT_KINDS[p[7]] ?? 'surface', headshot: !!p[8] });
+        m.emit('impact', { x: p[1], y: p[2], z: p[3], nx: p[4], ny: p[5], nz: p[6], kind: IMPACT_KINDS[p[7]] ?? 'surface', headshot: !!p[8], mat: DOOR_MATS[p[9]] ?? 'wood' });
         return;
       case 'o':
         m.emit('ricochet', { x: p[1], y: p[2], z: p[3], nx: p[4], ny: p[5], nz: p[6] });
@@ -541,8 +556,8 @@ function mergeById(list, incoming) {
 
 // ───────────────────────── 입력 ─────────────────────────
 // 한 번 누르는 동작의 카운터 순서
-const ACT = { reload: 0, interact: 1, patch0: 2, report: 6, command: 7, fire: 8, equipThrow: 9, equipGadget: 10, ads: 11 };
-const ACT_COUNT = 12;
+const ACT = { reload: 0, interact: 1, patch0: 2, report: 6, command: 7, fire: 8, equipThrow: 9, equipGadget: 10, ads: 11, door0: 12 };
+const ACT_COUNT = 12 + DOOR_ACTS.length;
 
 // 참가자: 키보드·마우스 조종자를 감싸 입력을 기록하고, 방장만 처리할 동작은 이 화면의 예측에서 뺌
 export class InputRecorder {
@@ -580,6 +595,7 @@ export class InputRecorder {
     this.wasAds = i.ads;
     if (i.equip === 'throw') this.c[ACT.equipThrow]++;
     if (i.equip === 'gadget') this.c[ACT.equipGadget]++;
+    if (i.door && DOOR_ACTS.includes(i.door)) this.c[ACT.door0 + DOOR_ACTS.indexOf(i.door)]++;
     if (i.card >= 0) {
       this.cardN++;
       this.cards.push([this.cardN, i.card]);
@@ -619,6 +635,7 @@ export class InputRecorder {
     i.buy = null; // 구매는 방장이 처리
     i.quiz = -1; // 점검 답도 방장이 채점
     i.equip = null; // 장비 들기도 방장이 (화면은 방장 값을 따름)
+    i.door = null; // 문도 방장이 (문 각도는 방장 값을 따름)
     return i;
   }
 }
@@ -668,6 +685,8 @@ export class RemoteController {
     if (fresh(ACT.ads) && !i.ads && a.equip) i.ads = true;
     if (fresh(ACT.equipThrow)) i.equip = 'throw';
     else if (fresh(ACT.equipGadget)) i.equip = 'gadget';
+    const door = DOOR_ACTS.findIndex((_, k) => fresh(ACT.door0 + k));
+    if (door >= 0) i.door = DOOR_ACTS[door];
     this.seen = [...c];
     // 해체 카드: 한 틱에 하나씩
     const next = (inp.cd ?? []).find(([n]) => n > this.cardSeen);

@@ -3,6 +3,7 @@ import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
 import { TEAMS } from '../sim/constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
+import { DOOR } from '../sim/door-geo.js';
 import { dirFromAngles } from '../core/vec.js';
 
 export const DIFFICULTY = {
@@ -19,6 +20,7 @@ const NOISE_TEXT = {
   step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
   smg: '기관단총 사격음', sniper: '저격총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
   throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음', drone: '드론 소리',
+  door: '문 여닫는 소리', doorQuiet: '문 손잡이 소리', kick: '문 부수는 소리',
 };
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 const compass = (dx, dz) => COMPASS[Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
@@ -80,6 +82,8 @@ export class BotBrain {
     this.gearPlan = null; // { id, mode, yaw, pitch, t } 조준을 맞춘 뒤 던짐
     this.avoidT = 0; // 섬광을 던진 뒤 고개를 돌리는 시간
     this.entryDone = false; // 이번 라운드 진입용 섬광·이명을 썼는지
+    this.doorT = 0; // 문을 다시 건드리기까지 (여닫기를 반복하지 않게)
+    this.doorWant = null; // 이번 틱에 할 문 행동 { act, id }
     this.assignRoles(agent, match);
   }
 
@@ -193,6 +197,12 @@ export class BotBrain {
     if (live && this.startDelay <= 0 && !a.lockpick && this.goal?.point && !paused) {
       wish = this.navigate(match, a, this.goal.point, this.goal.arrive ?? 0.8, dt);
     }
+    this.doorT -= dt;
+    if (this.doorWant && live) {
+      intent.door = this.doorWant.act;
+      intent.doorId = this.doorWant.id;
+    }
+    this.doorWant = null;
     if (!desired) {
       if (wish && Math.hypot(wish.x, wish.z) > 0.1) {
         desired = { yaw: Math.atan2(-wish.x, -wish.z), pitch: 0 };
@@ -921,7 +931,32 @@ export class BotBrain {
     const wp = p[this.pathIdx];
     const dx = wp.x - a.pos.x, dz = wp.z - a.pos.z;
     const l = Math.hypot(dx, dz) || 1;
+    if (this.doorAhead(match, a, wp)) return null;
     return { x: dx / l, z: dz / l };
+  }
+
+  // 가는 길 앞을 문짝이 막고 있으면: 다가가서 엶 (잠겼으면 걷어참). 문이 열리는 동안은 멈춰 기다림 (true)
+  doorAhead(match, a, wp) {
+    if (!match.map.leaves.length || a.pos.y > 0.8) return false;
+    const from = { x: a.pos.x, y: 1, z: a.pos.z };
+    const dx = wp.x - a.pos.x, dz = wp.z - a.pos.z;
+    const l = Math.hypot(dx, dz);
+    if (l < 0.01) return false;
+    const look = Math.min(l, 2.2);
+    const hit = match.map.raycastLeaves(from, { x: a.pos.x + (dx / l) * look, y: 1, z: a.pos.z + (dz / l) * look }, 1);
+    if (!hit) return false;
+    const d = match.doors.list[hit.door];
+    if (!d || d.st.broken) return false;
+    const st = d.st;
+    const reach = Math.hypot(d.x - a.pos.x, d.z - a.pos.z) < 1.6;
+    // 열리는 중이면 기다림
+    if (Math.abs(st.tgt) > DOOR.crack + 0.05 && st.ang !== st.tgt) return true;
+    if (!reach) return false; // 더 다가감
+    if (this.doorT > 0) return true;
+    this.doorT = 0.9;
+    const opt = match.doors.options(a, d);
+    this.doorWant = { act: opt.locked ? 'kick' : 'open', id: d.id };
+    return true;
   }
 
   unstick(match, a, intent, dt) {

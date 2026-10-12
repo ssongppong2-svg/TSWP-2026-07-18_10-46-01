@@ -48,7 +48,7 @@ export function buildCeilingFixtures(map, { museum = false, skip = null } = {}) 
   };
   for (let r = 0; r < map.rows; r++) {
     for (let c = 0; c < map.cols; c++) {
-      if (skip?.(c, r)) continue;
+      if (skip?.(c, r) || map.doorCellAt?.(c, r)) continue; // 문간 천장은 인방
       for (const s of map.surfaces(c, r)) {
         const ceil = ceilingAbove(map, c, r, s);
         if (!ceil) continue;

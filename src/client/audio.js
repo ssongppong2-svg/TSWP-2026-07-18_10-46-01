@@ -1054,6 +1054,104 @@ const SOUNDS = {
     a.tone(o, t, 0.06, { type: 'square', freq: 1760, gain: 0.08 });
     a.tone(o, t + 0.07, 0.1, { type: 'square', freq: 2350, gain: 0.08 });
   },
+  // ───────── 문 (surface 자리에 재질: 'steel' · 'wood') ─────────
+  // 열기: 손잡이 딸깍 + 걸쇠 + 경첩 삐걱 + 문이 공기를 밀어내는 소리 (철문은 낮고 묵직)
+  doorOpen(a, t, pos, vol, mat) {
+    const steel = mat === 'steel';
+    const o = a.out(pos, 0.5 * vol, 1, 0.25);
+    a.click(o, t, steel ? 1900 : 2600, 0.7, 6);
+    a.click(o, t + 0.05, steel ? 1300 : 1700, 0.45, 5);
+    a.tone(o, t + 0.08, 0.32, steel ? { type: 'sawtooth', freq: 150, to: 172, gain: 0.025, attack: 0.04 } : { type: 'triangle', freq: 410, to: 520, gain: 0.04, attack: 0.03, vibrato: 18 });
+    a.noise(o, t + 0.06, 0.4, { type: 'lowpass', freq: 420, gain: 0.35, attack: 0.08, buf: a.brownBuf });
+  },
+  doorClose(a, t, pos, vol, mat) {
+    const o = a.out(pos, 0.35 * vol, 0.7, 0.2);
+    a.noise(o, t, 0.35, { type: 'lowpass', freq: 380, gain: 0.3, attack: 0.08, buf: a.brownBuf });
+    a.tone(o, t + 0.05, 0.22, mat === 'steel' ? { type: 'sawtooth', freq: 170, to: 150, gain: 0.02 } : { type: 'triangle', freq: 500, to: 420, gain: 0.03, vibrato: 14 });
+  },
+  // 닫힘: 문이 문틀에 '쿵' + 걸쇠가 걸리는 소리 (철문은 쇠 울림)
+  doorShut(a, t, pos, vol, mat) {
+    const steel = mat === 'steel';
+    const o = a.out(pos, 0.65 * vol, 1.1, 0.35, 0.1);
+    a.noise(o, t, 0.12, { type: 'lowpass', freq: steel ? 240 : 320, gain: 1, buf: a.brownBuf });
+    a.tone(o, t, 0.16, { type: 'sine', freq: steel ? 85 : 120, to: 55, gain: 0.6 });
+    a.click(o, t + 0.015, steel ? 1500 : 2200, 0.6, 5);
+    if (steel) a.tone(o, t, 0.6, { type: 'triangle', freq: 330, to: 310, gain: 0.05 });
+  },
+  // 살짝 열기: 걸쇠를 조심스럽게 + 길고 낮은 삐걱
+  doorCreak(a, t, pos, vol, mat) {
+    const o = a.out(pos, 0.4 * vol, 1.4, 0.2);
+    a.click(o, t, mat === 'steel' ? 1700 : 2400, 0.35, 6);
+    a.tone(o, t + 0.1, 1.0, mat === 'steel' ? { type: 'sawtooth', freq: 140, to: 158, gain: 0.018, attack: 0.2, vibrato: 6 } : { type: 'triangle', freq: 300, to: 380, gain: 0.035, attack: 0.15, vibrato: 9 });
+  },
+  // 잠김: 손잡이를 돌려도 걸쇠가 덜컥덜컥
+  doorLocked(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 0.6, 0.15);
+    for (let i = 0; i < 3; i++) {
+      a.click(o, t + i * 0.085, 2100 + Math.random() * 400, 0.6, 5);
+      a.noise(o, t + i * 0.085 + 0.01, 0.05, { type: 'lowpass', freq: 500, gain: 0.35 });
+    }
+  },
+  // 발차기: 쾅 (문이 벽에 부딪히며 한 번 더)
+  doorKick(a, t, pos, vol, mat) {
+    const steel = mat === 'steel';
+    const o = a.out(pos, 0.95 * vol, 1.6, 0.45, 0.3);
+    a.noise(o, t, 0.2, { type: 'lowpass', freq: 280, gain: 1, buf: a.brownBuf });
+    a.tone(o, t, 0.25, { type: 'sine', freq: 90, to: 38, gain: 0.9 });
+    a.noise(o, t, 0.08, { type: 'bandpass', freq: steel ? 1300 : 2400, q: 1.2, gain: 0.7 });
+    a.noise(o, t + 0.16, 0.14, { type: 'lowpass', freq: 360, gain: 0.7, buf: a.brownBuf });
+    if (steel) a.tone(o, t + 0.16, 0.7, { type: 'triangle', freq: 290, to: 270, gain: 0.06 });
+  },
+  // 잠긴 문을 찼는데 안 열림: 둔탁한 쿵 + 덜컹
+  kickFail(a, t, pos, vol) {
+    const o = a.out(pos, 0.8 * vol, 1, 0.35, 0.2);
+    a.noise(o, t, 0.16, { type: 'lowpass', freq: 220, gain: 1, buf: a.brownBuf });
+    a.tone(o, t, 0.2, { type: 'sine', freq: 75, to: 45, gain: 0.8 });
+    a.click(o, t + 0.04, 1600, 0.5, 4);
+    a.click(o, t + 0.11, 1900, 0.35, 4);
+  },
+  // 자물쇠가 부서짐: 쇠가 튕겨 나가는 소리 + 나무 쪼개짐
+  lockBreak(a, t, pos, vol) {
+    const o = a.out(pos, 0.6 * vol, 0.9, 0.25);
+    a.click(o, t, 4200, 0.9, 7);
+    a.tone(o, t, 0.12, { type: 'triangle', freq: 1800, to: 900, gain: 0.12 });
+    a.noise(o, t + 0.02, 0.18, { type: 'bandpass', freq: 2600, q: 1.5, gain: 0.5, sweepTo: 1200 });
+    for (let i = 0; i < 3; i++) a.click(o, t + 0.25 + Math.random() * 0.3, 2800 + Math.random() * 1500, 0.3, 8);
+  },
+  // 문 폭파: 나무·쇠 조각이 흩어져 떨어짐 (폭발음은 c4Blast)
+  doorBreach(a, t, pos, vol, mat) {
+    const o = a.out(pos, 0.6 * vol, 2, 0.3);
+    a.noise(o, t, 0.25, { type: 'bandpass', freq: mat === 'steel' ? 1500 : 2200, q: 0.8, gain: 0.8, sweepTo: 600 });
+    for (let i = 0; i < 9; i++) a.noise(o, t + 0.3 + Math.random() * 1.1, 0.04, { type: 'bandpass', freq: (mat === 'steel' ? 1200 : 1800) + Math.random() * 1800, q: 4, gain: 0.25 });
+  },
+  // 문에 맞음 (걷어찬 문이 사람을 침)
+  doorHit(a, t, pos, vol) {
+    const o = a.out(pos, 0.7 * vol, 0.5, 0.15);
+    a.noise(o, t, 0.1, { type: 'lowpass', freq: 300, gain: 1, buf: a.brownBuf });
+    a.tone(o, t, 0.12, { type: 'sine', freq: 110, to: 60, gain: 0.6 });
+  },
+  // 총알이 문짝에: 나무는 '턱' + 부스러기, 쇠는 '팅'
+  doorImpact(a, t, pos, vol, mat) {
+    const o = a.out(pos, 0.4 * vol, 0.4, 0.12);
+    if (mat === 'steel') {
+      a.click(o, t, 3200, 0.7, 8);
+      a.tone(o, t, 0.16, { type: 'triangle', freq: 1700 + Math.random() * 500, to: 1300, gain: 0.08 });
+    } else {
+      a.noise(o, t, 0.05, { type: 'bandpass', freq: 900, q: 2, gain: 0.9 });
+      a.noise(o, t + 0.01, 0.12, { type: 'bandpass', freq: 2600, q: 2, gain: 0.25 });
+    }
+  },
+  // 문 밑 카메라: 작은 모터가 펴지는 소리
+  mirrorOn(a, t) {
+    const o = a.out(null, 0.25, 0.4, 0);
+    a.click(o, t, 3000, 0.4, 6);
+    a.tone(o, t + 0.02, 0.2, { type: 'sawtooth', freq: 240, to: 360, gain: 0.025 });
+  },
+  mirrorOff(a, t) {
+    const o = a.out(null, 0.22, 0.4, 0);
+    a.tone(o, t, 0.16, { type: 'sawtooth', freq: 360, to: 230, gain: 0.022 });
+    a.click(o, t + 0.16, 2600, 0.35, 6);
+  },
   // 기폭기 단추
   detClick(a, t) {
     const o = a.out(null, 0.4, 0.3, 0);

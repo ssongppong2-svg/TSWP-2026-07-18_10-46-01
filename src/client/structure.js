@@ -92,6 +92,42 @@ function coversOf(map, c, r) {
 // 2층 바닥이 있는 칸인지 (벽 무늬를 2층 바닥에 맞춤)
 const hasUpper = (map, c, r) => map.inBounds(c, r) && map.surfaces(c, r).some((y) => y > 1);
 
+// 문틀: 문간 양옆 기둥과 위 인방 (벽과 같은 재질 · 같은 무늬 · 같은 실내 그늘). 벽에 붙은 면은 그리지 않음
+function buildDoorFrames(map, q, shade) {
+  for (const d of map.doors ?? []) {
+    const x0c = map.originX + d.c * CELL, z0c = map.originZ + d.r * CELL;
+    const s = shade(d.c, d.r, 1);
+    for (const [bx0, bx1, bz0, bz1, by0, by1] of d.boxes) {
+      // 문간 바깥(통로)을 향한 면은 그 통로 칸 기준 그늘 (옆 벽 면과 같은 밝기)
+      const faces = [
+        // 법선, 면의 두 아래 점 (바깥에서 볼 때 왼쪽→오른쪽)
+        [[-1, 0, 0], [bx0, bz0], [bx0, bz1]],
+        [[1, 0, 0], [bx1, bz1], [bx1, bz0]],
+        [[0, 0, -1], [bx1, bz0], [bx0, bz0]],
+        [[0, 0, 1], [bx0, bz1], [bx1, bz1]],
+      ];
+      for (const [n, a, b] of faces) {
+        // 칸 경계에 붙은 면: 그 너머가 벽이면 가려짐
+        const onX = n[0] !== 0 && (Math.abs(a[0] - x0c) < EPS || Math.abs(a[0] - x0c - CELL) < EPS);
+        const onZ = n[2] !== 0 && (Math.abs(a[1] - z0c) < EPS || Math.abs(a[1] - z0c - CELL) < EPS);
+        if ((onX || onZ) && !map.walkable(d.c + n[0], d.r + n[2])) continue;
+        const horiz = (p) => (n[0] !== 0 ? p[1] * -n[0] : p[0] * n[2]);
+        const ua = horiz(a) / 4, ub = horiz(b) / 4;
+        const out = onX || onZ;
+        const sa = out ? shade(d.c + n[0], d.r + n[2], by0 + 0.05) : s;
+        const sb = out ? shade(d.c + n[0], d.r + n[2], Math.max(by0 + 0.05, by1 - 0.3)) : s;
+        q('wall').quad([a[0], by0, a[1]], [b[0], by0, b[1]], [b[0], by1, b[1]], [a[0], by1, a[1]], n, [ua, by0 / 4.8], [ub, by0 / 4.8], [ub, by1 / 4.8], [ua, by1 / 4.8], [sa, sa, sb, sb]);
+      }
+      // 인방 밑면
+      if (by0 > EPS) q('wall').quad([bx0, by0, bz0], [bx1, by0, bz0], [bx1, by0, bz1], [bx0, by0, bz1], [0, -1, 0], [bx0 / 4, bz0 / 4], [bx1 / 4, bz0 / 4], [bx1 / 4, bz1 / 4], [bx0 / 4, bz1 / 4], s * 0.85);
+      // 윗면 (천장이 없는 담장 문)
+      if (!map.spansAt(d.c, d.r).some(([y0]) => Math.abs(y0 - by1) < 0.05)) {
+        q('wallTop').quad([bx0, by1, bz1], [bx1, by1, bz1], [bx1, by1, bz0], [bx0, by1, bz0], [0, 1, 0], [bx0 / 4, -bz1 / 4], [bx1 / 4, -bz1 / 4], [bx1 / 4, -bz0 / 4], [bx0 / 4, -bz0 / 4], 1);
+      }
+    }
+  }
+}
+
 // map: GameMap, mats: { wall, wallTop, ceil, slabTop, grate, edge, edgeSteel, rail, roofTop, tread, nosing }
 export function buildStructure(map, mats, { museum = false } = {}) {
   const group = new THREE.Group();
@@ -182,6 +218,7 @@ export function buildStructure(map, mats, { museum = false } = {}) {
   }
 
   buildStairs(map, q, shade);
+  buildDoorFrames(map, q, shade);
 
   // 재질별 메쉬
   const order = ['wall', 'clad', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip'];

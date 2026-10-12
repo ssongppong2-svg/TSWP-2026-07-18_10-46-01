@@ -1,5 +1,6 @@
 import { CELL } from './constants.js';
 import { getMapDef } from './maps/index.js';
+import { DOOR, closestOnSegment, doorGeometry } from './door-geo.js';
 
 // 맵 데이터(글자 격자·구역 이름 등)는 ./maps/ 폴더에 있다. 이 파일은 격자를 게임에서 쓰는 형태로 바꾼다.
 //
@@ -108,6 +109,11 @@ export class GameMap {
     }
     this.buildRamps(ground);
     this.buildRails();
+    // 문: 문틀은 고정 상자(난간처럼), 문짝은 doors.js가 움직이며 this.leaves에 선분으로 넣음
+    this.doors = (def.doors ?? []).map((d, id) => doorGeometry(this, d, id));
+    this.doorCells = new Map(this.doors.map((d) => [this.idx(d.c, d.r), d]));
+    this.leaves = [];
+    this.buildBoxes();
     this.bombs.sort((a, b) => a.id.localeCompare(b.id));
     const yOf = (h) => (h.f ? STORY : 0);
     const toWorld = (h) => ({
@@ -296,20 +302,38 @@ export class GameMap {
     }
   }
 
-  // 그 칸의 난간 상자들 [minX, maxX, minZ, maxZ, y0, y1]
-  railBoxes(c, r) {
+  // 칸 안의 얇은 고정 상자들 (난간·문틀) [minX, maxX, minZ, maxZ, y0, y1] — 한 번만 만들어 둠
+  buildBoxes() {
+    this.boxes = new Array(this.cols * this.rows);
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const m = this.railMask[this.idx(c, r)];
+        if (!m) continue;
+        const x0 = this.originX + c * CELL, x1 = x0 + CELL;
+        const z0 = this.originZ + r * CELL, z1 = z0 + CELL;
+        const y0 = STORY, y1 = STORY + RAIL_H;
+        const out = [];
+        if (m & 1) out.push([x0, x1, z0, z0 + RAIL_T, y0, y1]);
+        if (m & 2) out.push([x0, x1, z1 - RAIL_T, z1, y0, y1]);
+        if (m & 4) out.push([x0, x0 + RAIL_T, z0, z1, y0, y1]);
+        if (m & 8) out.push([x1 - RAIL_T, x1, z0, z1, y0, y1]);
+        this.boxes[this.idx(c, r)] = out;
+      }
+    }
+    for (const d of this.doors) {
+      const i = this.idx(d.c, d.r);
+      this.boxes[i] = [...(this.boxes[i] ?? []), ...d.boxes];
+    }
+  }
+
+  thinBoxes(c, r) {
     if (!this.inBounds(c, r)) return NO_BOXES;
-    const m = this.railMask[this.idx(c, r)];
-    if (!m) return NO_BOXES;
-    const x0 = this.originX + c * CELL, x1 = x0 + CELL;
-    const z0 = this.originZ + r * CELL, z1 = z0 + CELL;
-    const y0 = STORY, y1 = STORY + RAIL_H;
-    const out = [];
-    if (m & 1) out.push([x0, x1, z0, z0 + RAIL_T, y0, y1]);
-    if (m & 2) out.push([x0, x1, z1 - RAIL_T, z1, y0, y1]);
-    if (m & 4) out.push([x0, x0 + RAIL_T, z0, z1, y0, y1]);
-    if (m & 8) out.push([x1 - RAIL_T, x1, z0, z1, y0, y1]);
-    return out;
+    return this.boxes[this.idx(c, r)] ?? NO_BOXES;
+  }
+
+  // 문간 칸이면 그 문 (없으면 null)
+  doorCellAt(c, r) {
+    return this.inBounds(c, r) ? this.doorCells.get(this.idx(c, r)) ?? null : null;
   }
 
   // 두 이웃 칸 사이 가장자리에 난간이 있는지
@@ -467,6 +491,12 @@ export class GameMap {
           const y0 = this.sy0[i * MAXS + k];
           if (y0 > fromY && y0 < best) best = y0;
         }
+        // 문틀 인방 (문간에서 뛰면 머리가 닿음)
+        for (const [bx0, bx1, bz0, bz1, by0] of this.thinBoxes(c, r)) {
+          if (by0 <= fromY || by0 >= best) continue;
+          const qx = Math.max(bx0, Math.min(x, bx1)), qz = Math.max(bz0, Math.min(z, bz1));
+          if ((x - qx) ** 2 + (z - qz) ** 2 < radius * radius) best = by0;
+        }
       }
     }
     return best;
@@ -502,8 +532,8 @@ export class GameMap {
           let dx = pos.x - cx, dz = pos.z - cz;
           const d2 = dx * dx + dz * dz;
           if (d2 >= radius * radius) continue;
-          // 난간 (칸 가장자리의 얇은 판)
-          for (const [bx0, bx1, bz0, bz1, by0, by1] of this.railBoxes(c, r)) {
+          // 난간·문틀 (칸 안의 얇은 고정 상자)
+          for (const [bx0, bx1, bz0, bz1, by0, by1] of this.thinBoxes(c, r)) {
             if (by1 <= feetY + stepHeight || by0 >= feetY + bodyH) continue;
             if (this.pushOut(pos, radius, bx0, bx1, bz0, bz1, vel)) moved = hit = true;
           }
@@ -534,9 +564,41 @@ export class GameMap {
           moved = hit = true;
         }
       }
+      // 문짝 (경첩으로 도는 얇은 판)
+      for (const L of this.leaves) {
+        if (L.y1 <= feetY + stepHeight || L.y0 >= feetY + bodyH) continue;
+        if (this.pushOutSegment(pos, radius + DOOR.thick / 2, L, vel)) moved = hit = true;
+      }
       if (!moved) break;
     }
     return hit;
+  }
+
+  // 원을 선분(문짝)에서 밀어냄. 선분 위에 올라탄 경우는 원래 있던 쪽(법선 방향)으로
+  pushOutSegment(pos, R, L, vel) {
+    if (Math.min(L.x0, L.x1) - R > pos.x || Math.max(L.x0, L.x1) + R < pos.x || Math.min(L.z0, L.z1) - R > pos.z || Math.max(L.z0, L.z1) + R < pos.z) return false;
+    const q = closestOnSegment(pos.x, pos.z, L.x0, L.z0, L.x1, L.z1);
+    let dx = pos.x - q.x, dz = pos.z - q.z;
+    const d = Math.hypot(dx, dz);
+    if (d >= R) return false;
+    if (d > 1e-6) {
+      dx /= d;
+      dz /= d;
+    } else {
+      const ex = L.x1 - L.x0, ez = L.z1 - L.z0, l = Math.hypot(ex, ez) || 1;
+      dx = -ez / l;
+      dz = ex / l;
+    }
+    pos.x += dx * (R - d);
+    pos.z += dz * (R - d);
+    if (vel) {
+      const vn = vel.x * dx + vel.z * dz;
+      if (vn < 0) {
+        vel.x -= vn * dx;
+        vel.z -= vn * dz;
+      }
+    }
+    return true;
   }
 
   // 원을 사각형(xz) 밖으로 밀어냄 (난간용)
@@ -573,8 +635,40 @@ export class GameMap {
   }
 
   // ───────── 총알·시야 ─────────
-  // 선분 a→b가 처음 부딪히는 곳 (격자 DDA + 칸마다 막힌 구간). 없으면 null.
+  // 선분 a→b가 처음 부딪히는 곳 (격자·난간·문틀 + 문짝). 없으면 null. 문짝에 맞으면 door·leaf가 붙음
   raycast(a, b) {
+    const g = this.raycastGrid(a, b);
+    if (!this.leaves.length) return g;
+    return this.raycastLeaves(a, b, g ? g.t : 1) ?? g;
+  }
+
+  // 문짝(세운 얇은 판)과의 교차: 위에서 본 선분 교차 + 높이
+  raycastLeaves(a, b, tMax) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    let best = null;
+    for (const L of this.leaves) {
+      const ex = L.x1 - L.x0, ez = L.z1 - L.z0;
+      const den = dx * ez - dz * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const wx = L.x0 - a.x, wz = L.z0 - a.z;
+      const t = (wx * ez - wz * ex) / den;
+      if (t < 0 || t > tMax || (best && t >= best.t)) continue;
+      const s = (wx * dz - wz * dx) / den;
+      if (s < 0 || s > 1) continue;
+      const y = a.y + dy * t;
+      if (y < L.y0 || y > L.y1) continue;
+      const l = Math.hypot(ex, ez) || 1;
+      let nx = -ez / l, nz = ex / l;
+      if (nx * dx + nz * dz > 0) {
+        nx = -nx;
+        nz = -nz;
+      }
+      best = { t, x: a.x + dx * t, y, z: a.z + dz * t, nx, ny: 0, nz, door: L.door, leaf: L.leaf };
+    }
+    return best;
+  }
+
+  raycastGrid(a, b) {
     const ax = a.x, ay = a.y, az = a.z;
     const dx = b.x - ax, dy = b.y - ay, dz = b.z - az;
     const hit = (t, nx, ny, nz) => ({ t, x: ax + dx * t, y: ay + dy * t, z: az + dz * t, nx, ny, nz });
@@ -635,8 +729,8 @@ export class GameMap {
           }
         }
       }
-      // 난간 (얇은 상자, 판 방식 교차)
-      for (const [bx0, bx1, bz0, bz1, by0, by1] of this.railBoxes(c, r)) {
+      // 난간·문틀 (얇은 상자, 판 방식 교차)
+      for (const [bx0, bx1, bz0, bz1, by0, by1] of this.thinBoxes(c, r)) {
         let t0 = -Infinity, t1 = Infinity, n = null;
         let ok = true;
         for (const [o, d, lo, hi, axis] of [[ax, dx, bx0, bx1, 0], [ay, dy, by0, by1, 1], [az, dz, bz0, bz1, 2]]) {

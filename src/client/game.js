@@ -10,12 +10,13 @@ import { Shop } from '../ui/shop.js';
 import { LockpickUI } from '../ui/lockpick-ui.js';
 import { AgentView } from './agent-view.js';
 import { Effects } from './effects.js';
-import { Input, PlayerController } from './input.js';
+import { COMMANDS, DOOR_ACTIONS, Input, PlayerController } from './input.js';
 import { ViewModel } from './viewmodel.js';
 import { QUALITY, QUALITY_ORDER } from './stage.js';
 import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
 import { GearView } from './gear-view.js';
+import { DoorsView } from './doors-view.js';
 import { GEAR } from '../sim/gear.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
@@ -77,6 +78,8 @@ export class GameClient {
     this.input.enabled = true;
     this.controller = new PlayerController(this.input, settings);
     this.controller.zoomOf = (a) => WEAPONS[a.weapon].adsZoom ?? 1;
+    // 문 앞에서 F: 길게 누르면 문 행동 휠 (교전 중에만 문을 다룸)
+    this.controller.doorTarget = (a) => (a?.alive && this.match.phase === 'live' && !this.ended ? this.match.doors.doorAt(a) : null);
     this.controller.syncFrom(this.player);
     if (net?.role === 'client') {
       // 참가자: 입력을 기록해 방장에게 보내고, 이 화면에서는 이동·사격만 미리 보여 줌
@@ -99,6 +102,7 @@ export class GameClient {
     this.gearView = new GearView(stage.scene, this.match, this.effects, stage.lightRig);
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
+    this.doorsView = new DoorsView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
     this.newConcepts = [];
     // 이번 경기 공부 기록 (결과 화면): 보급 점검·해체 문제·힘 장치 사용·새로 숙달한 개념
@@ -256,6 +260,49 @@ export class GameClient {
       A.play(e.weapon, { pos: local ? null : e.origin });
       if (e.amp && local) A.play('ampShot');
     });
+    // ── 문: 여닫기·살짝 열기·잠김·발차기·자물쇠 파손·폭파 (철문·나무문 소리가 다름)
+    const DOOR_SND = { open: 'doorOpen', close: 'doorClose', shut: 'doorShut', crack: 'doorCreak', crackClose: 'doorCreak', locked: 'doorLocked', kick: 'doorKick', kickFail: 'kickFail', lockBreak: 'lockBreak', breach: 'doorBreach' };
+    ev.on('door', (e) => {
+      const d = e.door;
+      if (!d) return;
+      this.doorsView.onDoor(e);
+      if (e.act === 'locked') d.st.knownLocked = true; // 참가자 화면에서도 지도에 잠긴 문 표시
+      const pos = { x: d.x, y: 1.1, z: d.z };
+      const loud = e.act === 'kick' || e.act === 'kickFail' || e.act === 'breach' || e.act === 'lockBreak';
+      const quiet = e.act === 'crack' || e.act === 'crackClose' || e.act === 'locked';
+      const v = viewing(e.agent) ? 1 : audible(pos, loud ? NOISE.kick : quiet ? NOISE.doorQuiet * 2 : NOISE.door * 1.4);
+      if (DOOR_SND[e.act] && v > 0) A.play(DOOR_SND[e.act], { pos, vol: v, surface: d.mat });
+      if (!viewing(e.agent)) return;
+      if (e.act === 'locked') this.hud.banner('잠긴 문', 'F 길게: 발차기 · 폭약 / 산탄총으로 손잡이 쪽 사격', 'small');
+      else if (e.act === 'kickFail') this.hud.banner('문이 버팀', '다시 차면 더 잘 부서짐 · C4 · 산탄총', 'small');
+      else if (e.act === 'lockBreak') this.hud.banner('자물쇠 파손', e.how === 'shotgun' ? '산탄으로 자물쇠를 부숨' : '걷어차 문을 부숨', 'good');
+    });
+    ev.on('kick', (e) => {
+      this.views.get(e.agent.id)?.kickDoor();
+      if (!viewing(e.agent)) return;
+      A.play('throw', { vol: 0.8 });
+      this.kickVel.y -= 0.035;
+      this.landDip = Math.max(this.landDip, 0.45);
+    });
+    ev.on('doorHit', (e) => {
+      this.views.get(e.agent.id)?.hit();
+      A.play('doorHit', { pos: viewing(e.agent) ? null : e.agent.pos });
+      if (viewing(e.agent)) {
+        this.shake = Math.min(1, this.shake + 0.5);
+        this.blur = Math.min(1, this.blur + 0.45);
+        this.hud.banner('문에 맞음', '휘청 · 잠시 조준 흔들림', 'bad');
+      }
+    });
+    ev.on('mirror', (e) => {
+      if (viewing(e.agent)) A.play(e.on ? 'mirrorOn' : 'mirrorOff');
+    });
+    ev.on('mirrorMark', (e) => {
+      if (!viewing(e.agent)) return;
+      if (e.target) {
+        A.play('droneMark');
+        this.hud.banner('문 밑 카메라: 적 표시', '5초 동안 벽 너머로 보임', 'good');
+      } else A.play('denied');
+    });
     // ── 투척·폭발 장비
     ev.on('equip', (e) => {
       if (!viewing(e.agent)) return;
@@ -312,6 +359,10 @@ export class GameClient {
     ev.on('impact', (e) => {
       this.effects.onImpact(e);
       if (e.kind === 'shield') A.play('shieldHit', { pos: e });
+      if (e.kind === 'door') {
+        const v = audible(e, 30);
+        if (v > 0) A.play('doorImpact', { pos: e, vol: v, surface: e.mat });
+      }
       // 몸에 맞는 소리는 가까이에서만 들림 (화면에 명중 표시는 없음)
       if (e.kind === 'flesh') A.play('impact', { pos: e });
     });
@@ -467,6 +518,7 @@ export class GameClient {
     // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
     ev.on('roundPrep', (e) => {
       this.controller.syncFrom(this.player);
+      this.doorsView.clearDebris();
       this.camYaw = this.player.yaw;
       this.camPitch = 0;
       this.specIndex = 0;
@@ -537,6 +589,43 @@ export class GameClient {
     });
   }
 
+  // HUD 휠: 지휘(G) 또는 문 행동(문 앞 F 길게)
+  wheelDef() {
+    const c = this.controller;
+    if (c.wheelOpen) return { title: '지휘', items: COMMANDS, sel: c.wheelSel };
+    if (c.doorWheel) return { title: '문', items: c.doorItems, sel: c.doorWheel.sel };
+    return null;
+  }
+
+  // 문 행동 휠 항목: 바라보는 문 상태에 맞춘 이름·설명, 지금 못 하는 것은 off
+  doorItems() {
+    const p = this.player;
+    const d = this.match.doors.doorAt(p);
+    const o = d ? this.match.doors.options(p, d) : null;
+    return DOOR_ACTIONS.map((x) => {
+      const it = { ...x };
+      if (!o) it.off = true;
+      else if (x.act === 'crack') {
+        if (o.open || o.cracked) Object.assign(it, { label: '살짝 닫기', sub: '틈만 남기고 천천히' });
+        it.off = o.locked && o.closed;
+        if (it.off) it.sub = '잠긴 문';
+      } else if (x.act === 'kick') {
+        it.off = !o.kick;
+        if (o.locked) it.sub = '잠긴 문 · 찰수록 잘 부서짐';
+        else if (!o.kick) it.sub = '이미 열린 문';
+      } else if (x.act === 'mirror') {
+        it.off = !o.mirror;
+        if (it.off) it.sub = '닫힌 문에만';
+      } else if (x.act === 'charge') {
+        it.off = !o.charge;
+        if (!((p.gear?.c4 ?? 0) > 0)) it.sub = 'C4 없음 · 보급에서 구매';
+        else if (it.off) it.sub = '닫힌 문에만';
+        else it.sub = `C4 ${p.gear.c4}개 · 5로 기폭기`;
+      }
+      return it;
+    });
+  }
+
   result() {
     const m = this.match;
     return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts }, study: this.study };
@@ -560,7 +649,13 @@ export class GameClient {
       this.audio.play('ui');
     }
     if (!canShop && this.shop.isOpen) this.shop.close();
+    // 문 행동 휠 항목은 지금 바라보는 문 상태에 맞춤 (못 하는 행동은 흐리게)
+    if (this.controller.fHold || this.controller.doorWheel) this.controller.doorItems = this.doorItems();
     this.controller.frame(this.player);
+    if (this.controller.denied) {
+      this.controller.denied = false;
+      this.audio.play('denied');
+    }
     // 온라인 경기는 일시정지해도 멈추지 않음 (다른 사람이 계속 싸우는 중)
     const running = this.net ? !this.netOver : this.started && !this.paused;
     if (running) {
@@ -589,18 +684,19 @@ export class GameClient {
     AgentView.eye.copy(this.stage.camera.position);
     for (const v of this.views.values()) {
       v.update(dt, alpha, time);
-      // 내 몸은 숨김 (드론으로 보는 동안에는 앉아 있는 내 몸이 보임)
-      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView);
+      // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임)
+      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView);
     }
     this.effects.update(dt, alpha, this.team);
     this.gearView.update(dt, alpha, this.droneView?.id ?? null);
     this.updateDroneSounds();
     {
       const va0 = this.viewAgent ?? this.player;
-      this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended);
+      this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended && !va0.mirror);
     }
     this.conceptCards.update(time, this.player.id);
     this.devicesView.update();
+    this.doorsView.update(dt, alpha);
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
@@ -608,7 +704,7 @@ export class GameClient {
     // 손에 든 장비가 있으면 총 대신 그 장비
     const held = va.equip ? `gear:${va.equip.kind === 'throw' ? va.equip.id : va.equip.kind}` : null;
     this.viewmodel.update(dt, {
-      visible: va.alive && !this.ended && !scoped && !this.droneView,
+      visible: va.alive && !this.ended && !scoped && !this.droneView && !this.mirrorView,
       weapon: held ?? va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
@@ -630,7 +726,7 @@ export class GameClient {
       viewAgent: va,
       spectating: va !== this.player,
       showMap: this.started && !this.paused && this.input.isDown('KeyM'),
-      wheel: this.controller.wheelOpen ? this.controller.wheelSel : null,
+      wheel: this.wheelDef(),
       shopOpen: this.shop.isOpen,
     });
     const lp = this.player.lockpick;
@@ -689,6 +785,21 @@ export class GameClient {
     if (this.wasDrone && !this.player.drone) this.controller.syncFrom(this.player);
     this.wasDrone = !!this.player.drone;
     this.droneView = drone;
+    // 문 밑 카메라: 문 건너편 바닥 바로 위에서 광각으로 (끝나면 시점을 몸으로 되돌림)
+    if (this.wasMirror && !this.player.mirror) this.controller.syncFrom(this.player);
+    this.wasMirror = !!this.player.mirror;
+    const mine = a === this.player;
+    const mv = a.mirror && a.alive ? m.doors.mirrorView(a, mine ? this.controller.yaw : a.mirror.yaw ?? a.yaw, mine ? this.controller.pitch : a.mirror.pitch ?? 0) : null;
+    this.mirrorView = mv;
+    if (mv) {
+      cam.position.set(mv.pos.x, mv.pos.y, mv.pos.z);
+      this.camYaw = mv.yaw;
+      this.camPitch = mv.pitch;
+      cam.rotation.set(mv.pitch, mv.yaw, 0);
+      this.stage.setZoom(0.72);
+      this.audio.setListener(eyePos(a), { x: -Math.sin(a.yaw), y: 0, z: -Math.cos(a.yaw) });
+      return;
+    }
     if (drone) {
       const pv = drone.prev ?? drone.pos;
       cam.position.set(pv.x + (drone.pos.x - pv.x) * alpha, pv.y + (drone.pos.y - pv.y) * alpha, pv.z + (drone.pos.z - pv.z) * alpha);
@@ -921,6 +1032,7 @@ export class GameClient {
     this.gearView.dispose();
     this.conceptCards.dispose();
     this.devicesView.dispose();
+    this.doorsView.dispose();
     this.stage.overlay = null;
     this.stage.onThunder = null;
     this.stage.setZoom(1);

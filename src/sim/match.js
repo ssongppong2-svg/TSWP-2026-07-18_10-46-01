@@ -13,6 +13,8 @@ import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js
 import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
 import { Devices } from './devices.js';
+import { Doors, MIRROR } from './doors.js';
+import { leafSegment } from './door-geo.js';
 
 // 팀 명단 (포스 패치 선택 화면과 경기에서 같은 id를 씀)
 export function makeRoster(playerTeam, playerName = '나') {
@@ -76,13 +78,14 @@ export class Match {
     this.playerTeam = playerTeam;
     this.agents = [];
     this.devices = new Devices(this); // 탄성 발판·승강기·지레 셔터·미끄럼틀
+    this.charges = []; // 붙여 둔 C4 (문에 붙은 것은 문을 따라 움직임)
+    this.doors = new Doors(this); // 문 (열기·살짝 열기·발차기·폭파·문 밑 카메라)
     this.controllers = new Map();
     this.projectiles = [];
     this.veils = [];
     this.zones = [];
     this.shields = [];
     this.throwables = []; // 날아가거나 바닥에 있는 투척물 (gear.js)
-    this.charges = []; // 붙여 둔 C4
     this.drones = []; // 날고 있는 정찰 드론
     this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
     this.scans = []; // 작동 중인 무게 감지기
@@ -235,6 +238,7 @@ export class Match {
     this.roundWinner = null;
     this.roundReason = '';
     this.devices.reset();
+    this.doors.reset();
     this.placeBombs();
     if (!this.client) for (const a of this.agents) if (a.isPlayer || a.human) this.dealQuiz(a);
     const firstOfHalf = this.round === 1 || this.round === ROUNDS.half + 1;
@@ -254,6 +258,8 @@ export class Match {
       a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
       a.equip = null;
       a.drone = null;
+      a.mirror = null;
+      a.kickT = 0;
       a.stunT = a.flashT = a.gasT = 0;
       a.alive = true;
       a.hp = PLAYER.maxHp;
@@ -531,6 +537,7 @@ export class Match {
 
     this.updateZones(dt);
     this.devices.update(dt);
+    this.doors.update(dt);
     for (const a of this.agents) {
       if (!a.alive) {
         a.deadT += dt;
@@ -570,6 +577,8 @@ export class Match {
   stepAgent(a, intent, dt, live, mobile = live) {
     // 드론을 조종하는 동안: 입력은 드론으로, 몸은 앉은 채 가만히 (시점도 그대로)
     if (a.drone) intent = this.droneControl(a, intent);
+    // 문 밑 카메라를 쥔 동안: 시점은 카메라로, 몸은 앉은 채 가만히
+    else if (a.mirror) intent = this.doors.mirrorControl(a, intent);
     a.yaw = intent.yaw;
     a.pitch = clamp(intent.pitch, -1.45, 1.45);
     for (const p of a.patches) {
@@ -591,7 +600,9 @@ export class Match {
     if (intent.report && live) this.reportContact(a);
     if (live) {
       if (a.lockpick) this.stepLockpick(a, intent, dt);
-      else if (intent.interact && canAct && !this.devices.tryUse(a)) this.tryStartLockpick(a);
+      // F: 지렛대 → 폭탄 해체 → 문 순서로
+      else if (intent.interact && canAct && !this.devices.tryUse(a) && !this.tryStartLockpick(a)) this.doors.use(a);
+      if (intent.door && canAct && !a.lockpick && !a.drone) this.doors.act(a, intent.door, intent.doorId != null ? this.doors.list[intent.doorId] : undefined);
       if (canAct && !a.lockpick) {
         intent.patch.forEach((pressed, i) => {
           if (pressed) this.usePatch(a, i);
@@ -602,7 +613,7 @@ export class Match {
     const w = WEAPONS[a.weapon];
     a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
     a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
-    this.stepWeapon(a, intent, dt, live && !a.lockpick);
+    this.stepWeapon(a, intent, dt, live && !a.lockpick && !(a.kickT > 0));
     this.moveAgent(a, intent, dt, live, mobile);
   }
 
@@ -932,8 +943,9 @@ export class Match {
   clientTick(dt) {
     this.time += dt;
     if (this.phase === 'live') this.timeLeft = Math.max(0, this.timeLeft - dt);
-    // 승강기·탄성 발판은 화면에서도 미리 움직임 (방장 상태를 받으면 맞춤)
+    // 승강기·탄성 발판·문은 화면에서도 미리 움직임 (방장 상태를 받으면 맞춤)
     this.devices.update(dt);
+    this.doors.update(dt);
     const a = this.localAgent;
     const myDrone = a?.drone ? this.drones.find((d) => d.id === a.drone) : null;
     if (a?.alive && myDrone && this.phase !== 'ended') {
@@ -943,6 +955,12 @@ export class Match {
       myDrone.prev = { ...myDrone.pos };
       stepDrone(this.map, myDrone, { mx: intent.moveX, mz: intent.moveZ, up: intent.jump, down: intent.crouch, yaw: intent.yaw, pitch: intent.pitch }, dt);
       myDrone.predicted = true;
+    } else if (a?.alive && a.mirror && this.phase !== 'ended') {
+      // 문 밑 카메라: 몸은 그대로, 카메라 방향만 이 화면에서 바로 (거두기 등 동작은 방장이 처리)
+      const ctrl = this.controllers.get(a.id);
+      const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
+      a.mirror.yaw = intent.yaw;
+      a.mirror.pitch = intent.pitch;
     } else if (a?.alive && this.phase !== 'ended') {
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
@@ -1073,6 +1091,21 @@ export class Match {
         this.emit('impact', { ...hp, nx: -Math.sin(shield.yaw), ny: 0, nz: -Math.cos(shield.yaw), kind: 'shield', projectile: p });
         continue;
       }
+      if (mh && mh.door != null) {
+        // 문짝: 산탄은 자물쇠를 부수고, 관통력이 있는 탄은 뚫고 지나감 (피해가 줄어듦)
+        const d = this.doors.list[mh.door];
+        const through = !!d && this.doors.shot(d, mh, p);
+        this.emit('impact', { x: mh.x, y: mh.y, z: mh.z, nx: mh.nx, ny: mh.ny, nz: mh.nz, kind: p.harmless ? 'debris' : 'door', mat: d?.mat ?? 'wood', projectile: p });
+        if (through) {
+          const sp = Math.hypot(p.vel.x, p.vel.y, p.vel.z) || 1;
+          p.pos.x = mh.x + (p.vel.x / sp) * 0.05;
+          p.pos.y = mh.y + (p.vel.y / sp) * 0.05;
+          p.pos.z = mh.z + (p.vel.z / sp) * 0.05;
+          p.life -= dt;
+          if (p.life > 0) keep.push(p);
+        }
+        continue;
+      }
       if (mh) {
         // 작용·반작용 도탄: 벽이 탄을 같은 크기의 힘으로 밀어내 반사
         if (p.bounces > 0 && !p.harmless) {
@@ -1126,6 +1159,7 @@ export class Match {
     t.lastHurtBy = attacker?.id ?? null;
     // 드론 조종 중에 몸이 맞으면 화면이 몸으로 돌아옴
     if (t.drone && hpLoss > 0) this.endDrone(this.drones.find((d) => d.id === t.drone), 'hurt');
+    if (t.mirror && hpLoss > 0) this.doors.endMirror(t, 'hurt');
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
     t.tagT = PLAYER.tagTime;
     t.punch = Math.min(0.08, t.punch + (pellet ? 0.006 : headshot ? 0.04 : 0.022));
@@ -1150,6 +1184,8 @@ export class Match {
     t.armorKind = null;
     t.equip = null;
     if (t.drone) this.endDrone(this.drones.find((d) => d.id === t.drone), 'dead');
+    if (t.mirror) this.doors.endMirror(t, 'dead');
+    t.kickT = 0;
     t.stunT = t.flashT = t.gasT = 0;
     t.deadT = 0;
     t.held = null;
@@ -1744,8 +1780,36 @@ export class Match {
       this.emit('gearDenied', { agent: a, which: 'c4', reason: 'far' });
       return false;
     }
+    return this.attachCharge(a, spot);
+  }
+
+  // 문 행동 '폭약': C4를 손에 들지 않아도 문짝 자물쇠 옆(내 쪽 면)에 바로 붙임
+  placeDoorCharge(a, d) {
+    if (!((a.gear?.c4 ?? 0) > 0) || !d || d.st.broken || Math.abs(d.st.ang) > 0.3) {
+      this.emit('gearDenied', { agent: a, which: 'c4', reason: (a.gear?.c4 ?? 0) > 0 ? 'door' : 'none' });
+      return false;
+    }
+    const s = this.doors.side(d, a.pos);
+    const leaf = d.leaves[0];
+    const t = d.double ? leaf.len - 0.15 : leaf.len * 0.78;
+    const x = leaf.hx + leaf.dx * t, z = leaf.hz + leaf.dz * t;
+    return this.attachCharge(a, { x: x + d.n.x * s * 0.04, y: 1.15, z: z + d.n.z * s * 0.04, nx: d.n.x * s, ny: 0, nz: d.n.z * s, door: d.id, leaf: 0 });
+  }
+
+  // C4를 붙임. 문짝에 붙이면 문을 따라 움직이고, 터지면 문이 부서짐
+  attachCharge(a, spot) {
     a.gear.c4--;
-    const c = { id: this.nextId++, kind: 'c4', ownerId: a.id, team: a.team, ...spot, armAt: this.time + GEAR.c4.arm, doorId: spot.doorId ?? null };
+    const { door = null, leaf = null, ...pos } = spot;
+    const c = { id: this.nextId++, kind: 'c4', ownerId: a.id, team: a.team, ...pos, armAt: this.time + GEAR.c4.arm, doorId: door };
+    if (door != null) {
+      // 문짝 위 자리 (경첩에서 거리 · 높이 · 붙인 면)
+      const d = this.doors.list[door];
+      const lf = d.leaves[leaf ?? 0];
+      const sg = leafSegment(d, lf, d.st.ang);
+      const t = (pos.x - lf.hx) * sg.dx + (pos.z - lf.hz) * sg.dz;
+      const side = Math.sign(-sg.dz * pos.nx + sg.dx * pos.nz) || 1;
+      c.onLeaf = { leaf: leaf ?? 0, t: Math.max(0.05, Math.min(lf.len - 0.05, t)), side };
+    }
     this.charges.push(c);
     a.equip = { kind: 'det' };
     a.swapT = 0.35;
@@ -1829,6 +1893,12 @@ export class Match {
   // 폭발 (세열 수류탄·C4): 가까울수록 큰 피해, 벽 뒤는 안전, 바깥쪽으로 밀려남. 피해는 적에게만
   blast(at, def, owner) {
     const hits = [];
+    // C4: 붙인 문(또는 바로 옆 문)이 부서진 뒤에 폭발이 퍼짐 (건너편까지 닿음)
+    if (def.id === 'c4') {
+      for (const d of this.doors.list) {
+        if (d.id === at.doorId || Math.hypot(d.x - at.x, d.z - at.z) < 1.3) this.doors.breach(d, at, owner);
+      }
+    }
     for (const a of this.agents) {
       if (!a.alive) continue;
       const c = chestPos(a);
@@ -1964,8 +2034,12 @@ export class Match {
       if (!a.alive) continue;
       // 섬광에 눈이 부시면 아무것도 못 봄
       if ((a.flashT ?? 0) > GEAR.flash.time * EFFECT.flashBlind) continue;
-      const eye = eyePos(a);
-      const fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw);
+      // 문 밑 카메라를 쥐었으면 카메라 자리에서 넓게 봄
+      const view = a.mirror ? this.doors.mirrorView(a) : null;
+      const eye = view ? view.pos : eyePos(a);
+      const lookYaw = view ? view.yaw : a.yaw;
+      const fx = -Math.sin(lookYaw), fz = -Math.cos(lookYaw);
+      const fovCos = view ? MIRROR.fov : 0.4;
       for (const e of this.agents) {
         if (!e.alive || e.team === a.team) continue;
         const ch = chestPos(e);
@@ -1974,7 +2048,8 @@ export class Match {
         // 멀리서 앉아 멈춰 있는 적은 어둠 속에서 잘 안 보임
         const still = Math.hypot(e.vel.x, e.vel.z) < 0.5 && e.crouch > 0.5;
         if (d > (still ? maxSight * 0.55 : maxSight)) continue;
-        if (d > 3 && (dx * fx + dz * fz) / d < 0.4) continue;
+        if (d > 3 && (dx * fx + dz * fz) / d < fovCos) continue;
+        if (view && d > MIRROR.range) continue;
         if (!this.clearLine(eye, eyePos(e)) && !this.clearLine(eye, ch)) continue;
         a.visibleEnemies.push(e.id);
         e.spottedT = this.time;

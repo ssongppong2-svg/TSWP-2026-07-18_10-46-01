@@ -11,6 +11,15 @@ export const COMMANDS = [
   { type: 'A', label: 'A 목표', sub: '해체 진입 / 방어', key: 4, angle: 210 },
 ];
 
+// 문 행동 휠 (문을 보고 F를 길게 누름 · 짧게 누르면 열기/닫기)
+export const DOOR_ACTIONS = [
+  { act: 'crack', label: '살짝 열기', sub: '틈으로 엿보기', key: 1, angle: -90 },
+  { act: 'kick', label: '발차기', sub: '걷어차 단숨에 엶', key: 2, angle: 0 },
+  { act: 'mirror', label: '문 밑 카메라', sub: '건너편 엿보기', key: 3, angle: 90 },
+  { act: 'charge', label: '폭약 설치', sub: 'C4로 문 폭파', key: 4, angle: 180 },
+];
+const DOOR_HOLD = 0.28; // F를 이만큼(초) 누르고 있으면 휠
+
 // 키보드·마우스 입력. event.code를 써서 한글 자판 상태에서도 WASD가 그대로 동작합니다.
 export class Input {
   constructor(target) {
@@ -163,8 +172,12 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [], equip: null };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [], equip: null, door: null };
     this.shop = null; // 상점이 열려 있으면: 마우스는 상점 커서, 숫자 키는 구매
+    this.doorTarget = null; // (요원) → 손이 닿는 문 (게임이 넣어 줌)
+    this.doorItems = DOOR_ACTIONS; // 지금 문 상태에 맞춘 휠 항목 (off: 지금은 못 함)
+    this.fHold = null; // 문 앞에서 F를 누른 시각
+    this.doorWheel = null; // { vec, sel, used }
     this.lastDx = 0;
     this.lastDy = 0;
     this.wheelOpen = false;
@@ -173,12 +186,12 @@ export class PlayerController {
     this.wheelUsed = false;
   }
 
-  // 휠 방향 → 명령 번호 (가운데 근처면 -1)
-  pickSector(v) {
+  // 휠 방향 → 항목 번호 (가운데 근처면 -1)
+  pickSector(v, items = COMMANDS) {
     if (Math.hypot(v.x, v.y) < 26) return -1;
     const ang = (Math.atan2(v.y, v.x) * 180) / Math.PI;
     let best = -1, bestD = Infinity;
-    COMMANDS.forEach((c, i) => {
+    items.forEach((c, i) => {
       let d = Math.abs(((ang - c.angle + 540) % 360) - 180);
       if (d < bestD) {
         bestD = d;
@@ -203,6 +216,51 @@ export class PlayerController {
       for (const code of this.input.takePressed()) {
         if (code === 'Mouse0') this.shop.click();
         else this.shop.key(code);
+      }
+      this.input.takeWheel();
+      return;
+    }
+    // 문 행동 휠: 문 앞에서 F를 길게 → 휠, 짧게 떼면 열기·닫기
+    if (this.fHold && (!agent?.alive || !this.input.active)) {
+      // 쓰러졌거나 일시정지(마우스 고정 풀림): 아무것도 하지 않고 취소
+      this.fHold = null;
+      this.doorWheel = null;
+    }
+    if (this.fHold) {
+      const down = this.input.isDown('KeyF');
+      if (!down) {
+        if (!this.doorWheel) this.queue.interact = true;
+        else if (!this.doorWheel.used) {
+          const it = this.doorItems[this.doorWheel.sel];
+          if (it && !it.off) this.queue.door = it.act;
+          else if (it) this.denied = true;
+        }
+        this.fHold = null;
+        this.doorWheel = null;
+      } else if (!this.doorWheel && (performance.now() - this.fHold.t) / 1000 >= DOOR_HOLD) {
+        this.doorWheel = { vec: { x: 0, y: 0 }, sel: -1, used: false };
+      }
+    }
+    if (this.doorWheel) {
+      const w = this.doorWheel;
+      w.vec.x += dx;
+      w.vec.y += dy;
+      const l = Math.hypot(w.vec.x, w.vec.y);
+      if (l > 110) {
+        w.vec.x *= 110 / l;
+        w.vec.y *= 110 / l;
+      }
+      if (!w.used) w.sel = this.pickSector(w.vec, this.doorItems);
+      this.lastDx = this.lastDy = 0;
+      for (const code of this.input.takePressed()) {
+        const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
+        const k = this.doorItems.findIndex((c) => c.key === digit);
+        if (k >= 0 && !w.used) {
+          w.sel = k;
+          w.used = true;
+          if (!this.doorItems[k].off) this.queue.door = this.doorItems[k].act;
+          else this.denied = true;
+        }
       }
       this.input.takeWheel();
       return;
@@ -261,7 +319,11 @@ export class PlayerController {
       }
       const slot = { KeyC: 0, KeyQ: 1, KeyE: 2, KeyX: 3 }[code];
       if (slot !== undefined) this.queue.patch[slot] = true;
-      else if (code === 'KeyF') this.queue.interact = true;
+      else if (code === 'KeyF') {
+        // 문을 보고 있으면 길게 누르는지 기다림 (문 밑 카메라 중에는 바로 거둠)
+        if (!agent?.mirror && !agent?.lockpick && this.doorTarget?.(agent)) this.fHold = { t: performance.now() };
+        else this.queue.interact = true;
+      }
       else if (code === 'KeyR') this.queue.reload = true;
       else if (code === 'Mouse1' || code === 'KeyH') this.queue.report = true;
       else if (digit === 1 && agent?.primary) this.queue.switchTo = agent.primary;
@@ -303,8 +365,8 @@ export class PlayerController {
       i.jump = inp.isDown('Space');
       i.crouch = inp.isDown('ControlLeft') || inp.isDown('ControlRight');
       i.lean = (inp.isDown('KeyV') ? 1 : 0) - (inp.isDown('KeyZ') ? 1 : 0);
-      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen && !this.shop?.isOpen;
-      i.ads = (inp.buttons & 4) !== 0 && !this.shop?.isOpen;
+      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen && !this.doorWheel && !this.shop?.isOpen;
+      i.ads = (inp.buttons & 4) !== 0 && !this.doorWheel && !this.shop?.isOpen;
     }
     const q = this.queue;
     i.patch = q.patch;
@@ -317,7 +379,8 @@ export class PlayerController {
     i.buy = q.buys.length ? q.buys.shift() : null;
     i.quiz = q.quiz ?? -1;
     i.equip = q.equip;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1, equip: null };
+    i.door = q.door;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1, equip: null, door: null };
     return i;
   }
 }

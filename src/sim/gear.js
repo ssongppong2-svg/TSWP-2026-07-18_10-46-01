@@ -176,7 +176,10 @@ export function placeTarget(map, eye, dir, reach) {
   const end = { x: eye.x + dir.x * reach, y: eye.y + dir.y * reach, z: eye.z + dir.z * reach };
   const hit = map.raycast(eye, end);
   if (!hit) return null;
-  return { x: hit.x + hit.nx * 0.04, y: hit.y + hit.ny * 0.04, z: hit.z + hit.nz * 0.04, nx: hit.nx, ny: hit.ny, nz: hit.nz };
+  const spot = { x: hit.x + hit.nx * 0.04, y: hit.y + hit.ny * 0.04, z: hit.z + hit.nz * 0.04, nx: hit.nx, ny: hit.ny, nz: hit.nz };
+  // 문짝에 붙이면 그 문 (문을 따라 움직이고, 터지면 문이 부서짐)
+  if (hit.door != null) Object.assign(spot, { door: hit.door, leaf: hit.leaf });
+  return spot;
 }
 
 export const gearCount = (a) => GEAR_ORDER.reduce((s, id) => s + (a.gear?.[id] ?? 0), 0);

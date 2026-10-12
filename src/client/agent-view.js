@@ -1335,6 +1335,12 @@ export class AgentView {
     this.flinch.step(dt);
     this.kick.step(dt);
     this.idle += dt;
+    // 문 발차기: 들어 올림 → 뻗음 → 내림
+    if (this.kickPh != null) {
+      this.kickPh += dt / 0.6;
+      this.kickW = this.kickPh < 1 ? Math.pow(Math.sin(Math.PI * Math.min(1, this.kickPh * 1.15)), 0.7) : 0;
+      if (this.kickPh >= 1) this.kickPh = null;
+    } else this.kickW = 0;
 
     // ── 상태 값 (부드럽게)
     const dead = !a.alive;
@@ -1697,6 +1703,10 @@ export class AgentView {
         A.lerp(v.a.set(s * 0.11, s < 0 ? 0.34 : 0.26, s < 0 ? -0.14 : 0.1), st.air);
         pitch += -0.35 * st.air;
       }
+      if ((this.kickW ?? 0) > 0.001 && s > 0 && !dead) {
+        A.lerp(v.a.set(0.1, 0.52, -0.6), this.kickW);
+        pitch += -0.8 * this.kickW;
+      }
       if (dead) {
         const d = smooth(this.deathT / 0.35) * (1 - smooth((this.deathT - 0.3) / 0.6));
         A.z += (s < 0 ? -0.1 : 0.05) * d;
@@ -1716,6 +1726,11 @@ export class AgentView {
       leg.foot.position.copy(A);
       leg.foot.rotation.set(pitch, s * -0.08, 0, 'YXZ');
     }
+  }
+
+  // 문 발차기: 오른다리를 들어 앞으로 차는 동작 (0.6초)
+  kickDoor() {
+    this.kickPh = 0;
   }
 
   // 피격: 붉은 번쩍임 대신 몸이 움찔함 (상체·머리가 짧게 튕김)

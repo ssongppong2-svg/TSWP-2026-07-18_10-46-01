@@ -124,6 +124,14 @@ export const FORCE_BOUND = {
     { type: 'crate', r: 23, c: 7 }, // A 길
     { type: 'crate', r: 22, c: 27 }, // B 길
   ],
+  // 문 (칸 하나짜리 문간): span = 닫힌 문짝이 놓이는 방향, mat = 재질 (철문은 관통력 높은 탄만 뚫음), open = 처음에 열려 있음
+  doorMat: 'steel',
+  doors: [
+    { r: 25, c: 12, span: 'z', mat: 'steel' }, // 연구동 서문 (A 길 ↔ 계단실)
+    { r: 25, c: 15, span: 'z', mat: 'wood', hinge: 1, open: 1 }, // 계단실 ↔ 복도
+    { r: 24, c: 20, span: 'z', mat: 'wood' }, // 복도 ↔ 동쪽 방
+    { r: 21, c: 23, span: 'z', mat: 'steel', hinge: 1 }, // 동쪽 방 ↔ B 길
+  ],
   // 포스팀 봇이 지키는 자리 (r=줄, c=칸, lr/lc=바라볼 칸, f: 1 = 2층)
   holds: {
     A: [

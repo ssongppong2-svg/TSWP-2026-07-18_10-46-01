@@ -127,6 +127,7 @@ export function emptyIntent(agent) {
     quiz: -1, // 구매 시간 개념 점검: 고른 보기 번호
     command: null, // 지휘 명령 { type } (분대장만)
     report: false, // 적 보고: 조준한 곳을 무전으로 알림
+    door: null, // 문 행동: 'crack' 살짝 열기 · 'kick' 발차기 · 'mirror' 문 밑 카메라 · 'charge' 문에 C4 (F는 interact)
   };
 }
 

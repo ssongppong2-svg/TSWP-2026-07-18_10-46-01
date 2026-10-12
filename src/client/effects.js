@@ -548,6 +548,15 @@ export class Effects {
       return;
     }
     const n = { x: e.nx ?? 0, y: e.ny ?? 1, z: e.nz ?? 0 };
+    // 문짝: 나무는 부스러기, 철문은 불똥 (문은 움직이므로 탄흔은 남기지 않음)
+    if (e.kind === 'door') {
+      if (e.mat === 'steel') this.sparks.burst(p, '#ffd9a0', 7, { speed: 4, up: 1, life: 0.25, normal: n, gravity: 12 });
+      else {
+        this.dust.burst(p, '#7a5a3a', 8, { speed: 2.2, up: 0.6, life: 0.7, normal: n, gravity: 6, drag: 2 });
+        this.dust.burst(p, '#c9a77a', 4, { speed: 3, up: 1, life: 0.35, normal: n, gravity: 10 });
+      }
+      return;
+    }
     if (e.kind === 'shield') {
       this.sparks.burst(p, '#ffd29a', 10, { speed: 4, up: 1, life: 0.3, normal: n, gravity: 10 });
       return;

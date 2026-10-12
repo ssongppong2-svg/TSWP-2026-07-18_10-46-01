@@ -148,6 +148,38 @@ export class TacticalMap {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
 
+    // 문 (1층): 문짝 선 — 닫힘 밝게 · 잠김(아는 경우) 붉게 · 열림 흐리게 · 부서짐 점선
+    if (floor === 0 && m.map.leaves) {
+      g.lineCap = 'round';
+      for (const d of m.doors?.list ?? []) {
+        const st = d.st;
+        if (!st) continue;
+        if (st.broken) {
+          const [x, y] = this.toPx(d.x, d.z);
+          g.strokeStyle = 'rgba(200,180,150,0.5)';
+          g.lineWidth = 1;
+          g.setLineDash([2, 2]);
+          g.beginPath();
+          g.moveTo(x - d.u.x * S * 0.3, y - d.u.z * S * 0.3);
+          g.lineTo(x + d.u.x * S * 0.3, y + d.u.z * S * 0.3);
+          g.stroke();
+          g.setLineDash([]);
+          continue;
+        }
+        const closed = Math.abs(st.ang) < 0.05;
+        g.strokeStyle = closed ? (st.locked && st.knownLocked ? '#e5534b' : 'rgba(225,230,236,0.9)') : 'rgba(225,230,236,0.45)';
+        g.lineWidth = closed ? 2 : 1.5;
+        for (const L of m.map.leaves) {
+          if (L.door !== d.id) continue;
+          const [x0, y0] = this.toPx(L.x0, L.z0), [x1, y1] = this.toPx(L.x1, L.z1);
+          g.beginPath();
+          g.moveTo(x0, y0);
+          g.lineTo(x1, y1);
+          g.stroke();
+        }
+      }
+    }
+
     // 아군이 만든 패치 구역
     for (const z of m.zones) {
       if (z.team !== myTeam) continue;
