@@ -84,6 +84,9 @@ export class Hud {
         <div class="vw-ammo"><span class="am-type"></span><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
         <div class="vw-name"></div>
       </div>
+      <div class="drone-hud"><div class="dh-frame"><i></i><i></i><i></i><i></i></div><div class="dh-box"></div>
+        <div class="dh-top"><b>정찰 드론 · 라이브</b><span class="dh-bat"><i></i></span><em class="dh-sec"></em></div>
+        <div class="dh-keys"><kbd>WASD</kbd> 이동 <kbd>Space</kbd> 위 <kbd>Ctrl</kbd> 아래 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>F</kbd> 복귀</div></div>
       <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
@@ -147,6 +150,9 @@ export class Hud {
       ammo: $('.vh-weapon'),
       ammoType: $('.am-type'),
       gear: $('.vw-gear'),
+      drone: $('.drone-hud'),
+      droneBat: $('.dh-bat i'),
+      droneSec: $('.dh-sec'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -414,17 +420,17 @@ export class Hud {
     // 투척·장비: 가진 것과 개수, 손에 든 것은 밝게 (4 투척물 · 5 C4/기폭기)
     const eq = a.equip;
     const charges = (m.charges ?? []).filter((c) => c.ownerId === a.id).length;
-    const gearItems = [...THROW_ORDER, 'c4'].filter((id) => (a.gear?.[id] ?? 0) > 0);
+    const gearItems = [...THROW_ORDER, 'c4', 'drone'].filter((id) => (a.gear?.[id] ?? 0) > 0);
     const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}`;
     this.set('gear', gearSig, () => {
-      const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === 'c4' && eq?.kind === 'c4');
+      const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === eq?.kind && (id === 'c4' || id === 'drone'));
       const cells = gearItems.map((id) => `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
       if (charges) cells.push(`<span class="vg ${eq?.kind === 'det' ? 'on' : ''}" title="기폭기 · 붙인 C4 ${charges}개">${GEAR_ICONS.det}<i>${charges}</i></span>`);
       E.gear.innerHTML = cells.length ? `<kbd>4·5</kbd>${cells.join('')}` : '';
       E.gear.classList.toggle('show', cells.length > 0);
     });
     if (eq) {
-      const name = eq.kind === 'throw' ? GEAR[eq.id].name : eq.kind === 'c4' ? 'C4 폭약' : '기폭기';
+      const name = eq.kind === 'throw' ? GEAR[eq.id].name : { c4: 'C4 폭약', det: '기폭기', drone: '정찰 드론' }[eq.kind] ?? '';
       this.set('wsel', `gear:${name}`, () => (E.wname.innerHTML = `${GEAR_ICONS[eq.kind === 'throw' ? eq.id : eq.kind] ?? ''}<span>${name}</span>`));
     }
     // 탄종 (일반탄이 아니면 탄약 앞에 표시)
@@ -472,7 +478,21 @@ export class Hud {
     const chOff = this.settings.crosshair === 'off';
     const scoped = !!w.scope && a.adsT > 0.5;
     this.set('scope', a.alive && !!w.scope && a.adsT > 0.85, (v) => E.scope.classList.toggle('show', v));
-    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen), (v) => E.crosshair.classList.toggle('hide', v));
+    // 드론 조종 화면: 배터리·조작법, 보통 조준점은 숨김
+    const drone = a.drone ? (m.drones ?? []).find((d) => d.id === a.drone) : null;
+    this.set('drone', !!drone, (v) => {
+      E.drone.classList.toggle('show', v);
+      this.root.classList.toggle('droning', v);
+    });
+    if (drone) {
+      const bat = Math.max(0, drone.battery ?? 0);
+      this.set('droneBat', Math.ceil(bat), (v) => {
+        E.droneSec.textContent = `${v}초`;
+        E.droneBat.style.transform = `scaleX(${bat / GEAR.drone.battery})`;
+        E.drone.classList.toggle('low', v <= 5);
+      });
+    }
+    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen || drone), (v) => E.crosshair.classList.toggle('hide', v));
     this.hitT -= dt;
     if (this.hitT <= 0) E.hitmarker.classList.remove('show');
 
@@ -496,7 +516,8 @@ export class Hud {
       const eq2 = a.equip;
       if (eq2?.kind === 'throw') prompt = `${GEAR[eq2.id].name} · <kbd>왼쪽 클릭</kbd> 멀리 <kbd>오른쪽 클릭</kbd> 가까이 <kbd>4</kbd> 다음 <kbd>1</kbd> 총 <small>(선 = 중력 때문에 휘는 길)</small>`;
       else if (eq2?.kind === 'c4') prompt = '<kbd>왼쪽 클릭</kbd> 가까운 벽·바닥·문에 C4 붙이기 <small>(2.6 m 안)</small>';
-      else if (eq2?.kind === 'det') prompt = '<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 <kbd>5</kbd> C4 <kbd>1</kbd> 총';
+      else if (eq2?.kind === 'det') prompt = '<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 <kbd>5</kbd> 다음 장비 <kbd>1</kbd> 총';
+      else if (eq2?.kind === 'drone') prompt = '<kbd>왼쪽 클릭</kbd> 정찰 드론 띄우기 <small>(조종하는 동안 몸은 앉아서 무방비)</small>';
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';
       else if (a.slippery) prompt = '마찰력 0 구역 · 제동 불가';

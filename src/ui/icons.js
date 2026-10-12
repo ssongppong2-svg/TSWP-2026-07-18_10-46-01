@@ -69,6 +69,7 @@ export const GEAR_ICONS = {
   gas: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="11" width="7" height="11" rx="1.2"/><path d="M5.5 9h4v2h-4z"/><path d="M12.5 8.5a3 3 0 0 1 5-2 3 3 0 0 1 4 2.6 2.5 2.5 0 0 1-1.6 4.4H14a3 3 0 0 1-1.5-5z" fill-opacity=".55"/><path d="M15.5 16.5v2.5M18.5 16v3.5" stroke="currentColor" stroke-width="1.4"/></svg>`,
   c4: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="2.5" y="8" width="13" height="10" rx="1"/><path d="M5 8v10M8 8v10M11 8v10" stroke="#08151a" stroke-width=".8" opacity=".55"/><rect x="11.5" y="5" width="6" height="5" rx=".6" fill-opacity=".6"/><path d="M17.5 7.5h2.5l1.5-3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="14.5" cy="7.5" r=".9" fill="#ff5a4f"/></svg>`,
   det: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="8" width="10" height="14" rx="2"/><path d="M14 8V2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="13" r="2.4" fill="#ff5a4f"/><path d="M9.5 18h5" stroke="#08151a" stroke-width="1.2"/></svg>`,
+  drone: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="9" y="10" width="6" height="5" rx="1" fill="currentColor"/><path d="M9 11 5.5 7.5M15 11l3.5-3.5M9 14l-3.5 3.5M15 14l3.5 3.5"/><ellipse cx="5" cy="7" rx="3" ry="1"/><ellipse cx="19" cy="7" rx="3" ry="1"/><ellipse cx="5" cy="18" rx="3" ry="1"/><ellipse cx="19" cy="18" rx="3" ry="1"/></svg>`,
 };
 
 export const UI_ICONS = {

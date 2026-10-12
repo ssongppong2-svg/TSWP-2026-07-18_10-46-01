@@ -508,6 +508,16 @@ function buildGearParts(id) {
     P.add('can', rbox(0.032, 0.016, 0.026, 0.003), [0.0, 0.024, 0]);
     P.add('red', rbox(0.006, 0.004, 0.006, 0.001), [0.008, 0.033, 0.006]);
     P.add('steel', cylG(0.0012, 0.0012, 0.05, 6), [-0.012, 0.045, 0], [0, 0, 0.4]);
+  } else if (id === 'drone') {
+    // 정찰 드론 (접은 채 손바닥 위): 몸통 + 팔 4개 + 프로펠러 보호대
+    P.add('can', rbox(0.07, 0.03, 0.1, 0.008), [0, 0.02, 0]);
+    P.add('dark', sphG(0.016, 10, 8), [0, 0.012, -0.052]);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      P.add('dark', rbox(0.01, 0.008, 0.09, 0.002), [x * 0.04, 0.028, z * 0.04], [0, Math.atan2(x, z), 0]);
+      P.add('canLight', cylG(0.036, 0.036, 0.006, 16, true), [x * 0.07, 0.032, z * 0.07]);
+      P.add('dark', cylG(0.008, 0.008, 0.016, 8), [x * 0.07, 0.03, z * 0.07]);
+    }
+    P.add('red', sphG(0.005, 6, 4), [0, 0.038, 0.045]);
   } else if (id === 'det') {
     // 기폭기: 손에 쥐는 상자 + 빨간 단추 + 안테나
     P.add('can', rbox(0.036, 0.075, 0.022, 0.006), [0, 0.02, 0]);
@@ -595,7 +605,7 @@ export class ViewModel {
     const GUNS = [
       ['rifle', () => this.buildRifle()], ['pistol', () => this.buildPistol()], ['knife', () => this.buildKnife()],
       ['smg', () => this.buildSmg()], ['shotgun', () => this.buildShotgun()], ['sniper', () => this.buildSniper()], ['sheriff', () => this.buildSheriff()],
-      ...['frag', 'stun', 'flash', 'smoke', 'gas', 'c4', 'det'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
+      ...['frag', 'stun', 'flash', 'smoke', 'gas', 'c4', 'det', 'drone'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
     ];
     for (const [id, build] of GUNS) {
       this.pending = [];

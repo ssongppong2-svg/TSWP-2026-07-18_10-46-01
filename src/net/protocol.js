@@ -10,7 +10,7 @@ import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
 const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
@@ -171,6 +171,7 @@ export class HostSync {
       D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)
       G: (m.throwables ?? []).map((t) => [t.id, THROW_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물
       K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz)]), // C4
+      Q: (m.drones ?? []).map((d) => [d.id, this.ai(m.agentById(d.ownerId)), r2(d.pos.x), r2(d.pos.y), r2(d.pos.z), r3(d.yaw), r3(d.pitch), r1(d.battery)]), // 드론
       E: this.events.map((e) => [e.s, e.p]),
     };
     if (m.phase === 'ended') snap.R = m.reason;
@@ -344,6 +345,31 @@ export class ClientSync {
         t.rest = !!rest;
         return t;
       });
+    }
+    // 드론: 내 드론은 이 화면에서 미리 날리므로 많이 어긋날 때만 맞춤, 다른 드론은 받은 위치로
+    if (snap.Q) {
+      const old = new Map((m.drones ?? []).map((d) => [d.id, d]));
+      m.drones = snap.Q.map(([id, oi, dx, dy, dz, yaw, pitch, battery]) => {
+        const owner = m.agents[oi];
+        const d = old.get(id) ?? { id, ownerId: owner?.id ?? null, team: owner?.team ?? null, pos: { x: dx, y: dy, z: dz }, prev: { x: dx, y: dy, z: dz }, vel: { x: 0, y: 0, z: 0 }, yaw, pitch };
+        d.battery = battery;
+        if (owner === this.local && d.predicted) {
+          const err = Math.hypot(dx - d.pos.x, dy - d.pos.y, dz - d.pos.z);
+          if (err > 1.5) d.pos = { x: dx, y: dy, z: dz };
+          else if (err > 0.05) {
+            d.pos.x += (dx - d.pos.x) * 0.1;
+            d.pos.y += (dy - d.pos.y) * 0.1;
+            d.pos.z += (dz - d.pos.z) * 0.1;
+          }
+        } else {
+          d.prev = { ...d.pos };
+          d.pos = { x: dx, y: dy, z: dz };
+          d.yaw = yaw;
+          d.pitch = pitch;
+        }
+        return d;
+      });
+      for (const a of m.agents) a.drone = m.drones.find((d) => d.ownerId === a.id)?.id ?? null;
     }
     if (snap.K) m.charges = snap.K.map(([id, oi, cx, cy, cz, nx, ny, nz]) => ({ id, kind: 'c4', ownerId: m.agents[oi]?.id ?? null, team: m.agents[oi]?.team ?? null, x: cx, y: cy, z: cz, nx, ny, nz }));
     m.zones = mergeById(m.zones, snap.Z);

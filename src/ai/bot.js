@@ -18,7 +18,7 @@ const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const NOISE_TEXT = {
   step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
   smg: '기관단총 사격음', sniper: '저격총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
-  throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음',
+  throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음', drone: '드론 소리',
 };
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 const compass = (dx, dz) => COMPASS[Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
@@ -110,6 +110,12 @@ export class BotBrain {
 
   // ───────────────────────── 매 틱 ─────────────────────────
   getIntent(match, a, dt) {
+    // 드론을 날리는 동안: 몸은 앉아서 기다림 (드론은 자동 비행)
+    if (a.drone) {
+      const i = emptyIntent(a);
+      i.crouch = true;
+      return i;
+    }
     const intent = emptyIntent(a);
     const live = match.phase === 'live';
     const eye = eyePos(a);
@@ -148,6 +154,12 @@ export class BotBrain {
     }
     // 섬광을 던졌으면 터질 때까지 고개를 돌림 (자기 섬광에 눈부시지 않게)
     if (!desired && this.avoidT > 0 && !visible) desired = { yaw: this.avoidYaw, pitch: 0 };
+    // 적 드론이 보이면 쏴서 떨어뜨림 (적 요원이 안 보일 때)
+    let droneTarget = null;
+    if (!desired && !visible && live && !a.lockpick) {
+      droneTarget = this.spotDrone(match, a, eye, dt);
+      if (droneTarget) desired = anglesTo(eye, droneTarget.pos);
+    }
     if (!desired && this.pending) {
       this.pending.t -= dt;
       if (this.pending.t <= 0) this.pending = null;
@@ -243,6 +255,12 @@ export class BotBrain {
     }
     if (!engaging && paused) intent.crouch = this.pauseCrouch;
     if (!engaging && !wish && this.goal?.crouchAtGoal && !a.lockpick) intent.crouch = true;
+
+    // 드론 사격: 조준이 맞고 반응 시간이 지났으면
+    if (droneTarget && this.droneSeen > this.d.reaction * 1.4 && !WEAPONS[a.weapon].melee) {
+      const aimDiff = Math.hypot(wrapAngle(desired.yaw - this.aimYaw), desired.pitch - this.aimPitch);
+      if (aimDiff < 0.05) this.shoot(a, intent, dt);
+    }
 
     // ── 무기 관리
     const prim = a.primary ? a.weapons[a.primary] : null;
@@ -430,6 +448,22 @@ export class BotBrain {
     this.dodgeFlash(match, a);
   }
 
+  // 가까이(22 m) 보이는 적 드론 (보이기 시작한 시간을 셈)
+  spotDrone(match, a, eye, dt) {
+    let best = null, bestD = 22;
+    const fx = -Math.sin(this.aimYaw), fz = -Math.cos(this.aimYaw);
+    for (const d of match.drones) {
+      if (d.team === a.team) continue;
+      const dx = d.pos.x - eye.x, dz = d.pos.z - eye.z, l = Math.hypot(dx, dz);
+      if (l > bestD || (l > 3 && (dx * fx + dz * fz) / l < 0.2)) continue;
+      if (!match.map.lineOfSight(eye, d.pos)) continue;
+      best = d;
+      bestD = l;
+    }
+    this.droneSeen = best ? (this.droneSeen ?? 0) + dt : 0;
+    return best;
+  }
+
   // 날아온 적 섬광이 곧 터지면 (실력만큼) 고개를 돌림
   dodgeFlash(match, a) {
     if (this.avoidT > 0) return;
@@ -450,7 +484,7 @@ export class BotBrain {
   // 언제 무엇을: 진입 전 섬광·이명(공격) · 소리로 안 적에게 세열·이명 · 해체 경보에 최루·세열(수비) · 동료 해체 중 연막(공격)
   considerGear(match, a) {
     const has = (id) => (a.gear?.[id] ?? 0) > 0;
-    if (!['frag', 'stun', 'flash', 'smoke', 'gas'].some(has)) return;
+    if (!['frag', 'stun', 'flash', 'smoke', 'gas', 'drone'].some(has)) return;
     const eye = eyePos(a);
     const tryThrow = (id, point, minD = 7) => {
       if (!has(id) || !point) return false;
@@ -475,6 +509,19 @@ export class BotBrain {
     };
     const armed = match.bombs.filter((b) => b.state === 'armed');
     if (a.team === TEAMS.DEFUSE) {
+      // 정찰 드론: 목표 폭탄까지 18~40 m에서 한 번, 드론을 먼저 보내 수비 위치를 찾음
+      const target = armed.find((b) => b.id === this.assignedBomb);
+      if (target && (a.gear?.drone ?? 0) > 0 && !this.droneDone && this.goal?.point && dist2(this.goal.point, target) < 4) {
+        const d = dist2(target, a.pos);
+        if (d > 18 && d < 40) {
+          const path = match.nav.findPath({ x: a.pos.x, y: a.pos.y, z: a.pos.z }, { x: target.x, y: target.y ?? 0, z: target.z });
+          if (path?.length) {
+            this.droneDone = true;
+            match.launchDrone(a, { path, i: 0 });
+            return;
+          }
+        }
+      }
       // 진입: 목표 폭탄 근처(12~24 m)로 다가갈 때 한 번, 폭탄 주변(수비가 숨는 곳)에 섬광·이명
       const bomb = armed.find((b) => b.id === this.assignedBomb);
       if (bomb && !this.entryDone && this.goal?.point && dist2(this.goal.point, bomb) < 4) {
@@ -934,8 +981,10 @@ export function botBuy(match, a, plan, rng) {
   if (plan === 'full') {
     gear(rng.chance(0.5) ? 'flash' : 'stun', 0.75);
     gear('frag', 0.3);
-    if (a.team === TEAMS.DEFUSE) gear('smoke', 0.35);
-    else gear('gas', 0.25);
+    if (a.team === TEAMS.DEFUSE) {
+      gear('smoke', 0.35);
+      gear('drone', 0.3);
+    } else gear('gas', 0.25);
   } else if (plan === 'half') gear('stun', 0.35);
   // 다음 라운드를 위해 900 J는 남기고, 남는 에너지로 가끔 관통탄 (상대가 방탄을 살 만한 라운드)
   if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 900 && rng.chance(plan === 'full' ? 0.35 : 0.15)) buy('ap');

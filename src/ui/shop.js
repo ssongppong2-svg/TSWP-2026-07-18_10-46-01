@@ -23,7 +23,7 @@ const SECTIONS = [
       { title: '방탄', items: ['light', 'heavy'], w: 1.2 },
       { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'], w: 1 },
       { title: '투척 · 4번 키', items: THROW_ORDER, w: 2, grid: 2 },
-      { title: '장비 · 5번 키', items: ['c4'], w: 1 },
+      { title: '장비 · 5번 키', items: ['c4', 'drone'], w: 1 },
     ],
   },
 ];
@@ -72,9 +72,15 @@ export function itemInfo(id) {
       smoke: `연기 벽 ${g.time}초 · 시야 차단`,
       gas: `기침·느려짐 ${g.time}초 · 피해 없음`,
       c4: `붙이고 기폭 · 피해 최대 ${g.damage} · 문 돌파`,
+      drone: `정찰 ${g.battery}초 · 보이는 적을 팀에 표시 · 총에 맞으면 추락`,
     }[id];
-    const short = { frag: `파편 ${g.damage}`, stun: `이명 ${g.time}초`, flash: `섬광 ${g.time}초`, smoke: `연기 ${g.time}초`, gas: `최루 ${g.time}초`, c4: '붙이고 기폭' }[id];
-    return { type: 'gear', name: g.name, kind: g.kind === 'throw' ? '투척' : '설치', price: g.price, icon: GEAR_ICONS[id], short, stats: [what, `최대 ${g.max}개 · ${g.mass} kg`, g.kind === 'throw' ? '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)' : '왼쪽 클릭으로 벽·바닥·문에 붙이고, 다시 왼쪽 클릭으로 기폭'] };
+    const short = { frag: `파편 ${g.damage}`, stun: `이명 ${g.time}초`, flash: `섬광 ${g.time}초`, smoke: `연기 ${g.time}초`, gas: `최루 ${g.time}초`, c4: '붙이고 기폭', drone: `정찰 ${g.battery}초` }[id];
+    const how = {
+      throw: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)',
+      place: '왼쪽 클릭으로 벽·바닥·문에 붙이고, 다시 왼쪽 클릭으로 기폭',
+      drone: '왼쪽 클릭으로 띄움 → WASD·Space·Ctrl 조종, 왼쪽 클릭 적 표시, F 복귀 · 과학: 프로펠러가 공기를 아래로 밀면 공기가 드론을 위로 밂(작용·반작용)',
+    }[g.kind];
+    return { type: 'gear', name: g.name, kind: { throw: '투척', place: '설치', drone: '정찰' }[g.kind], price: g.price, icon: GEAR_ICONS[id], short, stats: [what, `최대 ${g.max}개 · ${g.mass} kg`, how] };
   }
   const m = AMMO[id];
   return {
@@ -309,14 +315,14 @@ export class Shop {
     this.set('quiz', q ? `${q.id}|${q.done}|${q.ok}|${q.choice}` : '', () => this.renderQuiz(q));
     // 분대원 에너지·주무기 (보급 계획 맞추기)
     const mates = m.agents.filter((a) => a.team === me.team);
-    const gearSig = (a) => THROW_ORDER.concat('c4').map((id) => a.gear?.[id] ?? 0).join('');
+    const gearSig = (a) => THROW_ORDER.concat('c4', 'drone').map((id) => a.gear?.[id] ?? 0).join('');
     const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armorKind}:${a.ammo}:${gearSig(a)}`).join('|');
     this.set('team', sig, () => {
       this.teamEl.innerHTML = mates.map((a) => `
         <div class="st-row ${a.id === me.id ? 'me' : ''}">
           <b>${esc(a.name)}</b>
           <span class="st-w">${a.primary ? WEAPON_ICONS[a.primary] : WEAPON_ICONS[a.secondary] ?? ''}</span>
-          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}${THROW_ORDER.concat('c4').filter((id) => (a.gear?.[id] ?? 0) > 0).map((id) => GEAR_ICONS[id]).join('')}</span>
+          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}${THROW_ORDER.concat('c4', 'drone').filter((id) => (a.gear?.[id] ?? 0) > 0).map((id) => GEAR_ICONS[id]).join('')}</span>
           <span class="st-c">${money(a.credits ?? 0)} J</span>
         </div>`).join('');
     });

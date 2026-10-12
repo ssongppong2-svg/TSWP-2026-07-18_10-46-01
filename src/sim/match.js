@@ -7,7 +7,7 @@ import {
 } from './constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
-import { EFFECT, GEAR, GADGET_ORDER, emptyGear, exposure, nextThrowable, placeTarget, stepThrown, throwVelocity } from './gear.js';
+import { DRONE, EFFECT, GEAR, GADGET_ORDER, emptyGear, exposure, nextThrowable, placeTarget, stepDrone, stepThrown, throwVelocity } from './gear.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
@@ -83,6 +83,7 @@ export class Match {
     this.shields = [];
     this.throwables = []; // 날아가거나 바닥에 있는 투척물 (gear.js)
     this.charges = []; // 붙여 둔 C4
+    this.drones = []; // 날고 있는 정찰 드론
     this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
     this.scans = []; // 작동 중인 무게 감지기
     this.orders = { defuse: null, force: null }; // 팀 지휘 명령
@@ -224,6 +225,7 @@ export class Match {
     this.shields = [];
     this.throwables = [];
     this.charges = [];
+    this.drones = [];
     this.noises = [];
     this.scans = [];
     this.orders = { defuse: null, force: null };
@@ -251,6 +253,7 @@ export class Match {
       a.weapon = a.primary ?? a.secondary;
       a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
       a.equip = null;
+      a.drone = null;
       a.stunT = a.flashT = a.gasT = 0;
       a.alive = true;
       a.hp = PLAYER.maxHp;
@@ -546,6 +549,7 @@ export class Match {
     this.updateShields(dt);
     this.updateProjectiles(dt);
     this.updateThrowables(dt);
+    this.updateDrones(dt);
     this.updateVisibility(dt);
     this.noises = this.noises.filter((n) => this.time - n.t < NOISE.memory);
     this.scans = this.scans.filter((s) => s.until > this.time);
@@ -564,6 +568,8 @@ export class Match {
   }
 
   stepAgent(a, intent, dt, live, mobile = live) {
+    // 드론을 조종하는 동안: 입력은 드론으로, 몸은 앉은 채 가만히 (시점도 그대로)
+    if (a.drone) intent = this.droneControl(a, intent);
     a.yaw = intent.yaw;
     a.pitch = clamp(intent.pitch, -1.45, 1.45);
     for (const p of a.patches) {
@@ -929,7 +935,15 @@ export class Match {
     // 승강기·탄성 발판은 화면에서도 미리 움직임 (방장 상태를 받으면 맞춤)
     this.devices.update(dt);
     const a = this.localAgent;
-    if (a?.alive && this.phase !== 'ended') {
+    const myDrone = a?.drone ? this.drones.find((d) => d.id === a.drone) : null;
+    if (a?.alive && myDrone && this.phase !== 'ended') {
+      // 내 드론: 방장 결과를 기다리지 않고 이 화면에서 미리 날림 (몸은 그대로)
+      const ctrl = this.controllers.get(a.id);
+      const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
+      myDrone.prev = { ...myDrone.pos };
+      stepDrone(this.map, myDrone, { mx: intent.moveX, mz: intent.moveZ, up: intent.jump, down: intent.crouch, yaw: intent.yaw, pitch: intent.pitch }, dt);
+      myDrone.predicted = true;
+    } else if (a?.alive && this.phase !== 'ended') {
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
       const live = this.phase === 'live';
@@ -1001,7 +1015,17 @@ export class Match {
           shield = sh;
         }
       }
+      let drone = null;
       if (!p.harmless) {
+        for (const d of this.drones) {
+          if (d.team === p.team) continue;
+          const td = segmentSphere(p.pos, next, d.pos, DRONE.radius + 0.06);
+          if (td >= 0 && td < tHit) {
+            tHit = td;
+            drone = d;
+            shield = null;
+          }
+        }
         for (const a of this.agents) {
           if (!a.alive || a.team === p.team) continue;
           const th = segmentSphere(p.pos, next, eyePos(a), PLAYER.headRadius);
@@ -1010,6 +1034,7 @@ export class Match {
             target = a;
             head = true;
             shield = null;
+            drone = null;
           }
           const tb = segmentAabb(
             p.pos,
@@ -1022,10 +1047,17 @@ export class Match {
             target = a;
             head = false;
             shield = null;
+            drone = null;
           }
         }
       }
       const at = (t) => ({ x: p.pos.x + (next.x - p.pos.x) * t, y: p.pos.y + (next.y - p.pos.y) * t, z: p.pos.z + (next.z - p.pos.z) * t });
+      if (drone) {
+        // 드론은 한 발에 떨어짐
+        this.emit('impact', { ...at(tHit), kind: 'surface', projectile: p });
+        this.endDrone(drone, 'shot');
+        continue;
+      }
       if (target) {
         const hitPos = at(tHit);
         const owner = this.agentById(p.ownerId);
@@ -1092,6 +1124,8 @@ export class Match {
     t.hp -= hpLoss;
     t.lastHurtT = this.time;
     t.lastHurtBy = attacker?.id ?? null;
+    // 드론 조종 중에 몸이 맞으면 화면이 몸으로 돌아옴
+    if (t.drone && hpLoss > 0) this.endDrone(this.drones.find((d) => d.id === t.drone), 'hurt');
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
     t.tagT = PLAYER.tagTime;
     t.punch = Math.min(0.08, t.punch + (pellet ? 0.006 : headshot ? 0.04 : 0.022));
@@ -1115,6 +1149,7 @@ export class Match {
     t.armor = 0;
     t.armorKind = null;
     t.equip = null;
+    if (t.drone) this.endDrone(this.drones.find((d) => d.id === t.drone), 'dead');
     t.stunT = t.flashT = t.gasT = 0;
     t.deadT = 0;
     t.held = null;
@@ -1491,13 +1526,14 @@ export class Match {
       if (!id) return this.emit('gearDenied', { agent: a, which, reason: 'none' });
       a.equip = { kind: 'throw', id };
     } else if (which === 'gadget') {
-      const mine = this.charges.some((c) => c.ownerId === a.id);
-      const hasC4 = (a.gear.c4 ?? 0) > 0;
-      if (a.equip?.kind === 'c4' && mine) a.equip = { kind: 'det' };
-      else if (a.equip?.kind === 'det' && hasC4) a.equip = { kind: 'c4' };
-      else if (hasC4 && a.equip?.kind !== 'c4') a.equip = { kind: 'c4' };
-      else if (mine) a.equip = { kind: 'det' };
-      else return this.emit('gearDenied', { agent: a, which, reason: 'none' });
+      // 5: 가진 것 중 돌아가며 (C4 → 기폭기 → 드론)
+      const opts = [];
+      if ((a.gear.c4 ?? 0) > 0) opts.push('c4');
+      if (this.charges.some((c) => c.ownerId === a.id)) opts.push('det');
+      if ((a.gear.drone ?? 0) > 0 && !a.drone) opts.push('drone');
+      if (!opts.length) return this.emit('gearDenied', { agent: a, which, reason: 'none' });
+      const i = opts.indexOf(a.equip?.kind);
+      a.equip = { kind: opts[(i + 1) % opts.length] };
     } else return;
     if (before?.kind === a.equip.kind && before?.id === a.equip.id) return;
     a.reloadT = 0;
@@ -1527,6 +1563,154 @@ export class Match {
     if (e.kind === 'throw') this.throwGear(a, e.id, left ? 'long' : 'short');
     else if (e.kind === 'c4' && left) this.placeCharge(a);
     else if (e.kind === 'det' && left) this.detonate(a);
+    else if (e.kind === 'drone' && left) this.launchDrone(a);
+  }
+
+  // ───── 정찰 드론 ─────
+  // 띄우기: 눈앞에서 떠오름. 사람은 드론 카메라로 조종(입력이 드론으로), 봇은 목표까지 자동 비행
+  launchDrone(a, autopilot = null) {
+    if (!((a.gear?.drone ?? 0) > 0) || a.drone || this.client) return false;
+    a.gear.drone--;
+    const f = { x: -Math.sin(a.yaw), z: -Math.cos(a.yaw) };
+    const eye = eyePos(a);
+    const pos = { x: eye.x + f.x * 0.5, y: eye.y - 0.2, z: eye.z + f.z * 0.5 };
+    if (!this.map.lineOfSight(eye, pos)) Object.assign(pos, { x: eye.x, y: eye.y - 0.2, z: eye.z });
+    const d = { id: this.nextId++, ownerId: a.id, team: a.team, pos, vel: { x: f.x * 1.5, y: 1.2, z: f.z * 1.5 }, yaw: a.yaw, pitch: -0.1, battery: GEAR.drone.battery, scanT: 0, buzzT: 0, autopilot, marks: [] };
+    this.drones.push(d);
+    a.drone = d.id;
+    a.droneHome = { yaw: a.yaw, pitch: a.pitch };
+    a.equip = null;
+    a.reloadT = 0;
+    this.emit('droneLaunch', { agent: a, drone: d });
+    return true;
+  }
+
+  // 드론 조종 입력: 이동·위(점프)·아래(앉기)·시점 → 드론 / 왼쪽 클릭 = 적 표시 / F·5 = 복귀
+  droneControl(a, intent) {
+    const d = this.drones.find((x) => x.id === a.drone);
+    if (!d) {
+      a.drone = null;
+      return intent;
+    }
+    if (!d.autopilot) {
+      d.input = { mx: intent.moveX, mz: intent.moveZ, up: intent.jump, down: intent.crouch, yaw: intent.yaw, pitch: intent.pitch };
+      const mark = intent.fire && !d.fireLatch;
+      d.fireLatch = intent.fire;
+      if (mark) this.droneMark(a, d);
+      if (intent.interact || intent.equip === 'gadget' || intent.switchTo) {
+        this.endDrone(d, 'recall');
+        return { ...emptyIntent(a), yaw: a.yaw, pitch: a.pitch };
+      }
+    }
+    // 몸: 앉아서 가만히 (총도 쏘지 않음)
+    return { ...emptyIntent(a), crouch: true, yaw: a.droneHome?.yaw ?? a.yaw, pitch: a.droneHome?.pitch ?? 0 };
+  }
+
+  // 드론 화면 가운데(약 6°)에 보이는 적을 표시 → 5초 동안 벽 너머로도 팀에 보임 + 무전
+  droneMark(a, d) {
+    const fwd = dirFromAngles(d.yaw, d.pitch);
+    let best = null, bestCos = Math.cos(0.11);
+    for (const e of this.agents) {
+      if (!e.alive || e.team === d.team) continue;
+      const c = chestPos(e);
+      const vx = c.x - d.pos.x, vy = c.y - d.pos.y, vz = c.z - d.pos.z;
+      const l = Math.hypot(vx, vy, vz);
+      if (l > GEAR.drone.range + 5) continue;
+      const cs = (vx * fwd.x + vy * fwd.y + vz * fwd.z) / l;
+      if (cs < bestCos || !this.clearLine(d.pos, c)) continue;
+      bestCos = cs;
+      best = e;
+    }
+    if (!best) {
+      this.emit('droneMark', { agent: a, drone: d, target: null });
+      return null;
+    }
+    best.revealedUntil = Math.max(best.revealedUntil, this.time + GEAR.drone.mark);
+    best.spottedT = this.time;
+    const place = this.map.calloutAt(best.pos.x, best.pos.z, best.pos.y) ?? '드론 앞';
+    this.shareIntel(a, { x: best.pos.x, y: best.pos.y, z: best.pos.z, kind: 'seen' });
+    this.radio(a, `드론: 적 표시 — ${place}`, { kind: 'contact', pos: { ...best.pos }, report: true });
+    this.emit('droneMark', { agent: a, drone: d, target: best });
+    return best;
+  }
+
+  endDrone(d, reason = 'battery') {
+    if (!d) return;
+    this.drones = this.drones.filter((x) => x !== d);
+    const a = this.agentById(d.ownerId);
+    if (a?.drone === d.id) {
+      a.drone = null;
+      if (a.droneHome) {
+        a.yaw = a.droneHome.yaw;
+        a.pitch = a.droneHome.pitch;
+      }
+    }
+    this.emit('droneEnd', { drone: d, agent: a, reason, x: d.pos.x, y: d.pos.y, z: d.pos.z });
+  }
+
+  updateDrones(dt) {
+    if (!this.drones.length) return;
+    for (const d of [...this.drones]) {
+      const a = this.agentById(d.ownerId);
+      if (!a?.alive) {
+        this.endDrone(d, 'dead');
+        continue;
+      }
+      d.battery -= dt;
+      if (d.battery <= 0) {
+        this.endDrone(d, 'battery');
+        continue;
+      }
+      // 봇 자동 비행: 길을 따라 목표로, 도착하면 잠시 둘러봄
+      if (d.autopilot) {
+        const ap = d.autopilot;
+        const wp = ap.path?.[ap.i];
+        if (wp && Math.hypot(wp.x - d.pos.x, wp.z - d.pos.z) < 1.2) ap.i++;
+        const tgt = ap.path?.[ap.i];
+        if (tgt) {
+          const yaw = Math.atan2(-(tgt.x - d.pos.x), -(tgt.z - d.pos.z));
+          const want = (tgt.y ?? 0) + 1.8;
+          d.input = { mx: 0, mz: 0.8, up: d.pos.y < want - 0.3, down: d.pos.y > want + 0.3, yaw, pitch: -0.15 };
+        } else {
+          ap.look = (ap.look ?? 0) + dt;
+          d.input = { mx: 0, mz: 0, up: false, down: false, yaw: d.yaw + dt * 1.6, pitch: -0.25 };
+          if (ap.look > 3) {
+            this.endDrone(d, 'recall');
+            continue;
+          }
+        }
+      }
+      d.prev = { ...d.pos };
+      stepDrone(this.map, d, d.input ?? { yaw: d.yaw, pitch: d.pitch }, dt);
+      // 윙 소리 (가까운 적이 들음)
+      d.buzzT -= dt;
+      if (d.buzzT <= 0) {
+        d.buzzT = 0.9;
+        this.makeNoise(a, 'drone', d.pos);
+      }
+      // 드론 카메라에 보이는 적은 팀 미니맵에 (아군이 보고 있는 적과 같음), 봇 드론은 자동으로 표시까지
+      d.scanT -= dt;
+      if (d.scanT <= 0) {
+        d.scanT = DRONE.scanEvery;
+        const fwd = dirFromAngles(d.yaw, d.pitch);
+        d.seen = [];
+        for (const e of this.agents) {
+          if (!e.alive || e.team === d.team) continue;
+          const c = chestPos(e);
+          const vx = c.x - d.pos.x, vy = c.y - d.pos.y, vz = c.z - d.pos.z;
+          const l = Math.hypot(vx, vy, vz);
+          if (l > GEAR.drone.range || (l > 2 && (vx * fwd.x + vy * fwd.y + vz * fwd.z) / l < DRONE.fov)) continue;
+          if (!this.clearLine(d.pos, c)) continue;
+          e.spottedT = this.time;
+          d.seen.push(e.id);
+          if (d.autopilot && !d.marks.includes(e.id)) {
+            d.marks.push(e.id);
+            e.revealedUntil = Math.max(e.revealedUntil, this.time + GEAR.drone.mark);
+            this.shareIntel(a, { x: e.pos.x, y: e.pos.y, z: e.pos.z, kind: 'seen' });
+          }
+        }
+      }
+    }
   }
 
   // 던지기: 눈 앞에서 조준 방향으로 (달리던 속도도 더해짐 = 관성)

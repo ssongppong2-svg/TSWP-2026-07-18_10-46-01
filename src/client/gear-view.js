@@ -35,6 +35,7 @@ export class GearView {
     this.things = new Map(); // 투척물 id → mesh
     this.c4s = new Map(); // C4 id → { root, led }
     this.clouds = new Map(); // 연막·최루 구역 id → { root, puffs }
+    this.droneViews = new Map(); // 드론 id → { root, rotors, led }
     this.pops = []; // 섬광·이명·폭발 빛 (잠깐)
     this.geo = new THREE.SphereGeometry(1, 12, 8);
     this.mats = Object.fromEntries(Object.entries(BODY).map(([k, b]) => [k, new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.55, metalness: 0.3 })]));
@@ -131,9 +132,63 @@ export class GearView {
     this.landMark.visible = true;
   }
 
-  update(dt, alpha) {
+  // 정찰 드론 모형: 몸통 + 팔 4개 + 도는 프로펠러 + 카메라 + 팀색 불빛
+  makeDrone(d) {
+    const root = new THREE.Group();
+    const dark = new THREE.MeshStandardMaterial({ color: '#2a2d31', roughness: 0.5, metalness: 0.4 });
+    const shell = new THREE.MeshStandardMaterial({ color: '#4b5058', roughness: 0.45, metalness: 0.3 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.22), shell);
+    const cam = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshStandardMaterial({ color: '#0d1013', roughness: 0.1, metalness: 0.6 }));
+    cam.position.set(0, -0.03, -0.1);
+    root.add(body, cam);
+    const rotors = [];
+    const blade = new THREE.MeshBasicMaterial({ color: '#9aa2aa', transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.015, 0.2), dark);
+      arm.position.set(x * 0.08, 0.01, z * 0.08);
+      arm.rotation.y = Math.atan2(x, z);
+      const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.03, 10), dark);
+      motor.position.set(x * 0.15, 0.025, z * 0.15);
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.085, 20), blade);
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.set(x * 0.15, 0.045, z * 0.15);
+      root.add(arm, motor, disc);
+      rotors.push(disc);
+    }
+    const team = this.match.agentById(d.ownerId)?.squad;
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshBasicMaterial({ color: team === 'force' ? '#e08a3c' : '#5ec4d6' }));
+    led.position.set(0, 0.035, 0.1);
+    root.add(led);
+    this.group.add(root);
+    return { root, rotors, led };
+  }
+
+  update(dt, alpha, hideDrone = null) {
     this.time += dt;
     const m = this.match;
+    // 정찰 드론
+    const dseen = new Set();
+    for (const d of m.drones ?? []) {
+      dseen.add(d.id);
+      let v = this.droneViews.get(d.id);
+      if (!v) {
+        v = this.makeDrone(d);
+        this.droneViews.set(d.id, v);
+      }
+      const pv = d.prev ?? d.pos;
+      v.root.position.set(pv.x + (d.pos.x - pv.x) * alpha, pv.y + (d.pos.y - pv.y) * alpha + Math.sin(this.time * 7 + d.id) * 0.01, pv.z + (d.pos.z - pv.z) * alpha);
+      v.root.rotation.set(0, d.yaw, 0);
+      // 앞으로 날면 앞으로 기울어짐 (프로펠러가 미는 힘의 방향)
+      v.root.rotateX(-Math.min(0.35, Math.hypot(d.vel?.x ?? 0, d.vel?.z ?? 0) * 0.05));
+      for (const r of v.rotors) r.rotation.z += dt * 60;
+      v.led.visible = Math.sin(this.time * 9) > -0.3;
+      v.root.visible = d.id !== hideDrone;
+    }
+    for (const [id, v] of this.droneViews) {
+      if (dseen.has(id)) continue;
+      this.group.remove(v.root);
+      this.droneViews.delete(id);
+    }
     // 날아가는·굴러가는 투척물
     const seen = new Set();
     for (const t of m.throwables ?? []) {

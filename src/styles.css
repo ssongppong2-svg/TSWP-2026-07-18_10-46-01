@@ -4773,3 +4773,112 @@ button {
   background: var(--instr);
   border-color: var(--instr);
 }
+
+/* 정찰 드론 조종 화면 */
+.hud .drone-hud {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(160, 220, 200, 0.035) 0 1px, transparent 1px 3px);
+}
+
+.hud .drone-hud.show {
+  display: block;
+}
+
+.hud .dh-frame i {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-color: rgba(190, 240, 220, 0.75);
+  border-style: solid;
+  border-width: 0;
+}
+
+.hud .dh-frame i:nth-child(1) { left: 8%; top: 12%; border-left-width: 2px; border-top-width: 2px; }
+.hud .dh-frame i:nth-child(2) { right: 8%; top: 12%; border-right-width: 2px; border-top-width: 2px; }
+.hud .dh-frame i:nth-child(3) { left: 8%; bottom: 14%; border-left-width: 2px; border-bottom-width: 2px; }
+.hud .dh-frame i:nth-child(4) { right: 8%; bottom: 14%; border-right-width: 2px; border-bottom-width: 2px; }
+
+.hud .dh-box {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border: 1.5px solid rgba(190, 240, 220, 0.85);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+}
+
+.hud .dh-box::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  background: #d8fff0;
+}
+
+.hud .dh-top {
+  position: absolute;
+  left: 50%;
+  top: 14%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 12px var(--mono);
+  letter-spacing: 0.08em;
+  color: #d8fff0;
+  text-shadow: 0 1px 2px #000;
+}
+
+.hud .dh-top b::before {
+  content: '●';
+  margin-right: 6px;
+  color: #ff5a4f;
+  animation: blink 1s steps(2) infinite;
+}
+
+.hud .dh-bat {
+  width: 90px;
+  height: 6px;
+  border: 1px solid rgba(216, 255, 240, 0.7);
+}
+
+.hud .dh-bat i {
+  display: block;
+  height: 100%;
+  background: #8fe0b8;
+  transform-origin: left;
+}
+
+.hud .drone-hud.low .dh-bat i {
+  background: var(--bad);
+}
+
+.hud .dh-sec {
+  font-style: normal;
+}
+
+.hud .dh-keys {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  font: 500 11px var(--mono);
+  color: #d8fff0;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* 드론을 보는 동안에는 무기·패치 계기를 흐리게 */
+.hud.droning .vh-weapon,
+.hud.droning .hud-bottom,
+.hud.droning .hint-keys {
+  opacity: 0.25;
+}

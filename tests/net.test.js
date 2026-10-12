@@ -220,3 +220,52 @@ test('온라인 동기화: 참가자가 4로 투척물을 들고 던지면 방�
   assert.equal(me.gear.smoke + me.gear.stun, 1, '남은 개수 전달');
   assert.ok(thrown >= 1, '던짐 사건 전달');
 });
+
+test('온라인 동기화: 참가자가 드론을 띄워 조종하면 방장 경기에서 날고, 참가자 화면에서도 미리 날며 F로 복귀', () => {
+  const { host, client } = setup({ seed: 41 });
+  const hs = new HostSync(host);
+  const me = client.agentById('defuse-1');
+  client.localAgent = me;
+  const cs = new ClientSync(client, 'defuse-1');
+  host.agentById('defuse-1').gear.drone = 1;
+  let t = 0;
+  const T0 = PRE + 1;
+  const scripted = {
+    getIntent: (m, a) => ({
+      ...emptyIntent(a),
+      equip: Math.abs(t - T0) < DT / 2 ? 'gadget' : null,
+      fire: t > T0 + 0.5 && t < T0 + 0.6,
+      moveZ: t > T0 + 0.8 && t < T0 + 2.5 ? 1 : 0,
+      interact: Math.abs(t - (T0 + 3)) < DT / 2,
+      yaw: a.yaw,
+      pitch: 0,
+    }),
+  };
+  const rec = new InputRecorder(scripted);
+  client.setController(me.id, rec);
+  const inbox = [];
+  host.setController('defuse-1', new RemoteController(() => inbox[0]?.v, (s) => (hs.acks['defuse-1'] = s)));
+  host.setController('defuse-0', { getIntent: (m, a) => emptyIntent(a) });
+  const toClient = [];
+  let flew = 0, sawClient = false, hostStart = null;
+  const LAT = 6;
+  for (let k = 0; k < 60 * (T0 + 4); k++) {
+    t = k * DT;
+    client.tick(DT);
+    inbox.push({ v: rec.latest, at: k + LAT });
+    while (inbox.length > 1 && inbox[1].at <= k) inbox.shift();
+    host.tick(DT);
+    const hd = host.drones[0];
+    if (hd) {
+      hostStart ??= { ...hd.pos };
+      flew = Math.max(flew, Math.hypot(hd.pos.x - hostStart.x, hd.pos.z - hostStart.z));
+    }
+    if (k % 3 === 0) toClient.push({ snap: JSON.parse(JSON.stringify(hs.snapshot())), at: k + LAT });
+    while (toClient.length && toClient[0].at <= k) cs.apply(toClient.shift().snap, t);
+    if (me.drone && client.drones.length) sawClient = true;
+  }
+  assert.ok(flew > 3, `방장 경기에서 드론이 날아감 (${flew.toFixed(1)} m)`);
+  assert.ok(sawClient, '참가자 화면에서 내 드론 조종 중');
+  assert.equal(host.agentById('defuse-1').drone, null, 'F로 복귀');
+  assert.equal(host.drones.length, 0);
+});

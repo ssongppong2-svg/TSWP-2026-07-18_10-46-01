@@ -322,6 +322,80 @@ export class AudioEngine {
     }
   }
 
+  // ───────── 계속 나는 소리 (드론 프로펠러 등): key로 켜고·옮기고·끔 ─────────
+  setLoop(key, kind, pos) {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    this.loops ??= new Map();
+    let L = this.loops.get(key);
+    if (!L) {
+      const ctx = this.ctx;
+      const p = ctx.createPanner();
+      p.panningModel = this.lowPower ? 'equalpower' : 'HRTF';
+      p.distanceModel = 'inverse';
+      p.refDistance = 2;
+      p.rolloffFactor = 1.4;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      g.gain.setTargetAtTime(kind === 'drone' ? 0.12 : 0.1, ctx.currentTime, 0.2);
+      g.connect(p);
+      p.connect(this.master);
+      const nodes = [];
+      // 드론: 프로펠러 윙 (톱니파 두 개가 살짝 어긋나 맥놀이) + 바람 소리
+      for (const [f, gain] of [[172, 0.35], [176.5, 0.3], [344, 0.12]]) {
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = f;
+        const og = ctx.createGain();
+        og.gain.value = gain;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 900;
+        bp.Q.value = 0.7;
+        o.connect(bp);
+        bp.connect(og);
+        og.connect(g);
+        o.start();
+        nodes.push(o);
+      }
+      const n = ctx.createBufferSource();
+      n.buffer = this.noiseBuf;
+      n.loop = true;
+      const nf = ctx.createBiquadFilter();
+      nf.type = 'bandpass';
+      nf.frequency.value = 2400;
+      nf.Q.value = 0.6;
+      const ng = ctx.createGain();
+      ng.gain.value = 0.25;
+      n.connect(nf);
+      nf.connect(ng);
+      ng.connect(g);
+      n.start();
+      nodes.push(n);
+      L = { p, g, nodes };
+      this.loops.set(key, L);
+    }
+    const t = this.ctx.currentTime;
+    if (L.p.positionX) {
+      L.p.positionX.setTargetAtTime(pos.x, t, 0.05);
+      L.p.positionY.setTargetAtTime(pos.y, t, 0.05);
+      L.p.positionZ.setTargetAtTime(pos.z, t, 0.05);
+    } else L.p.setPosition(pos.x, pos.y, pos.z);
+  }
+
+  stopLoop(key) {
+    const L = this.loops?.get(key);
+    if (!L) return;
+    this.loops.delete(key);
+    const t = this.ctx.currentTime;
+    L.g.gain.setTargetAtTime(0, t, 0.15);
+    for (const n of L.nodes) n.stop(t + 0.6);
+    setTimeout(() => L.p.disconnect(), 900);
+  }
+
+  stopAllLoops() {
+    for (const key of [...(this.loops?.keys() ?? [])]) this.stopLoop(key);
+  }
+
   // 체력이 낮거나 섬광을 받으면 소리가 먹먹해짐 (0 = 정상, 1 = 아주 먹먹)
   setMuffle(amount) {
     if (!this.ctx) return;
@@ -960,6 +1034,25 @@ const SOUNDS = {
     a.noise(o, t, 0.12, { type: 'lowpass', freq: 380, gain: 0.8, attack: 0.01 });
     a.click(o, t + 0.1, 2600, 0.5, 5);
     a.tone(o, t + 0.25, 0.08, { type: 'square', freq: 1700, gain: 0.08 });
+  },
+  // 드론 띄우기: 모터가 켜지며 올라가는 소리
+  droneUp(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 1, 0.1);
+    a.tone(o, t, 0.6, { type: 'sawtooth', freq: 60, to: 172, gain: 0.08, attack: 0.05 });
+    a.noise(o, t, 0.5, { type: 'bandpass', freq: 800, q: 0.8, gain: 0.3, attack: 0.1, sweepTo: 2200 });
+  },
+  // 드론 격추·추락: 퍽 + 부서지는 소리
+  droneDown(a, t, pos, vol) {
+    const o = a.out(pos, 0.6 * vol, 1.2, 0.2);
+    a.noise(o, t, 0.06, { type: 'highpass', freq: 2500, gain: 0.8, attack: 0.001 });
+    a.tone(o, t, 0.4, { type: 'sawtooth', freq: 170, to: 50, gain: 0.08 });
+    for (let i = 0; i < 4; i++) a.click(o, t + 0.05 + Math.random() * 0.4, 1800 + Math.random() * 2500, 0.4, 5);
+  },
+  // 드론 표시: 짧은 확인음
+  droneMark(a, t, pos, vol) {
+    const o = a.out(null, 0.3 * vol, 0.4, 0);
+    a.tone(o, t, 0.06, { type: 'square', freq: 1760, gain: 0.08 });
+    a.tone(o, t + 0.07, 0.1, { type: 'square', freq: 2350, gain: 0.08 });
   },
   // 기폭기 단추
   detClick(a, t) {

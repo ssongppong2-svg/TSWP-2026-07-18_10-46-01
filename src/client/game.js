@@ -16,6 +16,7 @@ import { QUALITY, QUALITY_ORDER } from './stage.js';
 import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
 import { GearView } from './gear-view.js';
+import { GEAR } from '../sim/gear.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
@@ -279,6 +280,22 @@ export class GameClient {
       // 내가 이명·섬광에 맞으면 귀가 울림
       const hit = e.hit?.find((h) => h.id === this.viewAgent?.id);
       if (hit && (e.kind === 'stun' || hit.k > 0.5)) A.play('ring', { vol: e.kind === 'stun' ? 0.6 + hit.k * 0.6 : hit.k * 0.6 });
+    });
+    ev.on('droneLaunch', (e) => A.play('droneUp', { pos: viewing(e.agent) ? null : e.drone.pos }));
+    ev.on('droneMark', (e) => {
+      if (!viewing(e.agent)) return;
+      if (e.target) {
+        A.play('droneMark');
+        this.hud.banner('드론: 적 표시', `${GEAR.drone.mark}초 동안 벽 너머로 보임`, 'good');
+      } else A.play('denied');
+    });
+    ev.on('droneEnd', (e) => {
+      if (e.reason === 'shot' || e.reason === 'dead') {
+        A.play('droneDown', { pos: e });
+        this.effects.sparks.burst(e, '#ffd27a', 24, { speed: 4, up: 1, life: 0.5, gravity: 9 });
+      }
+      if (viewing(e.agent) && e.reason === 'shot') this.hud.banner('드론 격추됨', '', 'bad');
+      else if (viewing(e.agent) && e.reason === 'battery') this.hud.banner('드론 배터리 소진', '', '');
     });
     ev.on('gearDenied', (e) => {
       if (!isMe(e.agent)) return;
@@ -572,10 +589,12 @@ export class GameClient {
     AgentView.eye.copy(this.stage.camera.position);
     for (const v of this.views.values()) {
       v.update(dt, alpha, time);
-      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive);
+      // 내 몸은 숨김 (드론으로 보는 동안에는 앉아 있는 내 몸이 보임)
+      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView);
     }
     this.effects.update(dt, alpha, this.team);
-    this.gearView.update(dt, alpha);
+    this.gearView.update(dt, alpha, this.droneView?.id ?? null);
+    this.updateDroneSounds();
     {
       const va0 = this.viewAgent ?? this.player;
       this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended);
@@ -589,7 +608,7 @@ export class GameClient {
     // 손에 든 장비가 있으면 총 대신 그 장비
     const held = va.equip ? `gear:${va.equip.kind === 'throw' ? va.equip.id : va.equip.kind}` : null;
     this.viewmodel.update(dt, {
-      visible: va.alive && !this.ended && !scoped,
+      visible: va.alive && !this.ended && !scoped && !this.droneView,
       weapon: held ?? va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
@@ -665,6 +684,27 @@ export class GameClient {
     }
     this.viewAgent = a;
     const cam = this.stage.camera;
+    // 드론을 조종 중이면 드론 카메라로 (끝나면 시점을 몸으로 되돌림)
+    const drone = a.drone ? m.drones.find((d) => d.id === a.drone) : null;
+    if (this.wasDrone && !this.player.drone) this.controller.syncFrom(this.player);
+    this.wasDrone = !!this.player.drone;
+    this.droneView = drone;
+    if (drone) {
+      const pv = drone.prev ?? drone.pos;
+      cam.position.set(pv.x + (drone.pos.x - pv.x) * alpha, pv.y + (drone.pos.y - pv.y) * alpha, pv.z + (drone.pos.z - pv.z) * alpha);
+      if (a === this.player) {
+        this.camYaw = this.controller.yaw;
+        this.camPitch = this.controller.pitch;
+      } else {
+        this.camYaw = drone.yaw;
+        this.camPitch = drone.pitch;
+      }
+      const lateral = (drone.vel?.x ?? 0) * Math.cos(this.camYaw) - (drone.vel?.z ?? 0) * Math.sin(this.camYaw);
+      cam.rotation.set(this.camPitch, this.camYaw, -lateral * 0.03);
+      this.stage.setZoom(1);
+      this.audio.setListener(cam.position, { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) });
+      return;
+    }
     const shakeScale = this.settings.shake ?? 1;
     const eye = eyePos(a);
     const ix = a.prev.x + (a.pos.x - a.prev.x) * alpha;
@@ -723,6 +763,17 @@ export class GameClient {
     this.stage.setZoom(zoom);
     const fwd = { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) };
     this.audio.setListener(cam.position, fwd);
+  }
+
+  // 드론 프로펠러 소리: 날고 있는 드론마다 계속 (사라지면 끔)
+  updateDroneSounds() {
+    const live = new Set();
+    for (const d of this.match.drones ?? []) {
+      const key = `drone${d.id}`;
+      live.add(key);
+      this.audio.setLoop(key, 'drone', d.pos);
+    }
+    for (const key of [...(this.audio.loops?.keys() ?? [])]) if (key.startsWith('drone') && !live.has(key)) this.audio.stopLoop(key);
   }
 
   // 탄창 확인 (T를 누르고 있는 동안): 총을 기울여 탄창을 보고, 화면에 대략적인 양만 표시
@@ -876,6 +927,7 @@ export class GameClient {
     this.stage.setLens({});
     this.audio.setMuffle(0);
     this.audio.stopAmbience();
+    this.audio.stopAllLoops();
     this.hud.dispose();
     this.shop.dispose();
     this.lockpickUI.dispose();
