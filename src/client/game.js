@@ -15,6 +15,7 @@ import { ViewModel } from './viewmodel.js';
 import { QUALITY, QUALITY_ORDER } from './stage.js';
 import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
+import { GearView } from './gear-view.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
@@ -94,6 +95,7 @@ export class GameClient {
     stage.overlay = this.viewmodel;
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
+    this.gearView = new GearView(stage.scene, this.match, this.effects, stage.lightRig);
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
@@ -252,6 +254,37 @@ export class GameClient {
       }
       A.play(e.weapon, { pos: local ? null : e.origin });
       if (e.amp && local) A.play('ampShot');
+    });
+    // ── 투척·폭발 장비
+    ev.on('equip', (e) => {
+      if (!viewing(e.agent)) return;
+      A.play(e.equip?.kind === 'throw' ? 'pinPull' : 'swap');
+    });
+    ev.on('throw', (e) => {
+      if (viewing(e.agent)) this.viewmodel.toss(e.mode === 'short');
+      const v = viewing(e.agent) ? 1 : audible(e.agent.pos, NOISE.throw * 2);
+      if (v > 0) A.play('throw', { pos: viewing(e.agent) ? null : e.agent.pos, vol: v });
+    });
+    ev.on('gearBounce', (e) => {
+      const v = audible(e, 25);
+      if (v > 0) A.play('gearBounce', { pos: e, vol: Math.min(1, e.speed / 8) * v });
+    });
+    ev.on('chargePlaced', (e) => A.play('c4Place', { pos: viewing(e.agent) ? null : e.charge }));
+    ev.on('detonate', (e) => {
+      this.gearView.onDetonate(e, this.stage.camera.position);
+      const pos = { x: e.x, y: e.y, z: e.z };
+      if (e.kind === 'c4' && e.ownerId === this.viewAgent?.id) A.play('detClick');
+      const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss' }[e.kind];
+      if (snd) A.play(snd, { pos });
+      // 내가 이명·섬광에 맞으면 귀가 울림
+      const hit = e.hit?.find((h) => h.id === this.viewAgent?.id);
+      if (hit && (e.kind === 'stun' || hit.k > 0.5)) A.play('ring', { vol: e.kind === 'stun' ? 0.6 + hit.k * 0.6 : hit.k * 0.6 });
+    });
+    ev.on('gearDenied', (e) => {
+      if (!isMe(e.agent)) return;
+      A.play('denied');
+      const msg = { none: e.which === 'throw' ? '투척물이 없음 · 보급 단말기에서 받기' : 'C4가 없음', far: '붙일 곳이 너무 멂 · 벽·바닥에 가까이', arming: 'C4 준비 중 · 잠시 뒤 기폭' }[e.reason];
+      if (msg) this.hud.banner(msg, '', 'bad');
     });
     ev.on('melee', (e) => {
       if (viewing(e.agent)) this.viewmodel.swing(e.heavy);
@@ -542,15 +575,22 @@ export class GameClient {
       v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive);
     }
     this.effects.update(dt, alpha, this.team);
+    this.gearView.update(dt, alpha);
+    {
+      const va0 = this.viewAgent ?? this.player;
+      this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended);
+    }
     this.conceptCards.update(time, this.player.id);
     this.devicesView.update();
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
     const scoped = WEAPONS[va.weapon].scope && va.adsT > 0.85;
+    // 손에 든 장비가 있으면 총 대신 그 장비
+    const held = va.equip ? `gear:${va.equip.kind === 'throw' ? va.equip.id : va.equip.kind}` : null;
     this.viewmodel.update(dt, {
       visible: va.alive && !this.ended && !scoped,
-      weapon: va.weapon,
+      weapon: held ?? va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
       onGround: va.onGround,
@@ -561,8 +601,8 @@ export class GameClient {
       reloadT: va.reloadT,
       swapT: va.swapT,
       lockpick: !!va.lockpick,
-      amp: va.ampT > 0 && !WEAPONS[va.weapon].melee,
-      inspect: va === this.player ? this.inspectT : 0,
+      amp: !held && va.ampT > 0 && !WEAPONS[va.weapon].melee,
+      inspect: va === this.player && !held ? this.inspectT : 0,
       light: this.stage.bolt,
       day: this.stage.dayLight,
     });
@@ -582,8 +622,19 @@ export class GameClient {
     const damage = va.alive ? Math.max(0, Math.min(1, (0.6 - hpf) / 0.5)) : 0.7;
     const pulse = 0.5 + 0.5 * Math.sin(time * (5 + damage * 4));
     this.blur = Math.max(0, this.blur - dt * 1.6);
-    this.stage.setLens({ damage, pulse, flash: this.effects.flash, blur: this.blur + (va.held ? 0.4 : 0) });
-    this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9));
+    // 섬광: 하얗게 눈부심(짧게) · 이명: 소리가 먹먹 · 최루: 살짝 흐리고 기침
+    const flashed = va.alive ? Math.min(1, (va.flashT ?? 0) / 1.2) : 0;
+    const stunned = va.alive ? Math.min(1, (va.stunT ?? 0) / 2.5) : 0;
+    const gassed = va.alive && (va.gasT ?? 0) > 0 ? 1 : 0;
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25 });
+    this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85));
+    if (gassed && this.started && !this.paused) {
+      this.coughT = (this.coughT ?? 0.5) - dt;
+      if (this.coughT <= 0) {
+        this.coughT = 1.6 + Math.random() * 1.2;
+        this.audio.play('cough', { vol: va === this.player ? 0.8 : 0.5 });
+      }
+    }
     if (this.started && !this.paused && va === this.player && va.alive && damage > 0.15) {
       this.heartT -= dt;
       if (this.heartT <= 0) {
@@ -816,6 +867,7 @@ export class GameClient {
       v.dispose();
     }
     this.effects.dispose();
+    this.gearView.dispose();
     this.conceptCards.dispose();
     this.devicesView.dispose();
     this.stage.overlay = null;

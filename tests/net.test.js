@@ -179,3 +179,44 @@ test('온라인 동기화: 맵 장치(지레 셔터·승강기) 상태가 참가
   const cl = client.devices.list.find((d) => d.type === 'lift');
   assert.ok(Math.abs(hl.st.y - cl.st.y) < 0.02, '승강기 높이 같음');
 });
+
+test('온라인 동기화: 참가자가 4로 투척물을 들고 던지면 방장이 처리하고, 날아가는 투척물·남은 개수가 참가자에게 전달', () => {
+  const { host, client } = setup({ seed: 37 });
+  const hs = new HostSync(host);
+  const me = client.agentById('defuse-1');
+  client.localAgent = me;
+  const cs = new ClientSync(client, 'defuse-1');
+  host.agentById('defuse-1').gear.smoke = 1;
+  host.agentById('defuse-1').gear.stun = 1;
+  let t = 0;
+  // 교전 시작 1초 뒤 4를 누르고, 0.5초 뒤 왼쪽 클릭
+  const scripted = {
+    getIntent: (m, a) => ({ ...emptyIntent(a), equip: Math.abs(t - (PRE + 1)) < DT / 2 ? 'throw' : null, fire: t > PRE + 1.5 && t < PRE + 1.6, yaw: a.yaw, pitch: 0.3 }),
+  };
+  const rec = new InputRecorder(scripted);
+  client.setController(me.id, rec);
+  const inbox = [];
+  host.setController('defuse-1', new RemoteController(() => inbox[0]?.v, (s) => (hs.acks['defuse-1'] = s)));
+  host.setController('defuse-0', { getIntent: (m, a) => emptyIntent(a) });
+  const toClient = [];
+  let sawThrowable = false, sawEquip = false, thrown = 0;
+  client.events.on('throw', () => thrown++);
+  const LAT = 6;
+  for (let k = 0; k < 60 * (PRE + 3); k++) {
+    t = k * DT;
+    client.tick(DT);
+    inbox.push({ v: rec.latest, at: k + LAT });
+    while (inbox.length > 1 && inbox[1].at <= k) inbox.shift();
+    host.tick(DT);
+    if (k % 3 === 0) toClient.push({ snap: JSON.parse(JSON.stringify(hs.snapshot())), at: k + LAT });
+    while (toClient.length && toClient[0].at <= k) cs.apply(toClient.shift().snap, t);
+    if (client.throwables.length) sawThrowable = true;
+    if (me.equip?.kind === 'throw') sawEquip = true;
+  }
+  const hm = host.agentById('defuse-1');
+  assert.equal(hm.gear.smoke + hm.gear.stun, 1, '방장 경기에서 하나를 던짐');
+  assert.ok(sawEquip, '참가자 화면에서도 손에 든 장비가 보임');
+  assert.ok(sawThrowable, '날아가는 투척물이 참가자 화면에 보임');
+  assert.equal(me.gear.smoke + me.gear.stun, 1, '남은 개수 전달');
+  assert.ok(thrown >= 1, '던짐 사건 전달');
+});

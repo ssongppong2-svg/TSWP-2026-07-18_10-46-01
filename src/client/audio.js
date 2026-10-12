@@ -701,8 +701,8 @@ const SOUNDS = {
     a.tone(o, t, 0.14, { type: 'sine', freq: 85, to: 52, gain: 0.65 });
     a.noise(o, t + 0.04, 0.12, { type: 'bandpass', freq: 1200, q: 0.8, gain: 0.12 });
   },
-  ring(a, t) {
-    const o = a.out(null, 0.12, 2.6, 0);
+  ring(a, t, pos, vol = 1) {
+    const o = a.out(null, 0.12 * vol, 2.6, 0);
     a.tone(o, t, 2.5, { type: 'sine', freq: 4200, gain: 0.18, attack: 0.02 });
   },
   heartbeat(a, t, pos, vol) {
@@ -884,6 +884,88 @@ const SOUNDS = {
     a.noise(o, t, 2.5, { type: 'lowpass', freq: 160, gain: 0.9, attack: 0.01, buf: a.brownBuf });
     a.tone(o, t, 1.8, { type: 'sine', freq: 55, to: 20, gain: 1 });
     for (let i = 0; i < 6; i++) a.noise(o, t + 0.4 + Math.random() * 1.6, 0.05, { type: 'bandpass', freq: 1500 + Math.random() * 2000, q: 3, gain: 0.2 }); // 떨어지는 파편
+  },
+  // ───────── 투척·폭발 장비 ─────────
+  // 안전핀 뽑기: 고리 딸깍 + 손잡이 스프링 '팅'
+  pinPull(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 0.5, 0.05);
+    a.click(o, t, 3200, 0.7, 6);
+    a.tone(o, t + 0.06, 0.18, { type: 'triangle', freq: 2400, to: 1900, gain: 0.12 });
+    a.click(o, t + 0.12, 4200, 0.4, 8);
+  },
+  // 던지는 바람 소리
+  throw(a, t, pos, vol) {
+    const o = a.out(pos, 0.45 * vol, 0.5, 0.05);
+    a.noise(o, t, 0.28, { type: 'bandpass', freq: 600, q: 0.9, gain: 0.6, attack: 0.05, sweepTo: 2200 });
+  },
+  // 바닥·벽에 부딪힘: 쇠 깡통이 튀는 소리 (세게 부딪힐수록 큼)
+  gearBounce(a, t, pos, vol) {
+    const o = a.out(pos, 0.45 * vol, 0.4, 0.12);
+    a.noise(o, t, 0.04, { type: 'lowpass', freq: 600, gain: 0.7 });
+    a.tone(o, t, 0.12, { type: 'triangle', freq: 1300 + Math.random() * 500, to: 900, gain: 0.25 });
+    a.click(o, t + 0.005, 3600 + Math.random() * 800, 0.45, 9);
+  },
+  // 세열 수류탄: 짧고 묵직한 쿵 + 파편이 흩어지는 소리
+  fragBlast(a, t, pos, vol) {
+    const o = a.out(pos, 0.95 * vol, 3, 0.6, 0.8);
+    a.noise(o, t, 0.05, { type: 'highpass', freq: 1800, gain: 0.9, attack: 0.001 });
+    a.noise(o, t, 0.9, { type: 'lowpass', freq: 2400, sweepTo: 90, gain: 1, attack: 0.003 });
+    a.noise(o, t, 1.2, { type: 'lowpass', freq: 180, gain: 0.8, attack: 0.008, buf: a.brownBuf });
+    a.tone(o, t, 0.6, { type: 'sine', freq: 70, to: 28, gain: 0.9 });
+    for (let i = 0; i < 8; i++) a.noise(o, t + 0.05 + Math.random() * 0.6, 0.03, { type: 'bandpass', freq: 2000 + Math.random() * 2500, q: 4, gain: 0.18 });
+  },
+  // C4: 더 크고 길게 (건물이 울림)
+  c4Blast(a, t, pos, vol) {
+    const o = a.out(pos, 1.0 * vol, 4, 0.8, 1.0);
+    a.noise(o, t, 0.06, { type: 'highpass', freq: 1500, gain: 1, attack: 0.001 });
+    a.noise(o, t, 1.6, { type: 'lowpass', freq: 2600, sweepTo: 70, gain: 1, attack: 0.004 });
+    a.noise(o, t, 2.2, { type: 'lowpass', freq: 160, gain: 1, attack: 0.01, buf: a.brownBuf });
+    a.tone(o, t, 1.1, { type: 'sine', freq: 58, to: 22, gain: 1 });
+    for (let i = 0; i < 10; i++) a.noise(o, t + 0.2 + Math.random() * 1.2, 0.05, { type: 'bandpass', freq: 900 + Math.random() * 2400, q: 3, gain: 0.2 });
+  },
+  // 이명 수류탄: 귀를 때리는 큰 '빵' (화약 냄새 나는 날카로운 소리)
+  stunBang(a, t, pos, vol) {
+    const o = a.out(pos, 1.0 * vol, 2, 0.7, 0.8);
+    a.noise(o, t, 0.02, { type: 'highpass', freq: 2500, gain: 1, attack: 0.0005 });
+    a.noise(o, t, 0.35, { type: 'bandpass', freq: 1400, q: 0.6, gain: 1, attack: 0.001, sweepTo: 400 });
+    a.tone(o, t, 0.3, { type: 'sine', freq: 110, to: 45, gain: 0.8 });
+  },
+  // 섬광탄: 갈라지는 '팡' + 쉿 하는 소리
+  flashBang(a, t, pos, vol) {
+    const o = a.out(pos, 0.95 * vol, 1.8, 0.6, 0.6);
+    a.noise(o, t, 0.015, { type: 'highpass', freq: 3500, gain: 1, attack: 0.0004 });
+    a.noise(o, t, 0.22, { type: 'bandpass', freq: 2200, q: 0.7, gain: 0.9, attack: 0.001, sweepTo: 700 });
+    a.noise(o, t + 0.05, 0.9, { type: 'highpass', freq: 5000, gain: 0.15, attack: 0.05 });
+    a.tone(o, t, 0.2, { type: 'sine', freq: 140, to: 60, gain: 0.5 });
+  },
+  // 연막·최루: 깡통에서 '퍽' 하고 길게 쉬익
+  smokeHiss(a, t, pos, vol) {
+    const o = a.out(pos, 0.6 * vol, 4, 0.2);
+    a.noise(o, t, 0.08, { type: 'lowpass', freq: 500, gain: 0.8 });
+    a.noise(o, t + 0.05, 3.2, { type: 'highpass', freq: 2800, gain: 0.35, attack: 0.3 });
+    a.noise(o, t + 0.05, 3.0, { type: 'bandpass', freq: 900, q: 0.8, gain: 0.25, attack: 0.4 });
+  },
+  // 최루 가스 안: 기침
+  cough(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 0.9, 0.08);
+    for (let i = 0; i < 2 + Math.floor(Math.random() * 2); i++) {
+      const s = t + i * 0.22;
+      a.noise(o, s, 0.12, { type: 'bandpass', freq: 700 + Math.random() * 300, q: 1.6, gain: 0.8, attack: 0.008, sweepTo: 420 });
+      a.tone(o, s, 0.08, { type: 'sawtooth', freq: 180 + Math.random() * 40, to: 120, gain: 0.05 });
+    }
+  },
+  // C4 붙이기: 끈적하게 붙는 소리 + 삑
+  c4Place(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 0.6, 0.08);
+    a.noise(o, t, 0.12, { type: 'lowpass', freq: 380, gain: 0.8, attack: 0.01 });
+    a.click(o, t + 0.1, 2600, 0.5, 5);
+    a.tone(o, t + 0.25, 0.08, { type: 'square', freq: 1700, gain: 0.08 });
+  },
+  // 기폭기 단추
+  detClick(a, t) {
+    const o = a.out(null, 0.4, 0.3, 0);
+    a.click(o, t, 2400, 0.8, 5);
+    a.tone(o, t + 0.02, 0.06, { type: 'square', freq: 2100, gain: 0.06 });
   },
   // 교전 개시: 무전 '삑' + 두 음 (연구소 작전 시작)
   roundStart(a, t) {

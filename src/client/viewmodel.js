@@ -488,6 +488,47 @@ function buildCylinder() {
 }
 
 // 1인칭 팔과 총. 별도 장면/카메라에 그려 벽에 총이 파묻히지 않게 하고, 화면 처리(렌즈·노이즈)는 함께 받는다.
+// 투척·폭발 장비 모형 (원점 = 손에 쥐는 곳, 위가 +y)
+function buildGearParts(id) {
+  const P = new Parts();
+  const lever = () => {
+    P.add('steel', rbox(0.007, 0.06, 0.012, 0.002), [0.016, 0.03, 0], [0, 0, -0.18]);
+    P.add('steel', cylG(0.01, 0.01, 0.002, 14, true), [-0.018, 0.074, 0], [Math.PI / 2, 0, 0]);
+  };
+  if (id === 'frag') {
+    // 세열 수류탄: 둥근 몸통 + 신관 + 안전 손잡이 + 고리
+    P.add('olive', sphG(0.03, 18, 12), [0, 0.012, 0], [0, 0, 0], [1, 1.18, 1]);
+    for (let i = 0; i < 4; i++) P.add('olive', cylG(0.0305, 0.0305, 0.003, 18), [0, -0.012 + i * 0.016, 0], [0, 0, 0], [1, 1, 1]);
+    P.add('canLight', cylG(0.009, 0.011, 0.02, 12), [0, 0.052, 0]);
+    lever();
+  } else if (id === 'c4') {
+    // C4: 반죽 덩어리 + 테이프 + 기폭 장치 상자
+    P.add('c4', rbox(0.11, 0.032, 0.06, 0.006), [0, 0, 0]);
+    for (const x of [-0.035, 0.035]) P.add('tape', rbox(0.014, 0.034, 0.062, 0.002), [x, 0, 0]);
+    P.add('can', rbox(0.032, 0.016, 0.026, 0.003), [0.0, 0.024, 0]);
+    P.add('red', rbox(0.006, 0.004, 0.006, 0.001), [0.008, 0.033, 0.006]);
+    P.add('steel', cylG(0.0012, 0.0012, 0.05, 6), [-0.012, 0.045, 0], [0, 0, 0.4]);
+  } else if (id === 'det') {
+    // 기폭기: 손에 쥐는 상자 + 빨간 단추 + 안테나
+    P.add('can', rbox(0.036, 0.075, 0.022, 0.006), [0, 0.02, 0]);
+    P.add('red', cylG(0.008, 0.008, 0.006, 14), [0, 0.06, 0]);
+    P.add('dark', rbox(0.026, 0.012, 0.004, 0.001), [0, 0.035, 0.012]);
+    P.add('steel', cylG(0.0016, 0.0012, 0.08, 6), [0.012, 0.09, 0]);
+  } else {
+    // 원통형 (이명·섬광·연막·최루): 몸통 색과 띠로 구분
+    const body = { stun: 'can', flash: 'canLight', smoke: 'smokeG', gas: 'gasY' }[id] ?? 'can';
+    const r = id === 'smoke' || id === 'gas' ? 0.03 : 0.024;
+    P.add(body, cylG(r, r, 0.1, 18), [0, 0.01, 0]);
+    P.add('dark', cylG(r + 0.0006, r + 0.0006, 0.008, 18), [0, 0.045, 0]);
+    if (id === 'stun' || id === 'flash') for (let i = 0; i < 3; i++) P.add('dark', cylG(r + 0.0004, r + 0.0004, 0.004, 18), [0, -0.02 + i * 0.018, 0]);
+    if (id === 'gas') P.add('red', cylG(r + 0.0006, r + 0.0006, 0.01, 18), [0, -0.01, 0]);
+    if (id === 'smoke') P.add('canLight', cylG(r + 0.0006, r + 0.0006, 0.01, 18), [0, -0.015, 0]);
+    P.add('canLight', cylG(0.009, 0.011, 0.02, 12), [0, 0.07, 0]);
+    lever();
+  }
+  return P;
+}
+
 export class ViewModel {
   constructor(team, { detail = 2 } = {}) {
     this.scene = new THREE.Scene();
@@ -535,6 +576,15 @@ export class ViewModel {
       accent: std({ color: accent, roughness: 0.6, emissive: accent, emissiveIntensity: 0.02 }),
       shell: std({ color: '#a8261d', roughness: 0.55 }),
       core: std({ color: '#2a2d31', emissive: '#d9822b', emissiveIntensity: 0, roughness: 0.4 }),
+      // 투척·폭발 장비
+      olive: std({ color: '#4a5236', roughness: 0.62, metalness: 0.1 }),
+      can: std({ color: '#2c2f33', roughness: 0.5, metalness: 0.35 }),
+      canLight: std({ color: '#8d939a', roughness: 0.4, metalness: 0.5 }),
+      smokeG: std({ color: '#55613f', roughness: 0.6, metalness: 0.15 }),
+      gasY: std({ color: '#b7a03a', roughness: 0.55, metalness: 0.1 }),
+      c4: std({ color: '#c9b58c', roughness: 0.9 }),
+      tape: std({ color: '#2b3a52', roughness: 0.8 }),
+      red: std({ color: '#c8281e', roughness: 0.5, emissive: '#c8281e', emissiveIntensity: 0.2 }),
     };
     this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff3a26', transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 
@@ -545,6 +595,7 @@ export class ViewModel {
     const GUNS = [
       ['rifle', () => this.buildRifle()], ['pistol', () => this.buildPistol()], ['knife', () => this.buildKnife()],
       ['smg', () => this.buildSmg()], ['shotgun', () => this.buildShotgun()], ['sniper', () => this.buildSniper()], ['sheriff', () => this.buildSheriff()],
+      ...['frag', 'stun', 'flash', 'smoke', 'gas', 'c4', 'det'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
     ];
     for (const [id, build] of GUNS) {
       this.pending = [];
@@ -573,6 +624,7 @@ export class ViewModel {
     this.swingT = 0;
     this.swingDur = 1;
     this.swingHeavy = false;
+    this.tossT = 0; // 던지는 동작 (팔을 뻗음)
     this.slideT = 0;
     this.seated = false;
     this.tmpV = new V3();
@@ -745,6 +797,28 @@ export class ViewModel {
     };
   }
 
+  // 손에 든 투척·폭발 장비: 오른손으로 쥐고 몸 앞 오른쪽에 (칼과 같은 쥐는 자세)
+  buildHeld(id) {
+    const g = new THREE.Group();
+    const item = new THREE.Group();
+    this.mount(item, buildGearParts(id));
+    g.add(item);
+    this.hand(g, 1, {
+      curl: [[1.1, 1.25, 0.7], [1.2, 1.3, 0.75], [1.25, 1.3, 0.75], [1.25, 1.25, 0.75]],
+      spread: [-0.05, 0, 0.05, 0.12],
+      thumb: { yaw: 0.8, roll: 0.9, curl: [0.15, 0.35, 0.25] },
+    }, { at: new V3(0, -0.012, 0.012), f: new V3(-0.6, 0.8, 0), b: new V3(-0.8, -0.6, 0), anchor: new V3(0, -0.031, -0.07), arm: new V3(0.55, -0.55, 0.62) });
+    const muzzle = new THREE.Object3D();
+    g.add(muzzle);
+    return {
+      group: g, muzzle, port: muzzle, core: null, item,
+      kind: 'held',
+      spec: { draw: 0.25, reload: 1, melee: true },
+      scale: 1,
+      hip: new V3(0.1, -0.105, -0.3), hipRot: new THREE.Euler(0.2, 0.3, -0.15),
+    };
+  }
+
   // 긴 총 공통: 총 부품 + 탄창(또는 펌프) + 합력 코어 + 두 손
   buildLong({ parts, mag, magHome, leftAt, muzzleZ, bore, port, sight, eye, hip, hipRot, scale, kind = 'long', coreAt, dot = null }) {
     const g = new THREE.Group();
@@ -892,6 +966,12 @@ export class ViewModel {
     this.flash.scale.set(sz, sz, sz);
   }
 
+  // 던지기: 팔을 앞으로 크게 뻗었다 돌아옴 (short = 아래로 굴림)
+  toss(short = false) {
+    this.tossT = 0.42;
+    this.tossShort = short;
+  }
+
   swing(heavy) {
     this.swingT = heavy ? 0.5 : 0.32;
     this.swingDur = this.swingT;
@@ -942,7 +1022,7 @@ export class ViewModel {
     }
     const gun = this.guns[s.weapon];
     const g = gun.group;
-    const W = WEAPONS[s.weapon];
+    const W = WEAPONS[s.weapon] ?? gun.spec;
     const adsRaw = s.adsT ?? 0;
     const ads = smooth(adsRaw);
     const settle = 1 - adsRaw * 0.8;
@@ -1137,6 +1217,19 @@ export class ViewModel {
         g.rotation.y += k * 0.7;
       }
     }
+
+    // 던지기: 손을 뒤로 당겼다가 앞으로 뻗음 (짧게 굴릴 때는 아래로)
+    if (gun.kind === 'held' && this.tossT > 0) {
+      this.tossT = Math.max(0, this.tossT - dt);
+      const p = 1 - this.tossT / 0.42;
+      const back = bump(p, 0, 0.15, 0.2, 0.35);
+      const fwd = bump(p, 0.2, 0.45, 0.6, 1);
+      g.position.z += back * 0.06 - fwd * 0.22;
+      g.position.y += this.tossShort ? -fwd * 0.12 : back * 0.05 + fwd * 0.06;
+      g.rotation.x += this.tossShort ? fwd * 0.5 : -back * 0.6 + fwd * 0.9;
+      // 던진 직후 손이 비었다가 다음 것을 쥠 (뼈대 크기를 0으로 → 합쳐 그린 모형에서도 사라짐)
+      gun.item.scale.setScalar(p < 0.4 || p > 0.97 ? 1 : 0.0001);
+    } else if (gun.kind === 'held') gun.item.scale.setScalar(1);
 
     // 합력 강화 중: 소총 옆 코어가 주황색으로 빛남
     if (gun.core) gun.core.material.emissiveIntensity = s.amp ? 2.4 + Math.sin(this.time * 14) * 0.8 : 0;

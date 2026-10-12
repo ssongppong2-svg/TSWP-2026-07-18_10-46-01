@@ -7,6 +7,7 @@ import {
 } from './constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
+import { EFFECT, GEAR, GADGET_ORDER, emptyGear, exposure, nextThrowable, placeTarget, stepThrown, throwVelocity } from './gear.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
@@ -80,6 +81,8 @@ export class Match {
     this.veils = [];
     this.zones = [];
     this.shields = [];
+    this.throwables = []; // 날아가거나 바닥에 있는 투척물 (gear.js)
+    this.charges = []; // 붙여 둔 C4
     this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
     this.scans = []; // 작동 중인 무게 감지기
     this.orders = { defuse: null, force: null }; // 팀 지휘 명령
@@ -219,6 +222,8 @@ export class Match {
     this.veils = [];
     this.zones = [];
     this.shields = [];
+    this.throwables = [];
+    this.charges = [];
     this.noises = [];
     this.scans = [];
     this.orders = { defuse: null, force: null };
@@ -239,11 +244,14 @@ export class Match {
         a.secondary = 'pistol';
         a.armor = a.armorMax = 0;
         a.armorKind = null;
+        a.gear = emptyGear();
       } else {
         for (const id of Object.keys(a.weapons)) a.weapons[id] = freshAmmo(id);
       }
       a.weapon = a.primary ?? a.secondary;
       a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
+      a.equip = null;
+      a.stunT = a.flashT = a.gasT = 0;
       a.alive = true;
       a.hp = PLAYER.maxHp;
       a.deadT = 0;
@@ -350,6 +358,30 @@ export class Match {
       a.armor = a.armorMax = armor.dur;
       a.armorKind = item;
       a.bought.push({ item, price: armor.price });
+      this.emit('buy', { agent: a, item });
+      return true;
+    }
+    // 투척·폭발 장비: 누를 때마다 하나씩 (최대 개수까지), 최대인데 다시 누르면 이번에 산 것 하나를 반납
+    const gear = GEAR[item];
+    if (gear) {
+      a.gear ??= emptyGear();
+      const have = a.gear[item] ?? 0;
+      if (have >= gear.max || a.credits < gear.price) {
+        const i = a.bought.findLastIndex((b) => b.item === item);
+        if (i >= 0 && have > 0) {
+          const [b] = a.bought.splice(i, 1);
+          a.credits += b.price;
+          a.gear[item] = have - 1;
+          if (a.equip && (a.equip.id === item || (item === 'c4' && a.equip.kind === 'c4')) && !a.gear[item]) a.equip = null;
+          this.emit('buy', { agent: a, item, sold: true });
+          return true;
+        }
+        this.emit('buyDenied', { agent: a, item, reason: have >= gear.max ? 'full' : 'money' });
+        return false;
+      }
+      a.credits -= gear.price;
+      a.gear[item] = have + 1;
+      a.bought.push({ item, price: gear.price });
       this.emit('buy', { agent: a, item });
       return true;
     }
@@ -513,6 +545,7 @@ export class Match {
     this.updateVeils(dt);
     this.updateShields(dt);
     this.updateProjectiles(dt);
+    this.updateThrowables(dt);
     this.updateVisibility(dt);
     this.noises = this.noises.filter((n) => this.time - n.t < NOISE.memory);
     this.scans = this.scans.filter((s) => s.until > this.time);
@@ -541,8 +574,11 @@ export class Match {
     if (a.ampT > 0) a.ampT = Math.max(0, a.ampT - dt);
     if (a.bounceT > 0) a.bounceT = Math.max(0, a.bounceT - dt);
     if (a.tagT > 0) a.tagT = Math.max(0, a.tagT - dt);
+    this.decayEffects(a, dt);
     a.punch *= Math.exp(-dt * 8);
     if (live) a.ult = Math.min(ULT.max, a.ult + ULT.perSecond * dt);
+    if (intent.equip && !a.lockpick && !a.held) this.equipGear(a, intent.equip);
+    if (intent.useGear && live && !a.lockpick && !a.held) this.throwGear(a, intent.useGear.id, intent.useGear.mode);
 
     const canAct = live && !a.held;
     if (intent.command && live) this.issueCommand(a, intent.command);
@@ -715,6 +751,20 @@ export class Match {
       a.recoilYaw = 0;
     }
 
+    // 장비를 들고 있으면: 왼쪽 클릭 = 멀리 던지기·설치·기폭, 오른쪽 클릭 = 가까이 던지기. 무기 키를 누르면 다시 총으로
+    if (a.equip) {
+      if (intent.switchTo && !a.lockpick) {
+        a.equip = null;
+        a.swapT = Math.min(0.35, WEAPONS[a.weapon]?.draw ?? 0.35);
+        if (intent.switchTo !== a.weapon && WEAPONS[intent.switchTo] && a.weapons[intent.switchTo]) a.weapon = intent.switchTo;
+        a.triggerLatch = intent.fire;
+        a.adsLatch = intent.ads;
+        this.emit('swap', { agent: a, weapon: a.weapon });
+        return;
+      }
+      this.stepGearHand(a, intent, canFire, dt);
+      return;
+    }
     if (intent.switchTo && intent.switchTo !== a.weapon && WEAPONS[intent.switchTo] && a.weapons[intent.switchTo] && !a.lockpick) {
       a.weapon = intent.switchTo;
       a.swapT = WEAPONS[a.weapon].draw;
@@ -787,6 +837,9 @@ export class Match {
     let spread = w.spreadBase + a.bloom + w.spreadMove * moveFactor(a) + (!a.onGround ? w.spreadAir : 0);
     spread *= (1 + (w.adsSpread - 1) * a.adsT) * (1 + (w.crouchSpread - 1) * a.crouch);
     if (a.held) spread += w.spreadMove * 0.5;
+    // 이명·최루: 조준이 흔들림
+    if ((a.stunT ?? 0) > 0) spread += EFFECT.stunSpread * Math.min(1, a.stunT / 2);
+    if ((a.gasT ?? 0) > 0) spread += EFFECT.gasSpread;
     // 숨이 차면 조준이 흔들림 (지구력이 바닥날수록)
     if ((a.stamina ?? STAMINA.max) < STAMINA.swayBelow) spread += ((STAMINA.swayBelow - a.stamina) / STAMINA.swayBelow) * STAMINA.sway;
     const aim = dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch);
@@ -1061,6 +1114,8 @@ export class Match {
     t.hp = 0;
     t.armor = 0;
     t.armorKind = null;
+    t.equip = null;
+    t.stunT = t.flashT = t.gasT = 0;
     t.deadT = 0;
     t.held = null;
     t.slippery = false;
@@ -1318,7 +1373,27 @@ export class Match {
   clearLine(a, b) {
     if (!this.map.lineOfSight(a, b)) return false;
     for (const sh of this.shields) if (segmentShield(a, b, sh) >= 0) return false;
+    if (this.smokeBetween(a, b)) return false;
     return true;
+  }
+
+  // 연막이 두 점 사이 시야를 가리는지 (연기 구 안을 지나가는 거리가 1.2 m를 넘으면)
+  smokeBetween(a, b) {
+    for (const z of this.zones) {
+      if (z.type !== 'smoke' || z.age < 0.8) continue;
+      const r = z.radius * Math.min(1, z.age / 2.5) * (z.t < 2 ? z.t / 2 : 1); // 피어오르고 걷힘
+      const c = { x: z.x, y: z.y + 1.4, z: z.z };
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+      const L2 = dx * dx + dy * dy + dz * dz;
+      if (L2 < 1e-6) continue;
+      const t = Math.max(0, Math.min(1, ((c.x - a.x) * dx + (c.y - a.y) * dy + (c.z - a.z) * dz) / L2));
+      const px = a.x + dx * t - c.x, py = (a.y + dy * t - c.y) * 1.6, pz = a.z + dz * t - c.z;
+      const d2 = px * px + py * py + pz * pz;
+      if (d2 >= r * r) continue;
+      const chord = 2 * Math.sqrt(r * r - d2);
+      if (chord > 1.2) return true;
+    }
+    return false;
   }
 
   updateZones(dt) {
@@ -1339,6 +1414,13 @@ export class Match {
         for (const a of this.agents) {
           if (!a.alive || a.team === z.team) continue;
           if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) <= z.radius && Math.abs(a.pos.y - z.y) < 1.2) a.mired = true;
+        }
+      } else if (z.type === 'gas' && z.age > 0.6) {
+        // 최루 가스: 안에 있는 사람은 (아군도) 기침·느려짐·조준 흔들림
+        const r = z.radius * Math.min(1, z.age / 2);
+        for (const a of this.agents) {
+          if (!a.alive) continue;
+          if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) <= r && a.pos.y + 1 > z.y - 0.5 && a.pos.y < z.y + 2.5) a.gasT = Math.max(a.gasT ?? 0, 0.8);
         }
       } else if (z.type === 'collapse' && z.age <= z.pullT) {
         for (const a of this.agents) {
@@ -1391,6 +1473,199 @@ export class Match {
       }
     }
     this.zones = keep;
+  }
+
+  // ───────────────────────── 투척·폭발 장비 ─────────────────────────
+  decayEffects(a, dt) {
+    if (a.stunT > 0) a.stunT = Math.max(0, a.stunT - dt);
+    if (a.flashT > 0) a.flashT = Math.max(0, a.flashT - dt);
+    if (a.gasT > 0) a.gasT = Math.max(0, a.gasT - dt);
+  }
+
+  // 4: 투척물 들기 (들고 있으면 다음 종류로) · 5: C4 → 붙였으면 기폭기
+  equipGear(a, which) {
+    a.gear ??= emptyGear();
+    const before = a.equip;
+    if (which === 'throw') {
+      const id = nextThrowable(a, a.equip?.kind === 'throw' ? a.equip.id : null);
+      if (!id) return this.emit('gearDenied', { agent: a, which, reason: 'none' });
+      a.equip = { kind: 'throw', id };
+    } else if (which === 'gadget') {
+      const mine = this.charges.some((c) => c.ownerId === a.id);
+      const hasC4 = (a.gear.c4 ?? 0) > 0;
+      if (a.equip?.kind === 'c4' && mine) a.equip = { kind: 'det' };
+      else if (a.equip?.kind === 'det' && hasC4) a.equip = { kind: 'c4' };
+      else if (hasC4 && a.equip?.kind !== 'c4') a.equip = { kind: 'c4' };
+      else if (mine) a.equip = { kind: 'det' };
+      else return this.emit('gearDenied', { agent: a, which, reason: 'none' });
+    } else return;
+    if (before?.kind === a.equip.kind && before?.id === a.equip.id) return;
+    a.reloadT = 0;
+    a.ads = false;
+    a.swapT = 0.25; // 손에 쥐는 시간
+    a.triggerLatch = true;
+    a.adsLatch = true;
+    this.emit('equip', { agent: a, equip: { ...a.equip } });
+  }
+
+  // 장비를 든 손: 쥐는 중이 아니면 누른 순간 한 번 동작
+  stepGearHand(a, intent, canAct, dt) {
+    if (a.swapT > 0) {
+      a.swapT = Math.max(0, a.swapT - dt);
+      a.triggerLatch = intent.fire;
+      a.adsLatch = intent.ads;
+      return;
+    }
+    const left = intent.fire && !a.triggerLatch;
+    const right = intent.ads && !a.adsLatch;
+    a.triggerLatch = intent.fire;
+    a.adsLatch = intent.ads;
+    a.ads = false;
+    a.adsT = 0;
+    if (!canAct || (!left && !right) || this.client) return;
+    const e = a.equip;
+    if (e.kind === 'throw') this.throwGear(a, e.id, left ? 'long' : 'short');
+    else if (e.kind === 'c4' && left) this.placeCharge(a);
+    else if (e.kind === 'det' && left) this.detonate(a);
+  }
+
+  // 던지기: 눈 앞에서 조준 방향으로 (달리던 속도도 더해짐 = 관성)
+  throwGear(a, id, mode = 'long') {
+    const def = GEAR[id];
+    if (!def || def.kind !== 'throw' || !((a.gear?.[id] ?? 0) > 0) || this.client) return false;
+    a.gear[id]--;
+    const dir = dirFromAngles(a.yaw, a.pitch);
+    const eye = eyePos(a);
+    const start = { x: eye.x + dir.x * 0.35, y: eye.y - 0.1 + dir.y * 0.35, z: eye.z + dir.z * 0.35 };
+    // 벽에 붙어 서서 던지면 벽 안으로 들어가지 않게 눈 위치에서 시작
+    const pos = this.map.lineOfSight(eye, start) ? start : { ...eye };
+    const t = { id: this.nextId++, kind: id, ownerId: a.id, team: a.team, pos, prev: { ...pos }, vel: throwVelocity(dir, mode, a.vel), fuse: def.fuse, age: 0, rest: false };
+    this.throwables.push(t);
+    if (a.equip?.kind === 'throw') {
+      // 같은 종류가 남았으면 그대로, 없으면 다른 투척물, 그것도 없으면 총으로
+      const next = (a.gear[id] ?? 0) > 0 ? id : nextThrowable(a, id);
+      a.equip = next ? { kind: 'throw', id: next } : null;
+      a.swapT = next ? 0.45 : Math.min(0.4, WEAPONS[a.weapon]?.draw ?? 0.4);
+    }
+    a.stats.gearUses = (a.stats.gearUses ?? 0) + 1;
+    this.makeNoise(a, 'throw');
+    this.emit('throw', { agent: a, throwable: t, mode });
+    return true;
+  }
+
+  placeCharge(a) {
+    if (!((a.gear?.c4 ?? 0) > 0)) return false;
+    const spot = placeTarget(this.map, eyePos(a), dirFromAngles(a.yaw, a.pitch), GEAR.c4.reach);
+    if (!spot) {
+      this.emit('gearDenied', { agent: a, which: 'c4', reason: 'far' });
+      return false;
+    }
+    a.gear.c4--;
+    const c = { id: this.nextId++, kind: 'c4', ownerId: a.id, team: a.team, ...spot, armAt: this.time + GEAR.c4.arm, doorId: spot.doorId ?? null };
+    this.charges.push(c);
+    a.equip = { kind: 'det' };
+    a.swapT = 0.35;
+    this.makeNoise(a, 'patch');
+    this.emit('chargePlaced', { agent: a, charge: c });
+    return true;
+  }
+
+  // 기폭기: 내가 붙인 C4를 모두 터뜨림 (붙인 직후 잠깐은 안 됨)
+  detonate(a) {
+    const mine = this.charges.filter((c) => c.ownerId === a.id);
+    const ready = mine.filter((c) => this.time >= c.armAt);
+    if (!ready.length) {
+      this.emit('gearDenied', { agent: a, which: 'det', reason: mine.length ? 'arming' : 'none' });
+      return false;
+    }
+    this.charges = this.charges.filter((c) => !ready.includes(c));
+    for (const c of ready) this.blast(c, GEAR.c4, a);
+    a.equip = (a.gear?.c4 ?? 0) > 0 ? { kind: 'c4' } : null;
+    if (!a.equip) a.swapT = Math.min(0.4, WEAPONS[a.weapon]?.draw ?? 0.4);
+    return true;
+  }
+
+  updateThrowables(dt) {
+    if (!this.throwables.length) return;
+    const keep = [];
+    for (const t of this.throwables) {
+      t.prev = { ...t.pos };
+      t.age += dt;
+      const b = stepThrown(this.map, t, dt);
+      if (b) this.emit('gearBounce', { throwable: t, speed: b.speed, x: t.pos.x, y: t.pos.y, z: t.pos.z });
+      if (t.age >= t.fuse) {
+        this.detonateThrowable(t);
+        continue;
+      }
+      if (t.age < 8) keep.push(t);
+    }
+    this.throwables = keep;
+  }
+
+  detonateThrowable(t) {
+    const def = GEAR[t.kind];
+    const owner = this.agentById(t.ownerId);
+    const at = { x: t.pos.x, y: t.pos.y + 0.15, z: t.pos.z };
+    const payload = { kind: t.kind, x: at.x, y: at.y, z: at.z, ownerId: t.ownerId, team: t.team, id: t.id, hit: [] };
+    if (t.kind === 'frag') {
+      this.blast({ ...at, kind: 'frag', team: t.team, ownerId: t.ownerId }, def, owner);
+      return;
+    }
+    if (t.kind === 'stun' || t.kind === 'flash') {
+      // 아군·자신도 맞음 (조심해서 던져야 함)
+      for (const a of this.agents) {
+        if (!a.alive) continue;
+        const eye = eyePos(a);
+        let k = exposure(this.map, at, eye, def.radius);
+        if (k <= 0) continue;
+        if (t.kind === 'flash') {
+          // 보고 있던 방향일수록 강함 (등지고 있으면 4분의 1)
+          const dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z;
+          const d = Math.hypot(dx, dy, dz) || 1;
+          const f = dirFromAngles(a.yaw, a.pitch);
+          const facing = (dx * f.x + dy * f.y + dz * f.z) / d;
+          k = Math.min(1, (0.35 + 0.65 * k) * (facing > 0.5 ? 1 : facing > 0 ? 0.6 : 0.25));
+          a.flashT = Math.max(a.flashT ?? 0, def.time * k);
+        } else {
+          k = 0.35 + 0.65 * k;
+          a.stunT = Math.max(a.stunT ?? 0, def.time * k);
+          if (a.lockpick) this.cancelLockpick(a, 'stunned');
+        }
+        payload.hit.push({ id: a.id, k: Math.round(k * 100) / 100 });
+      }
+    } else if (t.kind === 'smoke' || t.kind === 'gas') {
+      const zone = { id: this.nextId++, type: t.kind, ownerId: t.ownerId, team: t.team, x: at.x, y: t.pos.y - 0.05, z: at.z, radius: def.radius, t: def.time, duration: def.time, age: 0 };
+      this.zones.push(zone);
+      payload.zone = zone;
+    }
+    if (owner) this.makeNoise(owner, 'gear', at);
+    this.emit('detonate', payload);
+  }
+
+  // 폭발 (세열 수류탄·C4): 가까울수록 큰 피해, 벽 뒤는 안전, 바깥쪽으로 밀려남. 피해는 적에게만
+  blast(at, def, owner) {
+    const hits = [];
+    for (const a of this.agents) {
+      if (!a.alive) continue;
+      const c = chestPos(a);
+      const k = Math.max(exposure(this.map, at, c, def.radius), exposure(this.map, at, eyePos(a), def.radius) * 0.8);
+      if (k <= 0) continue;
+      // 폭발이 미는 힘: 폭발 지점에서 바깥쪽으로 속도가 생김
+      const dx = c.x - at.x, dz = c.z - at.z, l = Math.hypot(dx, dz) || 1;
+      if (!a.held) {
+        a.vel.x += (dx / l) * EFFECT.knock * k;
+        a.vel.z += (dz / l) * EFFECT.knock * k;
+        a.vel.y = Math.max(a.vel.y, 2.5 * k);
+        a.onGround = false;
+      }
+      a.stunT = Math.max(a.stunT ?? 0, 1.5 * k);
+      if (owner && a.team === owner.team) continue;
+      if (!owner && a.team === at.team) continue;
+      hits.push(a.id);
+      this.applyDamage(a, def.damage * Math.pow(k, 1.15), owner, { weapon: at.kind ?? def.id, pos: c, pen: def.pen, wear: def.wear });
+    }
+    if (owner) this.makeNoise(owner, 'blast', at);
+    this.emit('detonate', { kind: def.id === 'c4' ? 'c4' : 'frag', x: at.x, y: at.y, z: at.z, nx: at.nx ?? 0, ny: at.ny ?? 1, nz: at.nz ?? 0, ownerId: owner?.id ?? null, team: at.team, id: at.id, hits, doorId: at.doorId ?? null });
   }
 
   // ───────────────────────── 폭탄 · 락픽 ─────────────────────────
@@ -1503,6 +1778,8 @@ export class Match {
     for (const a of this.agents) a.visibleEnemies = [];
     for (const a of this.agents) {
       if (!a.alive) continue;
+      // 섬광에 눈이 부시면 아무것도 못 봄
+      if ((a.flashT ?? 0) > GEAR.flash.time * EFFECT.flashBlind) continue;
       const eye = eyePos(a);
       const fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw);
       for (const e of this.agents) {

@@ -1,6 +1,7 @@
 import { SLIDE } from './devices.js';
 import { LOAD, PLAYER, STAMINA, ULT } from './constants.js';
 import { ARMOR, LOADOUT_SLOTS, WEAPONS } from './data.js';
+import { EFFECT, GEAR, emptyGear } from './gear.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -21,11 +22,9 @@ export function carriedMass(a) {
   let m = 0;
   for (const id in a.weapons ?? {}) m += WEAPONS[id]?.mass ?? 0;
   if ((a.armor ?? 0) > 0) m += ARMOR[a.armorKind]?.mass ?? 0;
-  for (const id in a.gear ?? {}) m += (a.gear[id] ?? 0) * (GEAR_MASS[id] ?? 0);
+  for (const id in a.gear ?? {}) m += (a.gear[id] ?? 0) * (GEAR[id]?.mass ?? 0);
   return m;
 }
-// 투척·장비 한 개의 질량 (kg) — 장비 정의(gear.js)가 채움
-export const GEAR_MASS = {};
 
 // 질량에 따른 이동 배율 (속도, 가속)
 export function loadFactors(mass) {
@@ -65,6 +64,11 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     armorMax: 0,
     armorKind: null, // 'light' | 'heavy' (등급·헬멧)
     ammo: 'fmj', // 이번 라운드 탄종 (AMMO)
+    gear: emptyGear(), // 투척·폭발 장비 개수 (gear.js)
+    equip: null, // 손에 든 장비 { kind: 'throw', id } · { kind: 'c4' } · { kind: 'det' } (총 대신)
+    stunT: 0, // 이명 남은 시간
+    flashT: 0, // 섬광 눈부심 남은 시간
+    gasT: 0, // 최루 가스 안에 있음 (나가면 곧 사라짐)
     stamina: STAMINA.max, // 지구력 (달리기·점프)
     tired: false, // 지구력이 바닥나 지친 상태
     restT: 0,
@@ -114,6 +118,8 @@ export function emptyIntent(agent) {
     fire: false,
     reload: false,
     switchTo: null,
+    equip: null, // 장비 손에 들기: 'throw' (4: 투척물, 다시 누르면 다음 것) · 'gadget' (5: C4 · 기폭기)
+    useGear: null, // 봇 전용: { id, mode } 지금 조준한 방향으로 바로 던짐
     buy: null, // 상점: 무기 id 또는 'light'·'heavy' (같은 것을 다시 사면 이번 구매 시간 안에서 환불)
     patch: [false, false, false, false],
     interact: false,
@@ -150,6 +156,8 @@ export function moveSpeed(a, intent) {
   if (Math.abs(a.lean) > 0.3) s *= P.leanSpeedMult;
   if (a.tagT > 0) s *= P.tagSlow;
   if (a.mired) s *= P.miredMult;
+  if ((a.stunT ?? 0) > 0) s *= EFFECT.stunSlow;
+  if ((a.gasT ?? 0) > 0) s *= EFFECT.gasSlow;
   // 무거운 장비 · 지침
   s *= loadFactors(carriedMass(a)).speed;
   if (a.tired) s *= STAMINA.tiredSpeed;

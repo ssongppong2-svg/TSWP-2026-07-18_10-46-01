@@ -2009,64 +2009,6 @@ button {
   margin-bottom: 0;
 }
 
-/* 방탄·탄종·장비: 작은 가로 칸 */
-.shop-cols.small {
-  padding-top: 10px;
-  border-top: 1px dashed var(--term-line);
-}
-
-.shop-item.small {
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  align-items: center;
-  gap: 2px 10px;
-  margin-bottom: 6px;
-  padding: 8px 10px;
-}
-
-.shop-item.small .si-icon {
-  grid-row: 1 / 3;
-  height: 32px;
-  margin-top: 0;
-}
-
-.shop-item.small .si-icon svg {
-  max-height: 28px;
-}
-
-.shop-item.small .si-name b {
-  display: inline;
-  font-size: 13px;
-}
-
-.shop-item.small .si-name small {
-  display: none; /* 칸 제목이 이미 종류를 알려 줌 */
-}
-
-.shop-item.small .si-stats {
-  grid-column: 2;
-  padding-top: 0;
-  border-top: 0;
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.shop-item.small .si-price {
-  grid-column: 3;
-  grid-row: 1 / 3;
-  align-self: end;
-  font-size: 13px;
-}
-
-.shop-item.small .si-badge {
-  top: 5px;
-  right: 8px;
-}
-
-.shop-col h4 {
-  margin-bottom: 8px;
-}
-
 .shop-item {
   position: relative;
   display: grid;
@@ -2143,6 +2085,119 @@ button {
   font: 600 15px var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--warn);
+}
+
+/* 아래 줄: 방탄·탄종·투척·장비 (작은 칸, 투척은 두 줄로) */
+.shop-cols.small {
+  padding-top: 8px;
+  border-top: 1px dashed var(--term-line);
+}
+
+.shop-cols.small .sc-items {
+  display: grid;
+  grid-template-columns: repeat(var(--g, 1), minmax(0, 1fr));
+  gap: 5px 6px;
+}
+
+.shop-item.small {
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 1px 8px;
+  margin-bottom: 0;
+  padding: 6px 8px;
+}
+
+.shop-item.small .si-icon {
+  grid-row: 1 / 3;
+  height: 26px;
+  margin-top: 0;
+}
+
+.shop-item.small .si-icon svg {
+  max-height: 24px;
+}
+
+.shop-item.small .si-name {
+  padding-right: 30px; /* 오른쪽 위 표시와 겹치지 않게 */
+}
+
+.shop-item.small:has(.si-badge:empty) .si-name {
+  padding-right: 0;
+}
+
+.shop-item.small .si-name b {
+  display: block;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.si-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.si-short {
+  flex: 1;
+  min-width: 0;
+  font: 500 10px var(--mono);
+  color: #aeb7bf;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shop-item.small .si-price {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.shop-item.small .si-badge {
+  top: 4px;
+  right: 5px;
+  font-size: 9.5px;
+}
+
+.shop-item[data-state='worn'] .si-badge {
+  background: rgba(227, 179, 65, 0.85);
+}
+
+.shop-item[data-state='some'] .si-badge {
+  background: var(--instr);
+}
+
+/* 큰 칸(총)도 조금 낮게 */
+.shop-cols.big .si-icon {
+  height: 36px;
+  margin-top: 8px;
+}
+
+.shop-cols.big .si-icon svg {
+  max-height: 32px;
+}
+
+/* 아래 안내줄: 커서를 올린 장비 설명 */
+.shop-info {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  min-height: 40px;
+  background: rgba(159, 223, 232, 0.04);
+  border-left: 2px solid var(--instr);
+}
+
+.sf-name {
+  font: 600 12.5px var(--font);
+}
+
+.sf-desc {
+  font: 500 11px var(--mono);
+  color: #aeb7bf;
 }
 
 .shop-item.hover,
@@ -2292,7 +2347,7 @@ button {
 
 .st-row {
   display: grid;
-  grid-template-columns: 1fr 52px 18px 62px;
+  grid-template-columns: 1fr 52px minmax(0, 64px) 56px;
   align-items: center;
   gap: 6px;
   padding: 5px 0;
@@ -2317,9 +2372,15 @@ button {
   color: #d6dce2;
 }
 
+.st-a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+}
+
 .st-a svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   color: #cfe8ff;
 }
 
@@ -4661,4 +4722,54 @@ button {
 /* 닳은 방탄 */
 .hud .vt-row.ar[data-level='worn'] .vt-bar i {
   background: var(--warn);
+}
+
+/* 투척·장비 칸 (무기 칸 위) */
+.hud .vw-gear {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.hud .vw-gear.show {
+  display: flex;
+}
+
+.hud .vw-gear kbd {
+  margin-right: 2px;
+  font-size: 9.5px;
+}
+
+.hud .vg {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #c9d2d9;
+  border: 1px solid rgba(214, 220, 226, 0.15);
+  border-radius: 2px;
+  background: rgba(10, 14, 18, 0.35);
+}
+
+.hud .vg svg {
+  width: 17px;
+  height: 17px;
+}
+
+.hud .vg i {
+  position: absolute;
+  right: -3px;
+  bottom: -4px;
+  font: 600 9px var(--mono);
+  font-style: normal;
+  color: #f2f5f7;
+}
+
+.hud .vg.on {
+  color: #08151a;
+  background: var(--instr);
+  border-color: var(--instr);
 }

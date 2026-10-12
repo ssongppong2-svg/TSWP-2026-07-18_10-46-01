@@ -131,6 +131,9 @@ export const NOISE = {
   knife: 6,
   patch: 18,
   lockpick: 10,
+  throw: 8, // 투척물 던지는 소리
+  gear: 55, // 이명·섬광·연막·최루가 터지는 소리
+  blast: 85, // 세열 수류탄·C4 폭발
   rainMult: 0.8, // 비가 오면 작은 소리는 덜 들림 (총성 제외)
   memory: 1.5, // 소리 기록 보관 시간(초)
 };

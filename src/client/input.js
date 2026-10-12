@@ -163,7 +163,7 @@ export class PlayerController {
     this.settings = settings;
     this.yaw = 0;
     this.pitch = 0;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [] };
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [], equip: null };
     this.shop = null; // 상점이 열려 있으면: 마우스는 상점 커서, 숫자 키는 구매
     this.lastDx = 0;
     this.lastDy = 0;
@@ -267,6 +267,9 @@ export class PlayerController {
       else if (digit === 1 && agent?.primary) this.queue.switchTo = agent.primary;
       else if (digit === 2 && agent?.secondary) this.queue.switchTo = agent.secondary;
       else if (digit === 3) this.queue.switchTo = 'knife';
+      // 4: 투척물 들기 (다시 누르면 다음 종류) · 5: C4 → 붙였으면 기폭기
+      else if (digit === 4) this.queue.equip = 'throw';
+      else if (digit === 5) this.queue.equip = 'gadget';
     }
     const w = this.input.takeWheel();
     if (w && agent && !agent.lockpick) {
@@ -313,7 +316,8 @@ export class PlayerController {
     i.report = q.report;
     i.buy = q.buys.length ? q.buys.shift() : null;
     i.quiz = q.quiz ?? -1;
-    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1 };
+    i.equip = q.equip;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1, equip: null };
     return i;
   }
 }

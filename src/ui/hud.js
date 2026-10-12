@@ -2,6 +2,7 @@ import { TEAM_INFO, TEAMS, BOMB, LOAD, ULT } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
 import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
+import { GEAR, THROW_ORDER } from '../sim/gear.js';
 import { COMMANDS } from '../client/input.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
@@ -79,10 +80,11 @@ export class Hud {
       <div class="vh-weapon">
         <div class="amp-badge">합력 강화</div>
         <div class="vw-energy">${GEAR_ICONS.credit}<b></b><span>J</span></div>
+        <div class="vw-gear"></div>
         <div class="vw-ammo"><span class="am-type"></span><b class="am-mag">0</b><span class="am-res">/ 0</span></div>
         <div class="vw-name"></div>
       </div>
-      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
+      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
@@ -144,6 +146,7 @@ export class Hud {
       wname: $('.vw-name'),
       ammo: $('.vh-weapon'),
       ammoType: $('.am-type'),
+      gear: $('.vw-gear'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -401,13 +404,29 @@ export class Hud {
     // 탄약·무기
     const w = WEAPONS[a.weapon];
     const ws = a.weapons[a.weapon];
-    this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`));
+    if (!a.equip) this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`));
     // 온라인에서 다른 사람을 관전하면 탄약은 모름 → —
     this.set('mag', w.melee || !ws ? '—' : ws.mag, (v) => {
       E.mag.textContent = v;
       E.mag.classList.toggle('low', !w.melee && typeof v === 'number' && v <= Math.ceil(w.magSize * 0.25));
     });
     this.set('res', w.melee || !ws ? '' : `/ ${ws.reserve}`, (v) => (E.res.textContent = v));
+    // 투척·장비: 가진 것과 개수, 손에 든 것은 밝게 (4 투척물 · 5 C4/기폭기)
+    const eq = a.equip;
+    const charges = (m.charges ?? []).filter((c) => c.ownerId === a.id).length;
+    const gearItems = [...THROW_ORDER, 'c4'].filter((id) => (a.gear?.[id] ?? 0) > 0);
+    const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}`;
+    this.set('gear', gearSig, () => {
+      const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === 'c4' && eq?.kind === 'c4');
+      const cells = gearItems.map((id) => `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
+      if (charges) cells.push(`<span class="vg ${eq?.kind === 'det' ? 'on' : ''}" title="기폭기 · 붙인 C4 ${charges}개">${GEAR_ICONS.det}<i>${charges}</i></span>`);
+      E.gear.innerHTML = cells.length ? `<kbd>4·5</kbd>${cells.join('')}` : '';
+      E.gear.classList.toggle('show', cells.length > 0);
+    });
+    if (eq) {
+      const name = eq.kind === 'throw' ? GEAR[eq.id].name : eq.kind === 'c4' ? 'C4 폭약' : '기폭기';
+      this.set('wsel', `gear:${name}`, () => (E.wname.innerHTML = `${GEAR_ICONS[eq.kind === 'throw' ? eq.id : eq.kind] ?? ''}<span>${name}</span>`));
+    }
     // 탄종 (일반탄이 아니면 탄약 앞에 표시)
     const ammoId = w.melee ? 'fmj' : a.ammo ?? 'fmj';
     this.set('ammoType', ammoId, (v) => {
@@ -473,10 +492,17 @@ export class Hud {
         const crate = m.devices?.list.find((d) => d.type === 'crate' && d.st.pushers > 0 && Math.hypot(a.pos.x - m.map.cellX(d.st.c), a.pos.z - m.map.cellZ(d.st.r)) < 1.7);
         if (crate) prompt = `상자 미는 중 · 합력 ${crate.st.pushers}명 <small>(같은 방향으로 함께 밀면 더 빨리)</small>`;
       }
+      // 손에 든 장비 사용법
+      const eq2 = a.equip;
+      if (eq2?.kind === 'throw') prompt = `${GEAR[eq2.id].name} · <kbd>왼쪽 클릭</kbd> 멀리 <kbd>오른쪽 클릭</kbd> 가까이 <kbd>4</kbd> 다음 <kbd>1</kbd> 총 <small>(선 = 중력 때문에 휘는 길)</small>`;
+      else if (eq2?.kind === 'c4') prompt = '<kbd>왼쪽 클릭</kbd> 가까운 벽·바닥·문에 C4 붙이기 <small>(2.6 m 안)</small>';
+      else if (eq2?.kind === 'det') prompt = '<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 <kbd>5</kbd> C4 <kbd>1</kbd> 총';
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';
       else if (a.slippery) prompt = '마찰력 0 구역 · 제동 불가';
       else if (a.mired) prompt = '마찰 폭풍 · 기동력 저하';
+      else if ((a.stunT ?? 0) > 0.3) prompt = '이명 · 귀가 울리고 조준이 흔들림';
+      else if ((a.gasT ?? 0) > 0) prompt = '최루 가스 · 빠져나가야 함';
     }
     this.set('prompt', prompt, (v) => {
       E.prompt.innerHTML = v;

@@ -2,11 +2,13 @@ import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
 import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
 import { TEAMS } from '../sim/constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
+import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
+import { dirFromAngles } from '../core/vec.js';
 
 export const DIFFICULTY = {
-  easy: { name: '신병', reaction: 0.65, aimError: 0.08, turnSpeed: 4.5, headChance: 0.06, burst: [2, 3], lead: 0.3, recoilComp: 0.4, patchSkill: 0.45, holdFireVeil: false, hearing: 0.75 },
-  normal: { name: '정규', reaction: 0.42, aimError: 0.05, turnSpeed: 7, headChance: 0.14, burst: [2, 4], lead: 0.6, recoilComp: 0.65, patchSkill: 0.75, holdFireVeil: true, hearing: 0.9 },
-  hard: { name: '정예', reaction: 0.28, aimError: 0.03, turnSpeed: 10, headChance: 0.25, burst: [3, 5], lead: 0.9, recoilComp: 0.85, patchSkill: 1, holdFireVeil: true, hearing: 1 },
+  easy: { name: '신병', reaction: 0.65, aimError: 0.08, turnSpeed: 4.5, headChance: 0.06, burst: [2, 3], lead: 0.3, recoilComp: 0.4, patchSkill: 0.45, holdFireVeil: false, hearing: 0.75, dodge: 0.2 },
+  normal: { name: '정규', reaction: 0.42, aimError: 0.05, turnSpeed: 7, headChance: 0.14, burst: [2, 4], lead: 0.6, recoilComp: 0.65, patchSkill: 0.75, holdFireVeil: true, hearing: 0.9, dodge: 0.45 },
+  hard: { name: '정예', reaction: 0.28, aimError: 0.03, turnSpeed: 10, headChance: 0.25, burst: [3, 5], lead: 0.9, recoilComp: 0.85, patchSkill: 1, holdFireVeil: true, hearing: 1, dodge: 0.7 },
 };
 
 const anglesTo = (from, to) => anglesFromDir({ x: to.x - from.x, y: to.y - from.y, z: to.z - from.z });
@@ -16,6 +18,7 @@ const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const NOISE_TEXT = {
   step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
   smg: '기관단총 사격음', sniper: '저격총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
+  throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음',
 };
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 const compass = (dx, dz) => COMPASS[Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
@@ -73,6 +76,10 @@ export class BotBrain {
     this.ackT = -1;
     this.pushDelay = this.rng.range(0, 5);
     this.holdCrouch = this.rng.chance(0.5);
+    this.gearT = this.rng.range(2, 6); // 다음 투척까지 (너무 자주 던지지 않게)
+    this.gearPlan = null; // { id, mode, yaw, pitch, t } 조준을 맞춘 뒤 던짐
+    this.avoidT = 0; // 섬광을 던진 뒤 고개를 돌리는 시간
+    this.entryDone = false; // 이번 라운드 진입용 섬광·이명을 썼는지
     this.assignRoles(agent, match);
   }
 
@@ -132,7 +139,16 @@ export class BotBrain {
 
     // ── 조준 방향 정하기
     let desired = null;
-    if (this.pending) {
+    this.gearT -= dt;
+    this.avoidT -= dt;
+    if (this.gearPlan) {
+      this.gearPlan.t -= dt;
+      if (this.gearPlan.t <= 0 || visible) this.gearPlan = null;
+      else desired = { yaw: this.gearPlan.yaw, pitch: this.gearPlan.pitch };
+    }
+    // 섬광을 던졌으면 터질 때까지 고개를 돌림 (자기 섬광에 눈부시지 않게)
+    if (!desired && this.avoidT > 0 && !visible) desired = { yaw: this.avoidYaw, pitch: 0 };
+    if (!desired && this.pending) {
       this.pending.t -= dt;
       if (this.pending.t <= 0) this.pending = null;
       else desired = anglesTo(eye, this.pending.point);
@@ -183,7 +199,7 @@ export class BotBrain {
     }
 
     this.turnToward(desired, dt);
-    this.updateError(dt, target ? dist2(target.pos, a.pos) : 10);
+    this.updateError(dt, target ? dist2(target.pos, a.pos) : 10, a);
     // 반동·피격 반동을 실력만큼 상쇄
     intent.yaw = this.aimYaw + this.err.y - a.recoilYaw * this.d.recoilComp;
     intent.pitch = clamp(this.aimPitch + this.err.p - (a.recoil + a.punch) * this.d.recoilComp, -1.4, 1.4);
@@ -252,6 +268,23 @@ export class BotBrain {
       }
     }
 
+    // ── 투척: 조준이 맞으면 던짐
+    if (this.gearPlan && live && !a.lockpick && !a.held) {
+      const err = Math.hypot(wrapAngle(this.gearPlan.yaw - this.aimYaw), this.gearPlan.pitch - this.aimPitch);
+      if (err < 0.04) {
+        intent.yaw = this.aimYaw;
+        intent.pitch = this.aimPitch;
+        intent.useGear = { id: this.gearPlan.id, mode: this.gearPlan.mode };
+        intent.fire = false;
+        if (this.gearPlan.id === 'flash') {
+          this.avoidT = GEAR.flash.fuse + 0.4;
+          this.avoidYaw = this.aimYaw + Math.PI * 0.7;
+        }
+        this.gearPlan = null;
+        this.gearT = this.rng.range(6, 11);
+      }
+    }
+
     // ── 대기 중이던 포스 패치 발동
     if (this.pending && live) {
       const aimErr = Math.hypot(wrapAngle(desired.yaw - this.aimYaw), (desired.pitch - this.aimPitch) * (this.pending.yawOnly ? 0 : 1));
@@ -286,12 +319,13 @@ export class BotBrain {
     this.aimPitch += clamp(desired.pitch - this.aimPitch, -max, max);
   }
 
-  updateError(dt, range = 10) {
+  updateError(dt, range = 10, a = null) {
     this.jitT -= dt;
     if (this.jitT <= 0) {
       this.jitT = 0.25;
-      // 멀수록(어둡고 비 오는 밤) 조준이 흔들림
-      const e = this.d.aimError * 0.35 * (1 + Math.max(0, range - 10) / 22);
+      // 멀수록(어둡고 비 오는 밤) 조준이 흔들림 · 이명·눈부심·최루에 걸리면 크게 흔들림
+      const dazed = a ? 1 + Math.min(2, (a.stunT ?? 0) * 0.8 + (a.flashT ?? 0) * 1.2 + ((a.gasT ?? 0) > 0 ? 0.8 : 0)) : 1;
+      const e = this.d.aimError * 0.35 * (1 + Math.max(0, range - 10) / 22) * dazed;
       this.jit.y = this.rng.range(-e, e);
       this.jit.p = this.rng.range(-e, e) * 0.6;
     }
@@ -392,6 +426,97 @@ export class BotBrain {
       else this.thinkForce(match, a, visible);
     }
     if (!a.lockpick && !a.held && !this.pending && this.rng.next() < this.d.patchSkill) this.considerPatches(match, a, target, visible);
+    if (!a.lockpick && !a.held && !this.gearPlan && this.gearT <= 0 && !visible) this.considerGear(match, a);
+    this.dodgeFlash(match, a);
+  }
+
+  // 날아온 적 섬광이 곧 터지면 (실력만큼) 고개를 돌림
+  dodgeFlash(match, a) {
+    if (this.avoidT > 0) return;
+    const eye = eyePos(a);
+    for (const t of match.throwables) {
+      if (t.kind !== 'flash' || t.team === a.team || t.dodged?.includes(a.id)) continue;
+      const left = t.fuse - t.age;
+      if (left > 0.9 || Math.hypot(t.pos.x - eye.x, t.pos.z - eye.z) > GEAR.flash.radius) continue;
+      (t.dodged ??= []).push(a.id);
+      if (!match.map.lineOfSight(eye, t.pos) || !this.rng.chance(this.d.dodge)) continue;
+      this.avoidT = left + 0.5;
+      this.avoidYaw = Math.atan2(-(eye.x - t.pos.x), -(eye.z - t.pos.z));
+      return;
+    }
+  }
+
+  // ───────────────────────── 투척 장비 ─────────────────────────
+  // 언제 무엇을: 진입 전 섬광·이명(공격) · 소리로 안 적에게 세열·이명 · 해체 경보에 최루·세열(수비) · 동료 해체 중 연막(공격)
+  considerGear(match, a) {
+    const has = (id) => (a.gear?.[id] ?? 0) > 0;
+    if (!['frag', 'stun', 'flash', 'smoke', 'gas'].some(has)) return;
+    const eye = eyePos(a);
+    const tryThrow = (id, point, minD = 7) => {
+      if (!has(id) || !point) return false;
+      const d = Math.hypot(point.x - eye.x, point.z - eye.z);
+      if (d < minD || d > 26) return false;
+      for (const mode of d < 9 ? ['short', 'long'] : ['long']) {
+        const speed = THROW[mode].speed;
+        const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, speed);
+        if (!aim) continue;
+        const pitch = Math.max(-0.6, Math.min(1.1, aim.pitch - THROW[mode].up));
+        // 실제로 던졌을 때 떨어질 곳이 목표 근처이고 나와 충분히 떨어졌는지 (벽에 맞고 돌아오지 않게)
+        const dir = dirFromAngles(aim.yaw, pitch);
+        const start = { x: eye.x + dir.x * 0.35, y: eye.y - 0.1 + dir.y * 0.35, z: eye.z + dir.z * 0.35 };
+        const { land } = previewArc(match.map, start, throwVelocity(dir, mode, a.vel), { dt: 1 / 20, maxT: 2.5 });
+        const off = Math.hypot(land.x - point.x, land.z - point.z);
+        const back = Math.hypot(land.x - a.pos.x, land.z - a.pos.z);
+        if (off > 4 || back < minD - 1) continue;
+        this.gearPlan = { id, mode, yaw: aim.yaw, pitch, t: 1.2 };
+        return true;
+      }
+      return false;
+    };
+    const armed = match.bombs.filter((b) => b.state === 'armed');
+    if (a.team === TEAMS.DEFUSE) {
+      // 진입: 목표 폭탄 근처(12~24 m)로 다가갈 때 한 번, 폭탄 주변(수비가 숨는 곳)에 섬광·이명
+      const bomb = armed.find((b) => b.id === this.assignedBomb);
+      if (bomb && !this.entryDone && this.goal?.point && dist2(this.goal.point, bomb) < 4) {
+        const d = dist2(bomb, a.pos);
+        if (d > 11 && d < 24) {
+          const spot = { x: bomb.x + (this.rng.next() - 0.5) * 4, y: bomb.y, z: bomb.z + (this.rng.next() - 0.5) * 4 };
+          if (tryThrow('flash', spot, 9) || tryThrow('stun', spot, 9)) {
+            this.entryDone = true;
+            return;
+          }
+        }
+      }
+      // 동료가 해체 중이면 적이 올 만한 쪽에 연막
+      const picking = armed.find((b) => b.picker && b.picker !== a.id && dist2(b, a.pos) < 14);
+      if (picking && has('smoke') && this.goal?.look) {
+        const lx = this.goal.look.x - picking.x, lz = this.goal.look.z - picking.z, l = Math.hypot(lx, lz) || 1;
+        if (tryThrow('smoke', { x: picking.x + (lx / l) * 6, y: picking.y, z: picking.z + (lz / l) * 6 }, 5)) return;
+      }
+    } else {
+      // 수비: 해체 경보가 울린 폭탄에 최루·세열
+      const alerted = armed.find((b) => b.picker && match.time - b.alertT < 2 && dist2(b, a.pos) < 26);
+      if (alerted && (tryThrow('gas', alerted, 8) || tryThrow('frag', alerted, 8))) return;
+      // 아군이 방금 본 적이 지키는 곳으로 다가오면 (내 눈에는 안 보여도) 이명·세열로 진입을 늦춤
+      const coming = match.agents
+        .filter((e) => e.alive && e.team !== a.team && match.time - e.spottedT < 1.2)
+        .map((e) => ({ e, d: dist2(e.pos, a.pos) }))
+        .filter((x) => x.d > 9 && x.d < 24)
+        .sort((p, q) => p.d - q.d)[0];
+      if (coming && this.rng.chance(0.6)) {
+        const p = coming.e.pos;
+        const lead = { x: p.x + coming.e.vel.x * 0.8, y: p.y, z: p.z + coming.e.vel.z * 0.8 };
+        if (tryThrow('stun', lead, 9) || tryThrow('frag', lead, 8) || tryThrow('flash', lead, 10)) return;
+      }
+    }
+    // 소리로 들은 적: 가까이(8~22 m) 숨어 있으면 세열·이명
+    if (this.heard && match.time - this.heard.t < 2.5 && this.heard.kind !== 'gear' && this.heard.kind !== 'blast') {
+      const spot = { x: this.heard.x, y: this.heard.y ?? 0, z: this.heard.z };
+      const d = dist2(spot, a.pos);
+      if (d > 8 && d < 22 && this.rng.chance(0.5)) {
+        if (tryThrow('frag', spot, 8) || tryThrow('stun', spot, 9)) return;
+      }
+    }
   }
 
   // 청각: 들을 수 있는 거리 안의 적 소리 → 그쪽을 보고, 가까우면 멈춰 경계, 무전으로 보고
@@ -804,6 +929,14 @@ export function botBuy(match, a, plan, rng) {
   }
   if (a.credits >= ARMOR.heavy.price + (plan === 'eco' ? 1500 : 0)) armorTo('heavy');
   else if (plan !== 'eco' || a.credits >= 1800) armorTo('light');
+  // 투척물: 풀 구매면 섬광·이명 하나 + 가끔 세열·연막(공격)·최루(수비), 반 구매면 이명 하나
+  const gear = (id, p) => a.credits >= GEAR[id].price + 300 && rng.chance(p) && buy(id);
+  if (plan === 'full') {
+    gear(rng.chance(0.5) ? 'flash' : 'stun', 0.75);
+    gear('frag', 0.3);
+    if (a.team === TEAMS.DEFUSE) gear('smoke', 0.35);
+    else gear('gas', 0.25);
+  } else if (plan === 'half') gear('stun', 0.35);
   // 다음 라운드를 위해 900 J는 남기고, 남는 에너지로 가끔 관통탄 (상대가 방탄을 살 만한 라운드)
   if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 900 && rng.chance(plan === 'full' ? 0.35 : 0.15)) buy('ap');
 }

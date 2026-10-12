@@ -8,12 +8,16 @@ import { emptyIntent, freshAmmo } from '../sim/agent.js';
 import { CONCEPTS } from '../sim/concepts.js';
 import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
+import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
-const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
+const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
 const ARMOR_KINDS = [null, 'light', 'heavy'];
+// 손에 든 장비: 0 없음 · 1~5 투척물 · 6 C4 · 7 기폭기
+const encEquip = (e) => (!e ? 0 : e.kind === 'throw' ? 1 + THROW_ORDER.indexOf(e.id) : e.kind === 'c4' ? 6 : e.kind === 'det' ? 7 : 0);
+const decEquip = (k) => (k >= 1 && k <= 5 ? { kind: 'throw', id: THROW_ORDER[k - 1] } : k === 6 ? { kind: 'c4' } : k === 7 ? { kind: 'det' } : null);
 const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
 const REASONS = ['폭탄 2기 해체 완료', '해체팀 전원 제압', '포스팀 전원 제압', '제한 시간 종료 — 폭탄 폭발'];
 const BOMB_STATES = ['armed', 'defused', 'exploded'];
@@ -124,6 +128,7 @@ export class HostSync {
         Math.round(a.armor ?? 0), r2(Math.max(-1, Math.min(9, m.time - a.spottedT))),
         a.primary ? WEAP.indexOf(a.primary) : -1, WEAP.indexOf(a.secondary ?? 'pistol'),
         Math.max(0, ARMOR_KINDS.indexOf(a.armorKind ?? null)),
+        encEquip(a.equip),
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
@@ -137,6 +142,8 @@ export class HostSync {
         am: a.armorMax ?? 0,
         ao: Math.max(0, AMMO_ORDER.indexOf(a.ammo ?? 'fmj')),
         sp: Math.round(a.stamina ?? 100),
+        g: GEAR_ORDER.map((id) => a.gear?.[id] ?? 0),
+        fx: [r2(a.stunT ?? 0), r2(a.flashT ?? 0), r2(a.gasT ?? 0)],
         bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
         u: Math.round(a.ult),
@@ -162,6 +169,8 @@ export class HostSync {
       I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t), r1(i.y ?? 0)])),
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
       D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)
+      G: (m.throwables ?? []).map((t) => [t.id, THROW_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물
+      K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz)]), // C4
       E: this.events.map((e) => [e.s, e.p]),
     };
     if (m.phase === 'ended') snap.R = m.reason;
@@ -213,13 +222,14 @@ export class ClientSync {
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak, eq] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
       a.hp = hp;
       a.armor = armor ?? 0;
       a.armorKind = ARMOR_KINDS[ak] ?? null;
+      a.equip = decEquip(eq ?? 0); // 손에 든 장비 (이 화면 요원도 방장 값을 따름)
       a.team = flags & 32 ? 'force' : 'defuse';
       a.spottedT = spotted >= 0 ? m.time - spotted : -99;
       a.mired = !!(flags & 4);
@@ -287,6 +297,9 @@ export class ClientSync {
       a.credits = h.$ ?? 0;
       a.armorMax = h.am ?? 0;
       a.ammo = AMMO_ORDER[h.ao] ?? 'fmj';
+      a.gear = emptyGear();
+      (h.g ?? []).forEach((n, k) => (a.gear[GEAR_ORDER[k]] = n));
+      if (h.fx) [a.stunT, a.flashT, a.gasT] = h.fx;
       // 지구력: 이 화면도 같은 규칙으로 계산하므로 많이 어긋날 때만 맞춤
       if (h.sp != null && Math.abs(h.sp - (a.stamina ?? 100)) > 8) {
         a.stamina = h.sp;
@@ -321,6 +334,18 @@ export class ClientSync {
       b.progress = pr;
     });
     if (snap.D) m.devices.unpack(snap.D);
+    // 투척물·C4: 같은 번호는 이어서 (화면에서 부드럽게 움직이게 이전 위치를 남김)
+    if (snap.G) {
+      const old = new Map((m.throwables ?? []).map((t) => [t.id, t]));
+      m.throwables = snap.G.map(([id, k, tx, ty, tz, rest]) => {
+        const t = old.get(id) ?? { id, kind: THROW_ORDER[k] ?? 'frag', pos: { x: tx, y: ty, z: tz }, prev: { x: tx, y: ty, z: tz }, vel: { x: 0, y: 0, z: 0 } };
+        t.prev = { ...t.pos };
+        t.pos = { x: tx, y: ty, z: tz };
+        t.rest = !!rest;
+        return t;
+      });
+    }
+    if (snap.K) m.charges = snap.K.map(([id, oi, cx, cy, cz, nx, ny, nz]) => ({ id, kind: 'c4', ownerId: m.agents[oi]?.id ?? null, team: m.agents[oi]?.team ?? null, x: cx, y: cy, z: cz, nx, ny, nz }));
     m.zones = mergeById(m.zones, snap.Z);
     m.veils = mergeById(m.veils, snap.V);
     m.shields = mergeById(m.shields, snap.S);
@@ -490,8 +515,8 @@ function mergeById(list, incoming) {
 
 // ───────────────────────── 입력 ─────────────────────────
 // 한 번 누르는 동작의 카운터 순서
-const ACT = { reload: 0, interact: 1, patch0: 2, report: 6, command: 7, fire: 8 };
-const ACT_COUNT = 9;
+const ACT = { reload: 0, interact: 1, patch0: 2, report: 6, command: 7, fire: 8, equipThrow: 9, equipGadget: 10, ads: 11 };
+const ACT_COUNT = 12;
 
 // 참가자: 키보드·마우스 조종자를 감싸 입력을 기록하고, 방장만 처리할 동작은 이 화면의 예측에서 뺌
 export class InputRecorder {
@@ -525,6 +550,10 @@ export class InputRecorder {
     }
     if (i.fire && !this.wasFire) this.c[ACT.fire]++;
     this.wasFire = i.fire;
+    if (i.ads && !this.wasAds) this.c[ACT.ads]++;
+    this.wasAds = i.ads;
+    if (i.equip === 'throw') this.c[ACT.equipThrow]++;
+    if (i.equip === 'gadget') this.c[ACT.equipGadget]++;
     if (i.card >= 0) {
       this.cardN++;
       this.cards.push([this.cardN, i.card]);
@@ -563,6 +592,7 @@ export class InputRecorder {
     i.card = -1;
     i.buy = null; // 구매는 방장이 처리
     i.quiz = -1; // 점검 답도 방장이 채점
+    i.equip = null; // 장비 들기도 방장이 (화면은 방장 값을 따름)
     return i;
   }
 }
@@ -607,8 +637,11 @@ export class RemoteController {
     for (let k = 0; k < 4; k++) if (fresh(ACT.patch0 + k)) i.patch[k] = true;
     if (fresh(ACT.report)) i.report = true;
     if (fresh(ACT.command) && inp.cm) i.command = { type: inp.cm };
-    // 짧게 눌렀다 뗀 사격(권총)도 놓치지 않게
+    // 짧게 눌렀다 뗀 사격(권총)·투척도 놓치지 않게
     if (fresh(ACT.fire) && !i.fire) i.fire = true;
+    if (fresh(ACT.ads) && !i.ads && a.equip) i.ads = true;
+    if (fresh(ACT.equipThrow)) i.equip = 'throw';
+    else if (fresh(ACT.equipGadget)) i.equip = 'gadget';
     this.seen = [...c];
     // 해체 카드: 한 틱에 하나씩
     const next = (inp.cd ?? []).find(([n]) => n > this.cardSeen);

@@ -1,4 +1,5 @@
 import { AMMO, ARMOR, WEAPONS } from '../sim/data.js';
+import { GEAR, THROW_ORDER } from '../sim/gear.js';
 import { CONCEPT_BY_ID } from '../sim/concepts.js';
 import { ECON, LOAD, STAMINA } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
@@ -19,8 +20,10 @@ const SECTIONS = [
   {
     kind: 'small',
     cols: [
-      { title: '방탄 · 등급과 내구도', items: ['light', 'heavy'] },
-      { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'] },
+      { title: '방탄', items: ['light', 'heavy'], w: 1.2 },
+      { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'], w: 1 },
+      { title: '투척 · 4번 키', items: THROW_ORDER, w: 2, grid: 2 },
+      { title: '장비 · 5번 키', items: ['c4'], w: 1 },
     ],
   },
 ];
@@ -44,7 +47,7 @@ export function itemInfo(id) {
       kind: w.kind,
       price: w.price,
       icon: WEAPON_ICONS[id],
-      stats: [`몸통 ${dmg} · 머리 ${head}`, `관통력 ${w.pen ?? 0}`, `${w.auto ? '자동' : '단발'} · ${w.magSize}발`],
+      stats: [`몸통 ${dmg} · 머리 ${head}`, `관통 ${w.pen ?? 0} · ${w.mass} kg`, `${w.auto ? '자동' : '단발'} · ${w.magSize}발`],
     };
   }
   const a = ARMOR[id];
@@ -52,11 +55,26 @@ export function itemInfo(id) {
     return {
       type: 'armor',
       name: a.name,
+      card: a.cls >= 4 ? '중량 방탄·헬멧' : '경량 조끼', // 작은 칸에 들어가는 이름
       kind: `${a.cls}등급`,
       price: a.price,
       icon: GEAR_ICONS[id],
-      stats: [`${a.cls}등급 · 내구 ${a.dur}`, a.helmet ? '몸통 + 머리(헬멧)' : '몸통만 막음'],
+      short: `${a.cls}등급 · 내구 ${a.dur}`,
+      stats: [`${a.cls}등급 · 내구 ${a.dur} · ${a.mass} kg`, a.helmet ? '몸통 + 머리(헬멧)를 막음' : '몸통만 막음', '막히면 충격만 조금 · 닳으면 잘 뚫림'],
     };
+  }
+  const g = GEAR[id];
+  if (g) {
+    const what = {
+      frag: `파편 피해 최대 ${g.damage} · 반경 ${g.radius} m`,
+      stun: `귀 울림·먹먹·조준 흔들림 ${g.time}초`,
+      flash: `눈부심 최대 ${g.time}초 · 바라보면 강함`,
+      smoke: `연기 벽 ${g.time}초 · 시야 차단`,
+      gas: `기침·느려짐 ${g.time}초 · 피해 없음`,
+      c4: `붙이고 기폭 · 피해 최대 ${g.damage} · 문 돌파`,
+    }[id];
+    const short = { frag: `파편 ${g.damage}`, stun: `이명 ${g.time}초`, flash: `섬광 ${g.time}초`, smoke: `연기 ${g.time}초`, gas: `최루 ${g.time}초`, c4: '붙이고 기폭' }[id];
+    return { type: 'gear', name: g.name, kind: g.kind === 'throw' ? '투척' : '설치', price: g.price, icon: GEAR_ICONS[id], short, stats: [what, `최대 ${g.max}개 · ${g.mass} kg`, g.kind === 'throw' ? '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)' : '왼쪽 클릭으로 벽·바닥·문에 붙이고, 다시 왼쪽 클릭으로 기폭'] };
   }
   const m = AMMO[id];
   return {
@@ -65,14 +83,25 @@ export function itemInfo(id) {
     kind: '탄종',
     price: m.price,
     icon: GEAR_ICONS[id],
-    stats: id === 'fmj' ? ['관통력 그대로', '기본 지급'] : [`관통력 ${signed(m.pen)}${m.dmg !== 1 ? ` · 맨몸 피해 ×${m.dmg}` : ''}`, m.desc],
+    short: id === 'fmj' ? '관통 그대로' : m.dmg !== 1 ? `맨몸 ×${m.dmg}` : `관통 ${signed(m.pen)}`,
+    stats: id === 'fmj' ? ['관통력 그대로', '기본 지급'] : [`관통력 ${signed(m.pen)}${m.dmg !== 1 ? ` · 맨몸 피해 ×${m.dmg}` : ''}`, m.desc, '과학: 같은 힘도 좁은 면적에 모이면 누르는 효과(압력)가 커짐'],
   };
 }
 
+// 큰 칸(총): 그림·이름·수치 / 작은 칸(방탄·탄종·장비): 그림 + 이름 + 한 줄 요약 + 가격 (자세한 설명은 아래 안내줄)
 const card = (id, small) => {
   const it = itemInfo(id);
   const key = SHOP_KEYS[id];
-  return `<button class="shop-item ${small ? 'small' : ''}" data-item="${id}" title="${esc(it.stats.join(' · '))}">
+  const price = it.price ? `${money(it.price)} J` : '기본';
+  if (small) {
+    return `<button class="shop-item small" data-item="${id}">
+    <span class="si-badge"></span>
+    <div class="si-icon">${it.icon}</div>
+    <div class="si-name"><b>${esc(it.card ?? it.name)}</b></div>
+    <div class="si-line"><span class="si-short">${esc(it.short ?? it.stats[0])}</span><span class="si-price">${price}</span></div>
+  </button>`;
+  }
+  return `<button class="shop-item" data-item="${id}">
     ${key ? `<kbd>${key}</kbd>` : ''}
     <span class="si-badge"></span>
     <div class="si-icon">${it.icon}</div>
@@ -102,8 +131,8 @@ export class Shop {
         </header>
         <div class="shop-body">
           <div class="shop-main">${SECTIONS.map((sec) => `
-            <div class="shop-cols ${sec.kind}" style="--n:${sec.cols.length}">${sec.cols.map((col) => `
-              <div class="shop-col"><h4>${col.title}</h4><div class="sc-items">${col.items.map((id) => card(id, sec.kind === 'small')).join('')}</div></div>`).join('')}
+            <div class="shop-cols ${sec.kind}" style="--n:${sec.cols.length};${sec.cols.some((c) => c.w) ? `grid-template-columns:${sec.cols.map((c) => `${c.w ?? 1}fr`).join(' ')}` : ''}">${sec.cols.map((col) => `
+              <div class="shop-col" style="--g:${col.grid ?? 1}"><h4>${col.title}</h4><div class="sc-items">${col.items.map((id) => card(id, sec.kind !== 'big')).join('')}</div></div>`).join('')}
             </div>`).join('')}
           </div>
           <aside class="shop-side">
@@ -111,7 +140,8 @@ export class Shop {
             <section class="shop-team"><h4>분대 보급 현황</h4><div class="st-list"></div></section>
           </aside>
         </div>
-        <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span>클릭 또는 숫자 키로 보급</span><span>이번 보급 시간에 받은 것을 다시 누르면 반납</span><span class="sf-load"></span></footer>
+        <div class="shop-info"><b class="sf-name">보급할 장비에 커서를 올리면 설명이 나옴</b><span class="sf-desc">클릭 또는 숫자 키(1~8)로 보급 · 이번 보급 시간에 받은 것을 다시 누르면 반납</span></div>
+        <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span class="sf-load"></span></footer>
       </div>
       <div class="shop-cursor"></div>`;
     root.appendChild(this.el);
@@ -122,6 +152,14 @@ export class Shop {
     this.teamEl = this.el.querySelector('.st-list');
     this.quizEl = this.el.querySelector('.qz-body');
     this.loadEl = this.el.querySelector('.sf-load');
+    this.infoName = this.el.querySelector('.sf-name');
+    this.infoDesc = this.el.querySelector('.sf-desc');
+    // 진짜 마우스로 올려도 설명 (제한 모드)
+    this.el.addEventListener('mouseover', (e) => {
+      if (document.pointerLockElement) return;
+      const b = e.target.closest('.shop-item');
+      if (b) this.describe(b.dataset.item);
+    });
     this.cache = {};
     // 마우스 잠금이 막힌 환경(제한 모드)에서는 진짜 마우스로 클릭
     this.el.addEventListener('click', (e) => {
@@ -173,6 +211,14 @@ export class Shop {
     this.hovered?.classList.remove('hover');
     this.hovered = btn;
     btn?.classList.add('hover');
+    if (btn?.dataset.item) this.describe(btn.dataset.item);
+  }
+
+  // 아래 안내줄: 커서를 올린 장비의 자세한 설명
+  describe(id) {
+    const it = itemInfo(id);
+    this.infoName.textContent = `${it.name} · ${it.price ? `${money(it.price)} J` : '기본 지급'}`;
+    this.infoDesc.textContent = it.stats.join(' · ');
   }
 
   click() {
@@ -229,16 +275,27 @@ export class Shop {
         owned = worn && me.armor >= ARMOR[id].dur;
         if (worn && !owned) note = `닳음 ${Math.round(me.armor)}/${ARMOR[id].dur}`;
         back = backFor((x) => !!ARMOR[x]);
+      } else if (info.type === 'gear') {
+        const have = me.gear?.[id] ?? 0;
+        owned = have >= GEAR[id].max;
+        note = have > 0 ? `${have}/${GEAR[id].max}` : '';
+        back = 0;
       } else {
         owned = (me.ammo ?? 'fmj') === id;
         back = backFor((x) => !!AMMO[x]);
       }
       const mine = bought.has(id);
       const afford = me.credits + back >= info.price;
-      const state = mine ? 'mine' : owned ? 'owned' : afford ? (note ? 'worn' : 'ok') : 'poor';
-      this.set(`it${id}`, `${state}|${note}`, () => {
+      let state = mine ? 'mine' : owned ? 'owned' : afford ? (note ? 'worn' : 'ok') : 'poor';
+      if (info.type === 'gear') state = owned ? (mine ? 'mine' : 'owned') : afford ? (note ? 'some' : 'ok') : note ? 'some' : 'poor';
+      // 작은 칸은 짧게 (이름을 가리지 않게)
+      const small = info.type !== 'weapon';
+      const badge = info.type === 'gear'
+        ? note
+        : state === 'mine' ? (small ? '반납' : '환불 가능') : state === 'owned' ? (info.type === 'ammo' ? '장전' : '보유') : info.type === 'armor' && note ? note.replace('닳음 ', '') : note;
+      this.set(`it${id}`, `${state}|${badge}`, () => {
         btn.dataset.state = state;
-        btn.querySelector('.si-badge').textContent = state === 'mine' ? '환불 가능' : state === 'owned' ? (info.type === 'ammo' ? '장전됨' : '보유') : note;
+        btn.querySelector('.si-badge').textContent = badge;
       });
     }
     // 장비 무게: 질량(kg) × 9.8 = 무게(N). 무거우면 느리고 출발·멈춤이 둔함(관성), 지구력도 빨리 닳음
@@ -252,13 +309,14 @@ export class Shop {
     this.set('quiz', q ? `${q.id}|${q.done}|${q.ok}|${q.choice}` : '', () => this.renderQuiz(q));
     // 분대원 에너지·주무기 (보급 계획 맞추기)
     const mates = m.agents.filter((a) => a.team === me.team);
-    const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armorKind}:${a.ammo}`).join('|');
+    const gearSig = (a) => THROW_ORDER.concat('c4').map((id) => a.gear?.[id] ?? 0).join('');
+    const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armorKind}:${a.ammo}:${gearSig(a)}`).join('|');
     this.set('team', sig, () => {
       this.teamEl.innerHTML = mates.map((a) => `
         <div class="st-row ${a.id === me.id ? 'me' : ''}">
           <b>${esc(a.name)}</b>
           <span class="st-w">${a.primary ? WEAPON_ICONS[a.primary] : WEAPON_ICONS[a.secondary] ?? ''}</span>
-          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}</span>
+          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}${THROW_ORDER.concat('c4').filter((id) => (a.gear?.[id] ?? 0) > 0).map((id) => GEAR_ICONS[id]).join('')}</span>
           <span class="st-c">${money(a.credits ?? 0)} J</span>
         </div>`).join('');
     });
