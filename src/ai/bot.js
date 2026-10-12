@@ -4,6 +4,7 @@ import { TEAMS } from '../sim/constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
 import { DOOR } from '../sim/door-geo.js';
+import { ENTRY_ACK, ENTRY_MODE, stepEntry } from './entry.js';
 import { dirFromAngles } from '../core/vec.js';
 
 export const DIFFICULTY = {
@@ -29,6 +30,7 @@ const ORDER_ACK = {
   hold: '수신. 현 위치 사수.',
   move: '수신. 지정 지점으로 이동.',
   free: '수신. 자율 교전.',
+  ...ENTRY_ACK,
 };
 
 // 봇 한 명의 두뇌. Match가 매 틱 getIntent를 불러 "무엇을 누를지"를 받아간다.
@@ -125,6 +127,36 @@ export class BotBrain {
     const eye = eyePos(a);
     this.startDelay -= dt;
     this.pauseT -= dt;
+    // 문 진입 명령: 팀 진행(한 틱에 한 번) + 내 몫의 일 (문 행동·투척·기폭은 한 번씩)
+    const entry = live && ENTRY_MODE[match.orders[a.team]?.type] && match.orders[a.team].issuerId !== a.id ? match.orders[a.team] : null;
+    if (entry) {
+      stepEntry(match, entry);
+      const job = entry.jobs?.[a.id];
+      if (job?.act && job.actId !== this.entryActId) {
+        this.entryActId = job.actId;
+        if (job.act === 'detonate') match.detonate(a);
+        else if (job.act === 'throw') this.planThrow(match, a, job.gear, job.target, 2.5, true);
+        else this.doorWant = { act: job.act, id: entry.door };
+      }
+      // 섬광이 터질 때까지 문에서 고개를 돌림
+      if (entry.avoid && match.time < entry.avoid.until && this.avoidT <= 0) {
+        this.avoidT = entry.avoid.until - match.time;
+        this.avoidYaw = Math.atan2(-(a.pos.x - entry.avoid.from.x), -(a.pos.z - entry.avoid.from.z));
+      }
+    }
+    // 문 밑 카메라를 쥔 동안: 앉아서 방 쪽을 봄 (거둘 때는 진입 명령이 다시 'mirror')
+    if (a.mirror) {
+      const v = match.doors.mirrorView(a);
+      intent.crouch = true;
+      intent.yaw = v?.yaw ?? a.yaw;
+      intent.pitch = 0.05;
+      if (this.doorWant) {
+        intent.door = this.doorWant.act;
+        intent.doorId = this.doorWant.id;
+        this.doorWant = null;
+      }
+      return intent;
+    }
 
     this.updateTarget(match, a, dt);
     const target = this.targetId ? match.agentById(this.targetId) : null;
@@ -492,31 +524,41 @@ export class BotBrain {
 
   // ───────────────────────── 투척 장비 ─────────────────────────
   // 언제 무엇을: 진입 전 섬광·이명(공격) · 소리로 안 적에게 세열·이명 · 해체 경보에 최루·세열(수비) · 동료 해체 중 연막(공격)
+  // 투척 계획: 목표 지점 근처에 떨어지는 궤적을 찾아 조준한 뒤 던짐 (force: 못 찾아도 가까이 던짐)
+  planThrow(match, a, id, point, minD = 7, force = false) {
+    if (!((a.gear?.[id] ?? 0) > 0) || !point) return false;
+    const eye = eyePos(a);
+    const d = Math.hypot(point.x - eye.x, point.z - eye.z);
+    if (d < minD || d > 26) return false;
+    for (const mode of d < 9 ? ['short', 'long'] : ['long']) {
+      const speed = THROW[mode].speed;
+      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, speed);
+      if (!aim) continue;
+      const pitch = Math.max(-0.6, Math.min(1.1, aim.pitch - THROW[mode].up));
+      // 실제로 던졌을 때 떨어질 곳이 목표 근처이고 나와 충분히 떨어졌는지 (벽에 맞고 돌아오지 않게)
+      const dir = dirFromAngles(aim.yaw, pitch);
+      const start = { x: eye.x + dir.x * 0.35, y: eye.y - 0.1 + dir.y * 0.35, z: eye.z + dir.z * 0.35 };
+      const { land } = previewArc(match.map, start, throwVelocity(dir, mode, a.vel), { dt: 1 / 20, maxT: 2.5 });
+      const off = Math.hypot(land.x - point.x, land.z - point.z);
+      const back = Math.hypot(land.x - a.pos.x, land.z - a.pos.z);
+      if (off > 4 || back < minD - 1) continue;
+      this.gearPlan = { id, mode, yaw: aim.yaw, pitch, t: 1.2 };
+      return true;
+    }
+    if (force) {
+      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, THROW.short.speed);
+      this.gearPlan = { id, mode: 'short', yaw: aim?.yaw ?? Math.atan2(-(point.x - eye.x), -(point.z - eye.z)), pitch: Math.max(-0.4, Math.min(0.8, (aim?.pitch ?? 0.1) - THROW.short.up)), t: 1.5 };
+      return true;
+    }
+    return false;
+  }
+
   considerGear(match, a) {
     const has = (id) => (a.gear?.[id] ?? 0) > 0;
     if (!['frag', 'stun', 'flash', 'smoke', 'gas', 'drone'].some(has)) return;
-    const eye = eyePos(a);
-    const tryThrow = (id, point, minD = 7) => {
-      if (!has(id) || !point) return false;
-      const d = Math.hypot(point.x - eye.x, point.z - eye.z);
-      if (d < minD || d > 26) return false;
-      for (const mode of d < 9 ? ['short', 'long'] : ['long']) {
-        const speed = THROW[mode].speed;
-        const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, speed);
-        if (!aim) continue;
-        const pitch = Math.max(-0.6, Math.min(1.1, aim.pitch - THROW[mode].up));
-        // 실제로 던졌을 때 떨어질 곳이 목표 근처이고 나와 충분히 떨어졌는지 (벽에 맞고 돌아오지 않게)
-        const dir = dirFromAngles(aim.yaw, pitch);
-        const start = { x: eye.x + dir.x * 0.35, y: eye.y - 0.1 + dir.y * 0.35, z: eye.z + dir.z * 0.35 };
-        const { land } = previewArc(match.map, start, throwVelocity(dir, mode, a.vel), { dt: 1 / 20, maxT: 2.5 });
-        const off = Math.hypot(land.x - point.x, land.z - point.z);
-        const back = Math.hypot(land.x - a.pos.x, land.z - a.pos.z);
-        if (off > 4 || back < minD - 1) continue;
-        this.gearPlan = { id, mode, yaw: aim.yaw, pitch, t: 1.2 };
-        return true;
-      }
-      return false;
-    };
+    // 진입 명령 중에는 스스로 던지지 않음 (섬광은 진입 계획대로)
+    if (ENTRY_MODE[match.orders[a.team]?.type]) return;
+    const tryThrow = (id, point, minD = 7) => this.planThrow(match, a, id, point, minD);
     const armed = match.bombs.filter((b) => b.state === 'armed');
     if (a.team === TEAMS.DEFUSE) {
       // 정찰 드론: 목표 폭탄까지 18~40 m에서 한 번, 드론을 먼저 보내 수비 위치를 찾음
@@ -662,6 +704,14 @@ export class BotBrain {
     }
     const slot = Math.max(0, this.index - 1);
     const fwd = { x: -Math.sin(o.yaw), z: -Math.cos(o.yaw) };
+    // 문 진입: 팀 진행(entry.js)이 정해 준 자리·볼 곳으로
+    if (ENTRY_MODE[o.type]) {
+      stepEntry(match, o);
+      const job = o.jobs?.[a.id];
+      if (!job) return false;
+      this.goal = { point: job.point, arrive: 0.55, look: job.look, quiet: !!job.quiet, urgent: !!job.urgent, crouchAtGoal: !!job.crouch };
+      return true;
+    }
     switch (o.type) {
       case 'regroup': {
         // 분대장 뒤쪽에 부채꼴로 붙음

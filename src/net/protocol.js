@@ -42,6 +42,12 @@ const bytes = (obj) => {
   return n;
 };
 
+// 지휘 명령 중 화면에 필요한 것만 (진입 명령의 계획·봇별 할 일은 방장만 씀)
+function publicOrder(o) {
+  const { id, type, point, issuerId, t, yaw, mode, door, side, phase } = o;
+  return { id, type, point, issuerId, t, yaw, mode, door, side, phase };
+}
+
 // ───────────────────────── 방장 ─────────────────────────
 export class HostSync {
   constructor(match, { keep = 0.4, maxBytes = 3500 } = {}) {
@@ -171,7 +177,7 @@ export class HostSync {
       Z: m.zones.map((z) => this.enc(z, 1)),
       V: m.veils.map((v) => this.enc(v, 1)),
       S: m.shields.map((s) => this.enc(s, 1)),
-      O: TEAMS_.map((t) => (m.orders[t] ? this.enc(m.orders[t], 1) : 0)),
+      O: TEAMS_.map((t) => (m.orders[t] ? this.enc(publicOrder(m.orders[t]), 1) : 0)),
       I: TEAMS_.map((t) => m.intel[t].slice(-6).map((i) => [r1(i.x), r1(i.z), i.kind, this.idx.get(i.reporterId) ?? -1, r2(i.t), r1(i.y ?? 0)])),
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
       D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)

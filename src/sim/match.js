@@ -14,6 +14,7 @@ import { GameMap, STORY } from './map.js';
 import { NavGrid } from './nav.js';
 import { Devices } from './devices.js';
 import { Doors, MIRROR } from './doors.js';
+import { ENTRY_MODE, ENTRY_REACH } from './entry-orders.js';
 import { leafSegment } from './door-geo.js';
 
 // 팀 명단 (포스 패치 선택 화면과 경기에서 같은 id를 씀)
@@ -678,6 +679,18 @@ export class Match {
   // 분대장(플레이어)의 명령: regroup 집결 / hold 위치 사수 / move 지정 지점 / A·B 목표 / free 자율
   issueCommand(a, cmd) {
     if (!cmd?.type) return;
+    // 문 진입 명령: 바라보는 문(4.5 m 안)을 기준으로 — 대기 → 돌파 → 진입 → 확보 (봇이 ai/entry.js로 진행)
+    if (ENTRY_MODE[cmd.type]) {
+      const d = this.doors.doorAt(a, ENTRY_REACH);
+      if (!d) {
+        this.emit('commandDenied', { agent: a, type: cmd.type, reason: 'door' });
+        return;
+      }
+      const order = { id: this.nextId++, type: cmd.type, mode: ENTRY_MODE[cmd.type], door: d.id, side: this.doors.side(d, a.pos), team: a.team, phase: 'stack', point: { x: d.x, y: 0, z: d.z }, issuerId: a.id, t: this.time, yaw: a.yaw };
+      this.orders[a.team] = order;
+      this.emit('command', { agent: a, team: a.team, type: cmd.type, order });
+      return;
+    }
     let point = null;
     if (cmd.type === 'move') point = this.aimPoint(a, 45);
     else if (cmd.type === 'regroup' || cmd.type === 'hold') point = { x: a.pos.x, y: a.pos.y, z: a.pos.z };

@@ -11,6 +11,8 @@ export const COMMANDS = [
   { type: 'A', label: 'A 목표', sub: '해체 진입 / 방어', key: 4, angle: 210 },
 ];
 
+import { ENTRY_COMMANDS } from '../sim/entry-orders.js';
+
 // 문 행동 휠 (문을 보고 F를 길게 누름 · 짧게 누르면 열기/닫기)
 export const DOOR_ACTIONS = [
   { act: 'crack', label: '살짝 열기', sub: '틈으로 엿보기', key: 1, angle: -90 },
@@ -175,6 +177,8 @@ export class PlayerController {
     this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [], equip: null, door: null };
     this.shop = null; // 상점이 열려 있으면: 마우스는 상점 커서, 숫자 키는 구매
     this.doorTarget = null; // (요원) → 손이 닿는 문 (게임이 넣어 줌)
+    this.entryTarget = null; // (요원) → 진입 명령을 내릴 문 (바라보는 4.5 m 안의 문)
+    this.cmdItems = COMMANDS; // 지휘 휠 항목: 문을 보고 있으면 문 진입 명령
     this.doorItems = DOOR_ACTIONS; // 지금 문 상태에 맞춘 휠 항목 (off: 지금은 못 함)
     this.fHold = null; // 문 앞에서 F를 누른 시각
     this.doorWheel = null; // { vec, sel, used }
@@ -270,6 +274,7 @@ export class PlayerController {
     const gDown = canCommand && this.input.isDown('KeyG');
     if (gDown && !this.wheelOpen) {
       this.wheelOpen = true;
+      this.cmdItems = this.entryTarget?.(agent) ? ENTRY_COMMANDS : COMMANDS;
       this.wheelVec = { x: 0, y: 0 };
       this.wheelUsed = false;
     }
@@ -282,10 +287,10 @@ export class PlayerController {
           this.wheelVec.x *= 110 / l;
           this.wheelVec.y *= 110 / l;
         }
-        this.wheelSel = this.pickSector(this.wheelVec);
+        this.wheelSel = this.pickSector(this.wheelVec, this.cmdItems);
         this.lastDx = this.lastDy = 0;
       } else {
-        if (!this.wheelUsed && this.wheelSel >= 0) this.queue.command = { type: COMMANDS[this.wheelSel].type };
+        if (!this.wheelUsed && this.wheelSel >= 0) this.queue.command = { type: this.cmdItems[this.wheelSel].type };
         this.wheelOpen = false;
         this.wheelSel = -1;
       }
@@ -293,11 +298,11 @@ export class PlayerController {
     if (this.wheelOpen) {
       for (const code of this.input.takePressed()) {
         const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
-        const cmd = COMMANDS.find((c) => c.key === digit);
+        const cmd = this.cmdItems.find((c) => c.key === digit);
         if (cmd && !this.wheelUsed) {
           this.queue.command = { type: cmd.type };
           this.wheelUsed = true;
-          this.wheelSel = COMMANDS.indexOf(cmd);
+          this.wheelSel = this.cmdItems.indexOf(cmd);
         }
       }
       this.input.takeWheel();

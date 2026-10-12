@@ -4,6 +4,7 @@ import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
 import { GEAR, THROW_ORDER } from '../sim/gear.js';
 import { COMMANDS } from '../client/input.js';
+import { ENTRY_NAME, ENTRY_PHASE } from '../sim/entry-orders.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
 import { money } from './shop.js';
@@ -316,8 +317,9 @@ export class Hud {
   }
 
   order(order, issuer) {
-    const text = order ? ORDER_NAME[order.type] ?? order.type : '자율 교전';
+    const text = order ? ORDER_NAME[order.type] ?? ENTRY_NAME[order.type] ?? order.type : '자율 교전';
     this.els.orderText.textContent = text;
+    this.cache.orderPhase = undefined; // 진입 명령이면 단계가 이어서 붙음
     this.els.order.classList.toggle('active', !!order);
     this.radio({ name: issuer?.name ?? '분대장', text: order ? `지시: ${text}` : '지시 해제. 자율 교전.', kind: 'order' });
   }
@@ -576,6 +578,10 @@ export class Hud {
       E.spectate.classList.toggle('show', !!v);
       this.root.classList.toggle('spectating', !!v);
     });
+
+    // 문 진입 명령: 지시 칸에 진행 단계 (대기 → 돌파 → 진입 → 수색 → 확보)
+    const myOrder = m.orders[me.team];
+    if (myOrder && ENTRY_NAME[myOrder.type]) this.set('orderPhase', `${ENTRY_NAME[myOrder.type]} · ${ENTRY_PHASE[myOrder.phase] ?? ''}`, (v) => (E.orderText.textContent = v));
 
     // 지휘 휠 · 문 행동 휠: wheel = { title, items, sel }
     if (wheel) this.renderWheel(wheel);

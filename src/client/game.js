@@ -17,6 +17,7 @@ import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
 import { GearView } from './gear-view.js';
 import { DoorsView } from './doors-view.js';
+import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
 import { GEAR } from '../sim/gear.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
@@ -80,6 +81,8 @@ export class GameClient {
     this.controller.zoomOf = (a) => WEAPONS[a.weapon].adsZoom ?? 1;
     // 문 앞에서 F: 길게 누르면 문 행동 휠 (교전 중에만 문을 다룸)
     this.controller.doorTarget = (a) => (a?.alive && this.match.phase === 'live' && !this.ended ? this.match.doors.doorAt(a) : null);
+    // 문을 보고 G: 문 진입 지휘 (대기·열고/섬광/폭파/걷어차고 진입·문 밑 확인)
+    this.controller.entryTarget = (a) => (a?.alive && this.match.phase === 'live' && !this.ended ? this.match.doors.doorAt(a, ENTRY_REACH) : null);
     this.controller.syncFrom(this.player);
     if (net?.role === 'client') {
       // 참가자: 입력을 기록해 방장에게 보내고, 이 화면에서는 이동·사격만 미리 보여 줌
@@ -292,6 +295,16 @@ export class GameClient {
         this.blur = Math.min(1, this.blur + 0.45);
         this.hud.banner('문에 맞음', '휘청 · 잠시 조준 흔들림', 'bad');
       }
+    });
+    ev.on('commandDenied', (e) => {
+      if (!isMe(e.agent)) return;
+      A.play('denied');
+      this.hud.banner('진입 지휘 불가', '문을 바라보고 4.5 m 안에서 지휘', 'small');
+    });
+    ev.on('roomClear', (e) => {
+      if (e.team !== this.team) return;
+      A.play('radio');
+      this.hud.banner('방 확보', `${ENTRY_NAME[e.order.type] ?? '진입'} 완료 · 분대가 위치를 지킴`, 'good');
     });
     ev.on('mirror', (e) => {
       if (viewing(e.agent)) A.play(e.on ? 'mirrorOn' : 'mirrorOff');
@@ -592,7 +605,7 @@ export class GameClient {
   // HUD 휠: 지휘(G) 또는 문 행동(문 앞 F 길게)
   wheelDef() {
     const c = this.controller;
-    if (c.wheelOpen) return { title: '지휘', items: COMMANDS, sel: c.wheelSel };
+    if (c.wheelOpen) return { title: c.cmdItems === ENTRY_COMMANDS ? '문 진입' : '지휘', items: c.cmdItems ?? COMMANDS, sel: c.wheelSel };
     if (c.doorWheel) return { title: '문', items: c.doorItems, sel: c.doorWheel.sel };
     return null;
   }
