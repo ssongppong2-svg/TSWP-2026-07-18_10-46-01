@@ -5,6 +5,7 @@ import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
 import { DOOR } from '../sim/door-geo.js';
 import { ENTRY_ACK, ENTRY_MODE, stepEntry } from './entry.js';
+import { thinkOperator, thinkSuspect } from './op-brain.js';
 import { dirFromAngles } from '../core/vec.js';
 
 export const DIFFICULTY = {
@@ -143,6 +144,15 @@ export class BotBrain {
         this.avoidT = entry.avoid.until - match.time;
         this.avoidYaw = Math.atan2(-(a.pos.x - entry.avoid.from.x), -(a.pos.z - entry.avoid.from.z));
       }
+    }
+    // CQB 작전: 연구원 결박 풀기·자료 확보 중에는 가만히 (적이 보이면 손을 떼고 싸움)
+    if (a.opTask) {
+      if ((a.visibleEnemies ?? []).length) {
+        intent.fire = true; // 사격 = 작업 취소 (다음 틱부터 교전)
+        return intent;
+      }
+      intent.crouch = true;
+      return intent;
     }
     // 문 밑 카메라를 쥔 동안: 앉아서 방 쪽을 봄 (거둘 때는 진입 명령이 다시 'mirror')
     if (a.mirror) {
@@ -314,6 +324,11 @@ export class BotBrain {
     else if (a.weapon === a.secondary && primAmmo > 0 && !engaging) intent.switchTo = a.primary;
     if (!engaging && !WEAPONS[a.weapon].melee && a.weapons[a.weapon].mag < WEAPONS[a.weapon].magSize * 0.4 && this.pauseT <= 0) intent.reload = true;
 
+    // ── CQB 작전: 가까운 연구원·자료 (F)
+    if (this.wantOpTask) {
+      this.wantOpTask = false;
+      if (live && !engaging && !a.lockpick) intent.interact = true;
+    }
     // ── 락픽
     if (live && a.team === TEAMS.DEFUSE) {
       if (a.lockpick) {
@@ -482,7 +497,11 @@ export class BotBrain {
 
     const order = this.followOrder(match, a);
     if (!order) {
-      if (a.team === TEAMS.DEFUSE) this.thinkDefuser(match, a, visible);
+      // CQB 작전: 용의자는 자리·순찰·소리 확인, 진압팀은 대장을 따라가거나 수색
+      if (match.op) {
+        if (a.team === TEAMS.FORCE) thinkSuspect(this, match, a, visible);
+        else thinkOperator(this, match, a, visible);
+      } else if (a.team === TEAMS.DEFUSE) this.thinkDefuser(match, a, visible);
       else this.thinkForce(match, a, visible);
     }
     if (!a.lockpick && !a.held && !this.pending && this.rng.next() < this.d.patchSkill) this.considerPatches(match, a, target, visible);
@@ -624,6 +643,8 @@ export class BotBrain {
     for (const n of match.noises) {
       if (n.id <= this.heardId) continue;
       if (n.team === a.team) continue;
+      // 연구원이 내는 소리(문 여닫기 등)는 진압팀에게는 적 소리가 아님 (용의자는 도망치는 소리로 들음)
+      if (n.team === 'civ' && a.team === TEAMS.DEFUSE) continue;
       const d = Math.hypot(n.x - a.pos.x, n.z - a.pos.z);
       if (d > n.radius * this.d.hearing) continue;
       const score = n.radius / Math.max(4, d);
@@ -638,7 +659,7 @@ export class BotBrain {
     // 소리로 짐작한 위치 (멀수록 부정확)
     const e = d * 0.12;
     const guess = { x: n.x + this.rng.range(-e, e), y: n.y ?? 0, z: n.z + this.rng.range(-e, e) };
-    this.heard = { ...guess, t: match.time, kind: n.kind, sourceId: n.agentId };
+    this.heard = { ...guess, t: match.time, kind: n.kind, sourceId: n.agentId, id: n.id };
     if (!visible) {
       this.alertLook = { point: { x: guess.x, y: guess.y + 1.4, z: guess.z }, until: match.time + 2.5 };
       // 가까운 발소리·착지음은 멈춰서 경계 (총성은 이미 교전 중일 가능성이 큼)
@@ -705,6 +726,8 @@ export class BotBrain {
     const slot = Math.max(0, this.index - 1);
     const fwd = { x: -Math.sin(o.yaw), z: -Math.cos(o.yaw) };
     // 문 진입: 팀 진행(entry.js)이 정해 준 자리·볼 곳으로
+    // CQB 작전의 '자율 교전': 대장을 따르지 않고 스스로 수색
+    if (o.type === 'free') return false;
     if (ENTRY_MODE[o.type]) {
       stepEntry(match, o);
       const job = o.jobs?.[a.id];
@@ -1031,8 +1054,10 @@ export class BotBrain {
 
 // 구매 (라운드 시작 때 한 번): 팀 평균 크레딧으로 정함 — 넉넉하면 풀 구매, 모자라면 아끼고(에코), 그 사이는 반만
 export function botBuy(match, a, plan, rng) {
-  if (!match.rounds || match.phase !== 'buy') return;
-  const pistolRound = match.round === 1 || match.round === 7;
+  if (!match.canBuy || match.phase !== 'buy') return;
+  // CQB 작전: 용의자는 사지 않음 (작전이 정한 무장)
+  if (match.op && a.team !== TEAMS.DEFUSE) return;
+  const pistolRound = match.rounds && (match.round === 1 || match.round === 7);
   const buy = (id) => match.buy(a, id);
   // 입고 있는 방탄이 같은 등급 이상이고 반 넘게 남았으면 그대로
   const armorTo = (want) => {

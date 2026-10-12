@@ -15,6 +15,7 @@ import { NavGrid } from './nav.js';
 import { Devices } from './devices.js';
 import { Doors, MIRROR } from './doors.js';
 import { ENTRY_MODE, ENTRY_REACH } from './entry-orders.js';
+import { Operation, makeOpRoster, missionById } from './operation.js';
 import { leafSegment } from './door-geo.js';
 
 // 팀 명단 (포스 패치 선택 화면과 경기에서 같은 id를 씀)
@@ -71,7 +72,10 @@ export class Match {
   // conceptIds: 개념 카드로 먼저 놓을 개념 (아직 도감에 없는 것 등). conceptCount: 맵에 놓을 카드 수
   // roster: 직접 정한 명단 (온라인: 사람 여러 명 + 봇). client: 온라인 참가자 화면용 — 규칙 계산은 방장이 하고
   //         여기서는 자기 요원의 이동·사격 연출만 미리 보여 줌 (피해·패치·해체는 방장 결과를 받아 씀)
-  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false, rules = 'single', playerMastery = [] } = {}) {
+  // rules: 'single' 한 판 · 'rounds' 라운드제 5대5 · 'cqb' CQB 작전 (mission: 작전 id 또는 정의, opDifficulty: 용의자 수·무장)
+  constructor({ map = null, mapId = undefined, playerTeam = null, playerName = '나', loadouts = new Map(), seed = Date.now(), conceptIds = null, conceptCount = 4, roster = null, client = false, rules = 'single', playerMastery = [], mission = null, opDifficulty = 'normal' } = {}) {
+    const op = rules === 'cqb' ? (typeof mission === 'object' && mission ? mission : missionById(mission)) : null;
+    if (op && !map && !mapId) mapId = op.map;
     this.map = map ?? new GameMap(mapId);
     this.nav = new NavGrid(this.map);
     this.rng = createRng(seed);
@@ -117,10 +121,10 @@ export class Match {
     this.localAgent = null; // client 모드에서 이 화면의 요원
     this.barriers = this.makeBarriers();
 
-    roster ??= makeRoster(playerTeam, playerName);
+    roster ??= op ? makeOpRoster(playerName, op.suspects[opDifficulty] ?? op.suspects.normal) : makeRoster(playerTeam, playerName);
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
       for (const m of roster.filter((x) => x.team === team)) {
-        this.agents.push(createAgent({ ...m, spawn: { x: 0, z: 0 }, loadout: loadouts.get(m.id) ?? [], kit: rules === 'rounds' ? 'pistol' : 'full' }));
+        this.agents.push(createAgent({ ...m, spawn: { x: 0, z: 0 }, loadout: loadouts.get(m.id) ?? [], kit: rules === 'single' ? 'full' : 'pistol' }));
         const a = this.agents.at(-1);
         a.human = !!m.human; // 온라인으로 들어온 다른 사람 (봇이 조종하지 않음)
         // 숙달한 개념 (사람만): 관련 패치 재사용 대기가 짧아짐
@@ -128,7 +132,11 @@ export class Match {
       }
     }
     this.byId = new Map(this.agents.map((a) => [a.id, a]));
-    this.placeAgents();
+    if (op) {
+      // CQB 작전: 준비(보급) → 작전, 라운드·경제 없음
+      this.op = new Operation(this, op, { difficulty: opDifficulty });
+      this.op.start();
+    } else this.placeAgents();
     if (rules === 'rounds') {
       for (const a of this.agents) a.credits = ECON.start;
       this.startRound();
@@ -138,6 +146,11 @@ export class Match {
 
   get rounds() {
     return this.rules === 'rounds';
+  }
+
+  // 구매 시간(보급 단말기)이 있는 규칙: 라운드제 · CQB 작전 준비
+  get canBuy() {
+    return this.rules === 'rounds' || this.rules === 'cqb';
   }
 
   // 그 패치와 관련된 개념을 숙달했는지
@@ -158,7 +171,7 @@ export class Match {
 
   answerQuiz(a, choice) {
     const q = a.quiz;
-    if (!q || q.done || this.phase !== 'buy' || !this.rounds) return false;
+    if (!q || q.done || this.phase !== 'buy' || !this.canBuy) return false;
     const c = CONCEPT_BY_ID[q.id];
     q.done = true;
     q.ok = choice === c.answer;
@@ -175,6 +188,7 @@ export class Match {
 
   // 시작 위치에 세움 (팀마다 시작 칸을 고르게 나눠 씀)
   placeAgents() {
+    if (this.op) return this.op.placeAgents();
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) {
       const members = this.agents.filter((a) => a.team === team);
       const spawns = this.map.spawns[team];
@@ -333,7 +347,7 @@ export class Match {
 
   // 상점 (구매 시간에만). 이번 구매 시간에 산 것을 다시 누르면 환불
   buy(a, item) {
-    if (!this.rounds || this.phase !== 'buy' || !a.alive) return false;
+    if (!this.canBuy || this.phase !== 'buy' || !a.alive) return false;
     a.bought ??= [];
     const refund = (match) => {
       const i = a.bought.findIndex(match);
@@ -504,7 +518,7 @@ export class Match {
   // ───────────────────────── 한 틱 진행 ─────────────────────────
   // 움직일 수 있는 때: 진행 중, 라운드 결과 화면, 라운드제의 구매 시간(시작 구역 안에서만)
   get mobile() {
-    return this.phase === 'live' || this.phase === 'roundEnd' || (this.phase === 'buy' && this.rounds);
+    return this.phase === 'live' || this.phase === 'roundEnd' || (this.phase === 'buy' && this.canBuy);
   }
 
   tick(dt) {
@@ -552,6 +566,7 @@ export class Match {
       this.stepAgent(a, intent, dt, live, mobile);
     }
     this.separateAgents();
+    this.op?.update(dt);
     this.updateConcepts();
     this.updateVeils(dt);
     this.updateShields(dt);
@@ -564,7 +579,8 @@ export class Match {
     for (const team of [TEAMS.DEFUSE, TEAMS.FORCE]) this.intel[team] = this.intel[team].filter((i) => this.time - i.t < 8);
 
     if (live) {
-      this.timeLeft -= dt;
+      // CQB 작전: 장치를 모두 해체하면 제한 시간이 멈춤
+      if (!this.op?.devicesDone) this.timeLeft -= dt;
       for (const w of [60, 30, 10]) {
         if (this.timeLeft <= w && !this.warned.has(w)) {
           this.warned.add(w);
@@ -601,8 +617,10 @@ export class Match {
     if (intent.report && live) this.reportContact(a);
     if (live) {
       if (a.lockpick) this.stepLockpick(a, intent, dt);
-      // F: 지렛대 → 폭탄 해체 → 문 순서로
-      else if (intent.interact && canAct && !this.devices.tryUse(a) && !this.tryStartLockpick(a)) this.doors.use(a);
+      // CQB 작전: 연구원 결박 풀기·자료 확보 중 (잠깐 멈춰 서서)
+      else if (a.opTask) this.op.stepTask(a, intent, dt);
+      // F: 지렛대 → 폭탄 해체 → (작전) 연구원·자료 → 문 순서로
+      else if (intent.interact && canAct && !this.devices.tryUse(a) && !this.tryStartLockpick(a) && !this.op?.interact(a)) this.doors.use(a);
       if (intent.door && canAct && !a.lockpick && !a.drone) this.doors.act(a, intent.door, intent.doorId != null ? this.doors.list[intent.doorId] : undefined);
       if (canAct && !a.lockpick) {
         intent.patch.forEach((pressed, i) => {
@@ -614,8 +632,8 @@ export class Match {
     const w = WEAPONS[a.weapon];
     a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
     a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
-    this.stepWeapon(a, intent, dt, live && !a.lockpick && !(a.kickT > 0));
-    this.moveAgent(a, intent, dt, live, mobile);
+    this.stepWeapon(a, intent, dt, live && !a.lockpick && !(a.kickT > 0) && !a.opTask);
+    this.moveAgent(a, intent, dt, live, mobile && !a.opTask);
   }
 
   // 이동 + 착지 소리 + 발걸음 (방장·참가자 화면이 같이 씀)
@@ -623,7 +641,7 @@ export class Match {
     const wasGround = a.onGround;
     const vy = a.vel.y;
     stepMovement(a, intent, this.map, dt, mobile && !a.lockpick);
-    if (this.phase === 'buy' && this.rounds) this.keepInBarrier(a);
+    if (this.phase === 'buy' && this.canBuy) this.keepInBarrier(a);
     if (wasGround && !a.onGround && a.vel.y > 1) this.emit('jump', { agent: a });
     if (!wasGround && a.onGround && vy < -4) {
       this.emit('land', { agent: a, speed: -vy });
@@ -694,7 +712,8 @@ export class Match {
     let point = null;
     if (cmd.type === 'move') point = this.aimPoint(a, 45);
     else if (cmd.type === 'regroup' || cmd.type === 'hold') point = { x: a.pos.x, y: a.pos.y, z: a.pos.z };
-    const order = cmd.type === 'free' ? null : { id: this.nextId++, type: cmd.type, point, issuerId: a.id, t: this.time, yaw: a.yaw };
+    // '자율 교전'은 명령 해제 (CQB 작전에서는 대장을 따르지 않고 스스로 수색하라는 명령)
+    const order = cmd.type === 'free' && !this.op ? null : { id: this.nextId++, type: cmd.type, point, issuerId: a.id, t: this.time, yaw: a.yaw };
     this.orders[a.team] = order;
     this.emit('command', { agent: a, team: a.team, type: cmd.type, order });
   }
@@ -1083,6 +1102,15 @@ export class Match {
         }
       }
       const at = (t) => ({ x: p.pos.x + (next.x - p.pos.x) * t, y: p.pos.y + (next.y - p.pos.y) * t, z: p.pos.z + (next.z - p.pos.z) * t });
+      // CQB 작전: 연구원 (누가 쏜 탄이든 맞음)
+      const hh = !p.harmless && this.op ? this.op.hitTest(p.pos, next, tHit) : null;
+      if (hh) {
+        const hitPos = at(hh.t);
+        const w = WEAPONS[p.weapon];
+        this.emit('impact', { ...hitPos, kind: 'flesh', projectile: p });
+        this.op.hurtHostage(hh.hostage, p.damage * falloffAt(w, p.from ? dist(p.from, hitPos) : 0), this.agentById(p.ownerId));
+        continue;
+      }
       if (drone) {
         // 드론은 한 발에 떨어짐
         this.emit('impact', { ...at(tHit), kind: 'surface', projectile: p });
@@ -1173,6 +1201,7 @@ export class Match {
     // 드론 조종 중에 몸이 맞으면 화면이 몸으로 돌아옴
     if (t.drone && hpLoss > 0) this.endDrone(this.drones.find((d) => d.id === t.drone), 'hurt');
     if (t.mirror && hpLoss > 0) this.doors.endMirror(t, 'hurt');
+    if (t.opTask && hpLoss > 0) this.op.cancelTask(t, 'hit');
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
     t.tagT = PLAYER.tagTime;
     t.punch = Math.min(0.08, t.punch + (pellet ? 0.006 : headshot ? 0.04 : 0.022));
@@ -1198,6 +1227,7 @@ export class Match {
     t.equip = null;
     if (t.drone) this.endDrone(this.drones.find((d) => d.id === t.drone), 'dead');
     if (t.mirror) this.doors.endMirror(t, 'dead');
+    if (t.opTask) this.op.cancelTask(t, 'dead');
     t.kickT = 0;
     t.stunT = t.flashT = t.gasT = 0;
     t.deadT = 0;
@@ -1894,6 +1924,8 @@ export class Match {
         }
         payload.hit.push({ id: a.id, k: Math.round(k * 100) / 100 });
       }
+      // CQB 작전: 연구원은 웅크림 (피해 없음)
+      this.op?.onBlast(at, null, owner, (pt) => exposure(this.map, at, pt, def.radius));
     } else if (t.kind === 'smoke' || t.kind === 'gas') {
       const zone = { id: this.nextId++, type: t.kind, ownerId: t.ownerId, team: t.team, x: at.x, y: t.pos.y - 0.05, z: at.z, radius: def.radius, t: def.time, duration: def.time, age: 0 };
       this.zones.push(zone);
@@ -1931,6 +1963,8 @@ export class Match {
       hits.push(a.id);
       this.applyDamage(a, def.damage * Math.pow(k, 1.15), owner, { weapon: at.kind ?? def.id, pos: c, pen: def.pen, wear: def.wear });
     }
+    // CQB 작전: 연구원도 다치고 웅크림
+    this.op?.onBlast(at, def, owner, (pt) => exposure(this.map, at, pt, def.radius));
     if (owner) this.makeNoise(owner, 'blast', at);
     this.emit('detonate', { kind: def.id === 'c4' ? 'c4' : 'frag', x: at.x, y: at.y, z: at.z, nx: at.nx ?? 0, ny: at.ny ?? 1, nz: at.nz ?? 0, ownerId: owner?.id ?? null, team: at.team, id: at.id, hits, doorId: at.doorId ?? null });
   }
@@ -2072,6 +2106,7 @@ export class Match {
 
   // ───────────────────────── 승패 ─────────────────────────
   checkEnd() {
+    if (this.op) return this.op.checkEnd();
     const done = (side, reason) => (this.rounds ? this.endRound(side, reason) : this.end(this.squadOf(side), reason));
     if (this.bombs.every((b) => b.state === 'defused')) return done(TEAMS.DEFUSE, '폭탄 2기 해체 완료');
     if (this.alive(TEAMS.DEFUSE).length === 0) return done(TEAMS.FORCE, '해체팀 전원 제압');

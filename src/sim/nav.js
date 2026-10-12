@@ -181,11 +181,13 @@ export class NavGrid {
 
   // 출발 → 목표 (둘 다 {x, y, z}). 월드 좌표 경로(첫 점 제외). 실패하면 null.
   // 예전 형식 findPath(sx, sz, tx, tz)도 받음 (1층 기준)
+  // 새 형식: findPath(from, to, { avoid }) — avoid: 지나가지 않을 칸 번호 Set
   findPath(from, to, tx, tz) {
+    let avoid = null;
     if (typeof from === 'number') {
       from = { x: from, y: 0, z: to };
       to = { x: tx, y: 0, z: tz };
-    }
+    } else avoid = tx?.avoid ?? null;
     const s = this.nodeNear(from.x, from.y ?? 0, from.z);
     const t = this.nodeNear(to.x, to.y ?? 0, to.z);
     if (s == null || t == null) return null;
@@ -215,8 +217,9 @@ export class NavGrid {
       closed[cur] = 1;
       for (const [b, cost] of this.edges[cur]) {
         if (closed[b]) continue;
-        // 닫힌 셔터 칸은 피함
+        // 닫힌 셔터 칸은 피함 (+ 부른 쪽이 피하라고 한 칸: 연구원에게 잠긴 문)
         if (map.dynBlocked?.(nodes[b].c, nodes[b].r) && nodes[b].y < 1) continue;
+        if (avoid?.has(map.idx(nodes[b].c, nodes[b].r))) continue;
         const ng = g[cur] + cost;
         if (ng < g[b]) {
           g[b] = ng;
