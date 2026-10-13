@@ -478,10 +478,14 @@ export class Effects {
         varying vec3 vW;
         varying float vY;
         void main() {
-          float s = fract((vW.x + vW.z) * 0.9 + vW.y * 1.4 - uTime * 0.5);
-          float stripe = smoothstep(0.42, 0.5, s) * (1.0 - smoothstep(0.62, 0.7, s));
-          float edge = smoothstep(0.0, 0.06, vY) * (1.0 - smoothstep(0.75, 1.0, vY));
-          float a = (0.05 + 0.15 * stripe + 0.3 * (1.0 - smoothstep(0.0, 0.08, vY))) * edge * uAlpha;
+          // 가까이 다가갔을 때만 드러나는 가는 격자 (멀리서는 바닥의 얇은 선만) — 화면을 덮지 않게
+          float d = length(cameraPosition.xz - vW.xz);
+          float near = 1.0 - smoothstep(1.2, 4.5, d);
+          vec2 g = abs(fract(vec2((vW.x + vW.z) * 2.0, vW.y * 2.0 - uTime * 0.25)) - 0.5);
+          float grid = 1.0 - smoothstep(0.0, 0.035, min(g.x, g.y));
+          float edge = smoothstep(0.0, 0.06, vY) * (1.0 - smoothstep(0.55, 0.95, vY));
+          float foot = 1.0 - smoothstep(0.0, 0.05, vY);
+          float a = (near * (0.03 + 0.22 * grid) * edge + foot * 0.35) * uAlpha;
           gl_FragColor = vec4(uColor * a, 1.0);
         }`,
       transparent: true,

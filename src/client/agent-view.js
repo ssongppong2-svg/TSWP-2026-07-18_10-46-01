@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { addDetail, detailUniforms, solidDetailChunks } from './detail.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEAM_INFO } from '../sim/constants.js';
@@ -203,10 +204,125 @@ function makeCordura(color, seed) {
   return canvasTex(c);
 }
 
-// 팀별 공유 재질 (요원끼리 같이 씀)
+// ───────── CQB 용의자: 무장한 민간인 차림 (요원 번호로 세 가지 중 하나) ─────────
+//   0: 차콜 후드티 · 청바지 · 검은 복면 · 맨손 / 1: 올리브 바람막이 · 카고 바지 · 비니 + 목토시 · 작업 장갑
+//   2: 회색 후드티 · 검은 청바지 · 복면 · 장갑
+export const CIV = [
+  { top: '#2b2d32', topKind: 'fleece', pants: '#33415a', pantsKind: 'denim', shoe: '#1b1c1e', sole: '#cfccc4', head: 'bala', bala: '#141517', hand: 'skin', glove: '#232426', skin: '#9a7461' },
+  { top: '#3e4333', topKind: 'nylon', pants: '#45433a', pantsKind: 'canvas', shoe: '#4a3a2a', sole: '#2b2521', head: 'beanie', bala: '#5c2d29', gaiter: '#25262a', hand: 'glove', glove: '#2b2a27', skin: '#b98a6a' },
+  { top: '#6b6e73', topKind: 'fleece', pants: '#24262c', pantsKind: 'denim', shoe: '#c9c6be', sole: '#e4e1da', head: 'bala', bala: '#1b1c1e', hand: 'glove', glove: '#1c1d1f', skin: '#8a6450' },
+];
+// 천 무늬 (256px = 약 25cm): fleece 기모 · nylon 립스탑 · denim 능직 · canvas 평직
+function makeCloth(kind, color, seed) {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = color;
+  g.fillRect(0, 0, S, S);
+  const r = rng(seed);
+  if (kind === 'denim') {
+    // 능직 사선 + 흰 씨실이 비치는 잔줄 + 바랜 얼룩
+    for (let i = -S; i < S * 2; i += 3) {
+      g.strokeStyle = `rgba(255,255,255,${0.05 + r() * 0.05})`;
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(i, 0);
+      g.lineTo(i + S, S);
+      g.stroke();
+    }
+    for (let i = 0; i < 26; i++) {
+      g.fillStyle = `rgba(210,220,235,${0.03 + r() * 0.05})`;
+      g.beginPath();
+      g.ellipse(r() * S, r() * S, 10 + r() * 40, 4 + r() * 14, r() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (let i = 0; i < 400; i++) {
+      g.fillStyle = `rgba(255,255,255,${0.04 + r() * 0.08})`;
+      g.fillRect(r() * S, r() * S, 1 + r() * 4, 1);
+    }
+  } else if (kind === 'nylon') {
+    for (let i = 0; i < S; i += 16) {
+      g.fillStyle = 'rgba(0,0,0,0.12)';
+      g.fillRect(i, 0, 1, S);
+      g.fillRect(0, i, S, 1);
+    }
+    const sheen = g.createLinearGradient(0, 0, S, S);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.05)');
+    sheen.addColorStop(0.5, 'rgba(255,255,255,0)');
+    sheen.addColorStop(1, 'rgba(255,255,255,0.04)');
+    g.fillStyle = sheen;
+    g.fillRect(0, 0, S, S);
+  } else if (kind === 'canvas') {
+    for (let y = 0; y < S; y += 2) for (let x = (y / 2) % 2; x < S; x += 2) {
+      g.fillStyle = 'rgba(0,0,0,0.08)';
+      g.fillRect(x, y, 1, 1);
+    }
+  } else {
+    // 기모: 부드러운 얼룩 + 보풀
+    for (let i = 0; i < 60; i++) {
+      g.fillStyle = `rgba(0,0,0,${0.03 + r() * 0.04})`;
+      g.beginPath();
+      g.ellipse(r() * S, r() * S, 8 + r() * 26, 6 + r() * 20, r() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (let i = 0; i < 500; i++) {
+      g.fillStyle = `rgba(255,255,255,${0.03 + r() * 0.05})`;
+      g.fillRect(r() * S, r() * S, 1 + r() * 2, 1 + r() * 2);
+    }
+  }
+  grain(g, S, S, kind === 'fleece' ? 20 : 14, seed + 3);
+  const t = canvasTex(c);
+  t.repeat.set(3, 3);
+  return t;
+}
+
+function civMaterials(v) {
+  const k = CIV[v];
+  const std = (o) => new THREE.MeshStandardMaterial(o);
+  const top = std({ map: makeCloth(k.topKind, k.top, 51 + v), roughness: k.topKind === 'nylon' ? 0.62 : 0.95 });
+  const pants = std({ map: makeCloth(k.pantsKind, k.pants, 61 + v), roughness: 0.92 });
+  addDetail(top, { scale: 7, kind: 'fabric', amt: [0.5, 1, 1, 1] });
+  addDetail(pants, { scale: 7, kind: 'fabric', amt: [0.5, 1, 1, 1] });
+  const carrier = std({ map: makeMolle('#1d1e21', 71), roughness: 0.9 });
+  const pouch = std({ map: makeCordura('#202124', 73), roughness: 0.9 });
+  for (const m of [carrier, pouch]) addDetail(m, { scale: 7, kind: 'fabric', amt: [0.45, 1, 1, 1] });
+  return {
+    top,
+    pants,
+    uniform: top,
+    carrier,
+    pouch,
+    helmet: std({ color: '#222326', roughness: 0.6 }),
+    strap: std({ color: '#2e2620', roughness: 0.62 }), // 가죽 벨트·끈
+    hard: std({ color: '#26272a', roughness: 0.55, metalness: 0.12 }),
+    rubber: std({ color: '#1e1f21', roughness: 0.92 }),
+    boot: std({ color: k.shoe, roughness: 0.75 }),
+    sole: std({ color: k.sole, roughness: 0.85 }),
+    glove: std({ color: k.glove, roughness: 0.82 }),
+    bala: std({ color: k.bala, roughness: 0.97 }),
+    mask: std({ color: k.gaiter ?? k.bala, roughness: 0.95 }),
+    skin: std({ color: k.skin, roughness: 0.6 }),
+    eye: std({ color: '#0c0c0e', roughness: 0.25 }),
+    brow: std({ color: '#1e1814', roughness: 0.9 }),
+    lens: std({ color: '#1a2228', roughness: 0.06, metalness: 0.75 }),
+    lensTint: std({ color: '#2a3236', roughness: 0.05, metalness: 0.7 }),
+    metal: std({ color: '#2a2c30', roughness: 0.42, metalness: 0.55 }),
+    poly: std({ color: '#26282b', roughness: 0.7, metalness: 0.05 }),
+    furn: std({ color: '#2c2e31', roughness: 0.68, metalness: 0.04 }),
+    steel: std({ color: '#9aa0a6', roughness: 0.28, metalness: 0.9 }),
+    accent: std({ color: '#3a3a3a', roughness: 0.8 }),
+    filter: std({ color: '#55595e', roughness: 0.45, metalness: 0.35 }),
+    lab: std({ color: '#55595e', roughness: 0.45 }),
+    cable: std({ color: '#151619', roughness: 0.6 }),
+    camoMap: null,
+  };
+}
+
+// 팀별 공유 재질 (요원끼리 같이 씀). 'civ0'~'civ2' = CQB 용의자 차림
 const TEAM_MATS = {};
 export function teamMaterials(team) {
   if (TEAM_MATS[team]) return TEAM_MATS[team];
+  if (team.startsWith('civ')) return (TEAM_MATS[team] = civMaterials(+team.slice(3)));
   const k = KIT[team];
   const camo = makeCamo(team);
   const molle = makeMolle(k.carrier, team === 'defuse' ? 31 : 37);
@@ -241,6 +357,9 @@ export function teamMaterials(team) {
     lensTint: std({ color: '#2a3236', roughness: 0.05, metalness: 0.7 }),
     cable: std({ color: '#151619', roughness: 0.6 }),
   };
+  // 천·경질 부품에 표면 디테일 (때·요철 · 천 짜임은 캔버스 무늬가 있어 약하게)
+  for (const k of ['uniform', 'carrier', 'pouch']) addDetail(M[k], { scale: 7, kind: 'fabric', amt: [0.45, 1, 1, 1] });
+  addDetail(M.helmet, { scale: 7, kind: k.helmetCamo ? 'fabric' : 'poly', amt: [0.4, 1, 1, 0.8] });
   TEAM_MATS[team] = M;
   return M;
 }
@@ -675,6 +794,128 @@ function buildHand(side) {
   return P;
 }
 
+// ───────── CQB 용의자 몸 (뼈대·관절 위치는 요원과 같음) ─────────
+const PELVIS_PTS = [[0, -0.135], [0.09, -0.125], [0.148, -0.075], [0.165, 0.0], [0.162, 0.06], [0.15, 0.1], [0.0, 0.11]];
+function buildPelvisCiv() {
+  const P = new Parts();
+  P.add('pants', lathe(PELVIS_PTS, 16), [0, 0, 0], [0, 0, 0], [1, 1, 0.72]);
+  // 가죽 벨트 · 버클 · 허리 권총집 · 뒷주머니
+  P.add('strap', ringG(0.16, 0.17, 0.032, 22), [0, 0.07, 0], [0, 0, 0], [1, 1, 0.74]);
+  P.add('steel', rbox(0.038, 0.026, 0.008, 0.003), [0, 0.07, -0.124]);
+  P.add('poly', rbox(0.032, 0.11, 0.07, 0.01), [0.2, -0.02, 0.0], [0, 0, 0.08]);
+  for (const s2 of [-1, 1]) P.add('pants', rbox(0.075, 0.07, 0.008, 0.003), [s2 * 0.07, -0.02, 0.112], [0.15, 0, 0]);
+  return P;
+}
+
+// 상체: 후드티(앞 주머니 · 뒤로 넘긴 후드 · 끈) 또는 바람막이(지퍼 · 깃 · 가슴 주머니) + 방탄판 또는 탄창 조끼
+function buildTorsoCiv(kind, rig) {
+  const P = new Parts();
+  P.add('top', lathe([[0.0, -0.13], [0.152, -0.12], [0.168, -0.05], [0.172, 0.1], [0.184, 0.22], [0.192, 0.3], [0.18, 0.36], [0.142, 0.405], [0.08, 0.43], [0.0, 0.434]], 18), [0, 0, 0], [0, 0, 0], [1, 1, 0.66]);
+  P.add('top', ringG(0.15, 0.162, 0.05, 20), [0, -0.105, 0], [0, 0, 0], [1, 1, 0.7]); // 밑단 시보리
+  if (kind === 'fleece') {
+    P.add('top', rbox(0.21, 0.1, 0.022, 0.01), [0, -0.01, -0.111], [0.03, 0, 0], 1, bend(0.8)); // 앞 주머니
+    P.add('top', sphG(0.11, 16, 10), [0, 0.39, 0.085], [-0.3, 0, 0], [1.25, 0.62, 0.85]); // 넘긴 후드
+    for (const x of [-0.035, 0.035]) P.add('sole', cylG(0.0035, 0.0035, 0.11, 6), [x, 0.33, -0.128], [0.08, 0, 0]); // 끈
+  } else {
+    P.add('hard', rbox(0.006, 0.42, 0.006, 0.002), [0, 0.15, -0.124], [0.02, 0, 0]); // 지퍼
+    P.add('top', ringG(0.07, 0.09, 0.06, 18), [0, 0.43, 0.0], [0, 0, 0], [1, 1, 0.9]); // 깃
+    for (const s2 of [-1, 1]) P.add('top', rbox(0.08, 0.07, 0.014, 0.006), [s2 * 0.08, 0.25, -0.118], [0.05, 0, 0]);
+  }
+  if (rig === 'plate') {
+    // 값싼 방탄판 조끼: 앞뒤 판 · 허리 띠 · 어깨끈 · 탄창 주머니 2
+    P.add('carrier', rbox(0.27, 0.3, 0.04, 0.014), [0, 0.225, -0.136], [0.04, 0, 0], 1, bend(0.75));
+    P.add('carrier', rbox(0.27, 0.31, 0.04, 0.014), [0, 0.23, 0.138], [-0.04, 0, 0], 1, bend(-0.75));
+    P.add('carrier', ringG(0.18, 0.195, 0.13, 24), [0, 0.12, 0], [0, 0, 0], [1, 1, 0.72]);
+    for (const s2 of [-1, 1]) P.add('carrier', rbox(0.05, 0.012, 0.29, 0.004), [s2 * 0.095, 0.41, 0.0], [0, 0, s2 * -0.1]);
+    for (const x of [-0.04, 0.04]) {
+      P.add('pouch', rbox(0.066, 0.1, 0.04, 0.008), [x, 0.135, -0.178]);
+      P.add('furn', rbox(0.056, 0.05, 0.022, 0.004), [x, 0.195, -0.176], [0.06, 0, 0]);
+    }
+  } else if (rig === 'chest') {
+    // 탄창 조끼(체스트 리그): 가슴 앞판 + 탄창 3 + 어깨·등 X자 끈
+    P.add('carrier', rbox(0.25, 0.11, 0.03, 0.01), [0, 0.15, -0.128], [0.02, 0, 0], 1, bend(0.9));
+    for (const x of [-0.07, 0, 0.07]) {
+      P.add('pouch', rbox(0.062, 0.095, 0.036, 0.008), [x, 0.16, -0.152]);
+      P.add('furn', rbox(0.054, 0.05, 0.02, 0.004), [x, 0.215, -0.15], [0.06, 0, 0]);
+    }
+    for (const s2 of [-1, 1]) {
+      P.add('strap', rbox(0.035, 0.008, 0.3, 0.003), [s2 * 0.1, 0.36, 0.0], [0.15, 0, s2 * -0.12]);
+      P.add('strap', rbox(0.03, 0.34, 0.008, 0.003), [s2 * 0.05, 0.24, 0.124], [0, 0, s2 * 0.5]);
+    }
+  }
+  return P;
+}
+
+// 머리: 복면(눈 구멍) 또는 맨얼굴 + 비니 + 목토시 (원점 = 머리 중심)
+function buildHeadCiv(kind) {
+  const P = new Parts();
+  if (kind === 'bala') {
+    P.add('bala', sphG(0.1, 20, 14), [0, 0, 0], [0, 0, 0], [0.8, 1.04, 0.95]);
+    P.add('bala', rbox(0.112, 0.07, 0.11, 0.034), [0, -0.068, -0.02]);
+    P.add('skin', rbox(0.084, 0.03, 0.02, 0.009), [0, 0.012, -0.086]); // 눈 구멍
+    for (const s2 of [-1, 1]) P.add('eye', sphG(0.0085, 8, 6), [s2 * 0.021, 0.013, -0.096]);
+    P.add('bala', rbox(0.09, 0.012, 0.02, 0.005), [0, 0.031, -0.09]); // 눈 위 테두리
+  } else {
+    // 비니 + 코까지 올린 목토시: 머리는 목토시 색, 눈가 띠만 맨살 (눈 · 눈썹 · 콧등)
+    P.add('mask', sphG(0.1, 20, 14), [0, 0, 0], [0, 0, 0], [0.8, 1.04, 0.95]);
+    P.add('mask', rbox(0.112, 0.07, 0.11, 0.034), [0, -0.068, -0.02]);
+    P.add('skin', rbox(0.104, 0.046, 0.022, 0.012), [0, 0.016, -0.084]);
+    P.add('skin', rbox(0.02, 0.02, 0.02, 0.006), [0, -0.004, -0.094]);
+    for (const s2 of [-1, 1]) {
+      P.add('eye', sphG(0.0085, 8, 6), [s2 * 0.024, 0.013, -0.094]);
+      P.add('brow', rbox(0.03, 0.006, 0.008, 0.002), [s2 * 0.025, 0.032, -0.095]);
+    }
+    P.add('bala', new THREE.SphereGeometry(0.106, sg(24, 8), sg(10, 4), 0, Math.PI * 2, 0, Math.PI * 0.5), [0, 0.028, 0.004], [0, 0, 0], [0.84, 1.05, 0.98]);
+    P.add('bala', cylG(0.092, 0.09, 0.034, 24), [0, 0.04, 0.004], [0, 0, 0], [0.92, 1, 1.04]);
+  }
+  return P;
+}
+function buildNeckCiv(kind) {
+  const P = new Parts();
+  P.add(kind === 'bala' ? 'bala' : 'mask', cylG(0.05, 0.056, 0.13, 12), [0, 0.04, 0]);
+  return P;
+}
+function buildThighCiv() {
+  const P = new Parts();
+  P.add('pants', lathe([[0, -0.475], [0.04, -0.468], [0.058, -0.44], [0.064, -0.37], [0.072, -0.26], [0.08, -0.14], [0.086, -0.05], [0.082, 0.02], [0.05, 0.06], [0, 0.07]], 14), [0, 0, 0], [0, 0, 0], [1.05, 1, 1.08]);
+  return P;
+}
+function buildShinCiv() {
+  const P = new Parts();
+  P.add('pants', lathe([[0, -0.3], [0.058, -0.296], [0.062, -0.26], [0.056, -0.2], [0.056, -0.12], [0.06, -0.05], [0.06, 0.0], [0.054, 0.04], [0, 0.06]], 14), [0, 0, 0], [0, 0, 0], [1.06, 1, 1.08]);
+  return P;
+}
+// 운동화 (흰 밑창 · 끈) 또는 작업화 (원점 = 발목, 바닥 −0.09)
+function buildShoeCiv() {
+  const P = new Parts();
+  P.add('boot', lathe([[0, -0.02], [0.052, -0.02], [0.054, 0.03], [0, 0.04]], 14));
+  P.add('boot', profile([[-0.07, -0.06], [0.185, -0.06], [0.2, -0.048], [0.19, -0.03], [0.14, -0.014], [0.08, 0.006], [0.045, 0.026], [-0.05, 0.03], [-0.074, 0.0]], 0.094, 0.014), [0, 0, 0]);
+  P.add('sole', profile([[-0.078, -0.09], [0.198, -0.09], [0.214, -0.074], [0.208, -0.055], [-0.078, -0.055]], 0.104, 0.006), [0, 0, 0]);
+  for (let i = 0; i < 4; i++) P.add('sole', rbox(0.03, 0.004, 0.006, 0.0015), [0, -0.004 - i * 0.008, -0.03 - i * 0.022], [0.5, 0, 0]);
+  return P;
+}
+function buildUpperArmCiv() {
+  const P = new Parts();
+  P.add('top', lathe([[0, -0.31], [0.036, -0.305], [0.047, -0.285], [0.051, -0.22], [0.056, -0.13], [0.06, -0.06], [0.062, -0.01], [0.055, 0.03], [0.034, 0.052], [0, 0.058]], 14));
+  return P;
+}
+function buildForearmCiv() {
+  const P = new Parts();
+  P.add('top', lathe([[0, -0.268], [0.034, -0.266], [0.043, -0.248], [0.046, -0.19], [0.052, -0.1], [0.055, -0.04], [0.051, 0.0], [0.038, 0.03], [0, 0.04]], 14));
+  P.add('top', cylG(0.046, 0.042, 0.04, 14, true), [0, -0.235, 0]); // 소매 시보리
+  return P;
+}
+function buildHandCiv(side, mat) {
+  const P = new Parts();
+  const s2 = side;
+  P.add(mat, rbox(0.06, 0.082, 0.07, 0.02), [s2 * 0.008, 0, 0.024]);
+  P.add(mat, rbox(0.054, 0.076, 0.03, 0.013), [s2 * -0.004, -0.002, -0.026]);
+  P.add(mat, rbox(0.021, 0.068, 0.048, 0.009), [s2 * -0.03, -0.004, 0.0]);
+  P.add(mat, new THREE.CapsuleGeometry(0.0105, 0.032, sg(3, 1), sg(8, 4)), [s2 * -0.012, 0.044, -0.004], [0, 0, Math.PI / 2]);
+  P.add(mat, cylG(0.03, 0.033, 0.05, 12), [s2 * 0.006, 0, 0.085], [Math.PI / 2, 0, 0]);
+  return P;
+}
+
 // ───────── 3인칭 총기 (원점 = 권총 손잡이 윗부분, -z = 앞) ─────────
 const RIFLE = {
   bore: 0.047,
@@ -964,43 +1205,37 @@ const slotOf = (W) => (W === 'knife' ? 'knife' : LONG.has(W) ? 'primary' : 'seco
 // ───────── 요원 한 명 = 스킨 메시 몇 개 ─────────
 // 부품(뼈대마다 재질별로 나뉜 메시 수십 개)을 재질 묶음 5개로 합쳐 한 번에 그림.
 // 뼈대는 기존 그룹을 그대로 쓰고(각 정점은 자기 뼈대 하나만 따라감), 숨길 부품은 크기를 0으로 만듦.
-const TEXTURED = new Set(['uniform', 'carrier', 'pouch', 'helmet']);
+const TEXTURED = new Set(['uniform', 'carrier', 'pouch', 'helmet', 'top', 'pants']);
 const IDENTITY = new THREE.Matrix4();
 const skinCache = new Map();
 
 // 단색 부품용 재질: 색은 정점 색, 거칠기·금속성·발광은 정점 속성 (aRME)으로
 // grain > 0: 표면 결 (부품 좌표 1/grain m 간격의 잔무늬 — 거친 천·고무일수록 진하게, 금속은 옅게).
 //            가까이서 보는 1인칭 손·총에만 씀 (멀리 있는 요원에 쓰면 반짝거림)
-export function makeSolidMaterial({ strobe = 2, grain = 0 } = {}) {
+// 정점색 + 정점별 거칠기·금속성·발광(aRME) 재질. detail: 표면 디테일 무늬 크기(1 m에 몇 번 반복, 0 = 없음 · detail.js)
+//   grain(예전 이름)도 받아서 detail로 씀
+export function makeSolidMaterial({ strobe = 2, grain = 0, detail = grain ? 18 : 0, amt, bump, edge = 0 } = {}) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   const u = { value: strobe };
   m.userData.strobe = u;
-  const G = grain > 0;
+  const D = detail > 0;
+  const C = D ? solidDetailChunks() : null;
+  const uni = D ? detailUniforms(detail, amt, bump, edge) : null;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uStrobe = u;
-    sh.uniforms.uGrain = { value: grain };
+    if (D) Object.assign(sh.uniforms, uni);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 aRME;\nvarying vec3 vRME;${G ? '\nuniform float uGrain;\nvarying vec3 vGrainP;' : ''}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvRME = aRME;${G ? '\nvGrainP = position * uGrain;' : ''}`);
+      .replace('#include <common>', `#include <common>\nattribute vec3 aRME;\nvarying vec3 vRME;${D ? C.vertPars : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvRME = aRME;${D ? C.vertMain : ''}`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vRME;\nuniform float uStrobe;${G ? '\nvarying vec3 vGrainP;' : ''}`)
-      .replace(
-        '#include <color_fragment>',
-        G
-          ? `#include <color_fragment>
-          vec3 gq = floor(vGrainP);
-          float gh = fract(sin(dot(gq, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-          float gw = sin(vGrainP.x * 3.1 + vGrainP.y * 3.1) * sin(vGrainP.z * 3.1 - vGrainP.y * 3.1);
-          float gN = (gh - 0.5) * 0.6 + gw * 0.4;
-          float gAmt = mix(0.05, 0.28, smoothstep(0.55, 0.92, vRME.x));
-          diffuseColor.rgb *= 1.0 + gN * gAmt;`
-          : '#include <color_fragment>\nfloat gN = 0.0;',
-      )
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = clamp(vRME.x + gN * 0.08, 0.04, 1.0);')
+      .replace('#include <common>', `#include <common>\nvarying vec3 vRME;\nuniform float uStrobe;${D ? C.fragPars : ''}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>${D ? C.fragColor : ''}`)
+      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = vRME.x;${D ? C.fragRough : ''}`)
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vRME.y;')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>${D ? C.fragNormal : ''}`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vRME.z * uStrobe;');
   };
-  m.customProgramCacheKey = () => (G ? 'agentSolidGrain' : 'agentSolid');
+  m.customProgramCacheKey = () => (D ? 'agentSolidDetail' : 'agentSolid');
   return m;
 }
 
@@ -1063,7 +1298,7 @@ function skinGeometry(team, level, builds) {
   const key = `${team}@${level}@${builds.map((b) => b.key).join(',')}`;
   if (skinCache.has(key)) return skinCache.get(key);
   const T = teamMaterials(team);
-  const accent = new THREE.Color(TEAM_INFO[team].color);
+  const accent = new THREE.Color((TEAM_INFO[team] ?? TEAM_INFO.force).color);
   const entries = builds.map(({ key: partKey, build }) => cached(`${partKey}@${level}`, () => withDetail(level, () => build().build())));
   const out = mergeSkinned(entries, (mat) => {
     if (TEXTURED.has(mat)) return { cls: mat };
@@ -1082,11 +1317,17 @@ export class AgentView {
   // 카메라 위치 (가까운 요원만 정밀 모델로 그림) — 게임이 매 프레임 갱신
   static eye = new THREE.Vector3(0, 1.6, 0);
 
-  constructor(agent, { showTag }) {
+  // civilian: CQB 용의자 (무장한 민간인 차림 · 요원 번호로 세 가지 중 하나)
+  constructor(agent, { showTag, civilian = false }) {
     this.agent = agent;
-    const team = agent.squad ?? agent.team; // 색·무늬는 분대 기준 (공수 교대해도 그대로)
-    const accent = TEAM_INFO[team].color;
+    const squad = agent.squad ?? agent.team; // 색·무늬는 분대 기준 (공수 교대해도 그대로)
+    const accent = TEAM_INFO[squad].color;
+    const civ = civilian ? [...String(agent.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % CIV.length : -1;
+    const team = civ >= 0 ? `civ${civ}` : squad;
     this.team = team;
+    this.civ = civ >= 0 ? CIV[civ] : null;
+    const C = this.civ;
+    const rig = C ? (agent.armorKind ? 'plate' : agent.primary && agent.primary !== 'pistol' ? 'chest' : null) : null;
     this.bones = [];
     this.builds = [];
 
@@ -1099,23 +1340,23 @@ export class AgentView {
     this.hips.rotation.order = 'YXZ';
     this.hips.position.y = 0.98;
     root.add(this.hips);
-    this.mount(this.hips, 'pelvis', buildPelvis);
+    this.mount(this.hips, C ? 'c:pelvis' : 'pelvis', C ? buildPelvisCiv : buildPelvis);
     this.holstered = this.mount(this.hips, 'holsterPistol', buildHolsterPistol);
     this.spine = new THREE.Group();
     this.spine.rotation.order = 'YXZ';
     this.spine.position.y = 0.08;
     this.hips.add(this.spine);
-    this.mount(this.spine, 'torso', buildTorso);
+    this.mount(this.spine, C ? `c:torso:${C.topKind}:${rig}` : 'torso', C ? () => buildTorsoCiv(C.topKind, rig) : buildTorso);
     this.neck = new THREE.Group();
     this.neck.rotation.order = 'YXZ';
     this.neck.position.set(0, 0.425, 0.012);
     this.spine.add(this.neck);
-    this.mount(this.neck, 'neck', buildNeck);
+    this.mount(this.neck, C ? `c:neck:${C.head}` : 'neck', C ? () => buildNeckCiv(C.head) : buildNeck);
     this.head = new THREE.Group();
     this.head.rotation.order = 'YXZ';
     this.head.position.set(0, 0.135, -0.004);
     this.neck.add(this.head);
-    this.mount(this.head, 'head', buildHead);
+    this.mount(this.head, C ? `c:head:${C.head}` : 'head', C ? () => buildHeadCiv(C.head) : buildHead);
 
     // 다리 (IK; 루트 기준)
     this.thighLen = 0.43;
@@ -1126,9 +1367,9 @@ export class AgentView {
       const foot = new THREE.Group();
       foot.rotation.order = 'YXZ';
       root.add(thigh, shin, foot);
-      this.mount(thigh, `thigh${side}`, () => buildThigh(side));
-      this.mount(shin, 'shin', buildShin);
-      this.mount(foot, 'boot', buildBoot);
+      this.mount(thigh, C ? 'c:thigh' : `thigh${side}`, C ? buildThighCiv : () => buildThigh(side));
+      this.mount(shin, C ? 'c:shin' : 'shin', C ? buildShinCiv : buildShin);
+      this.mount(foot, C ? 'c:shoe' : 'boot', C ? buildShoeCiv : buildBoot);
       return { side, thigh, shin, foot, hip: new V3(), ankle: new V3(), knee: new V3(), pitch: 0 };
     });
 
@@ -1140,9 +1381,9 @@ export class AgentView {
       const fore = new THREE.Group();
       const hand = new THREE.Group();
       this.spine.add(upper, fore, hand);
-      this.mount(upper, 'upperArm', buildUpperArm);
-      this.mount(fore, `forearm${side}`, () => buildForearm(side));
-      this.mount(hand, `hand${side}`, () => buildHand(side));
+      this.mount(upper, C ? 'c:upperArm' : 'upperArm', C ? buildUpperArmCiv : buildUpperArm);
+      this.mount(fore, C ? 'c:forearm' : `forearm${side}`, C ? buildForearmCiv : () => buildForearm(side));
+      this.mount(hand, C ? `c:hand${side}:${C.hand}` : `hand${side}`, C ? () => buildHandCiv(side, C.hand) : () => buildHand(side));
       return { side, upper, fore, hand, shoulder: new V3(side * 0.172, 0.358, 0.012), S: new V3(), W: new V3(), E: new V3(), pole: side > 0 ? new V3(0.55, -1, -0.1) : new V3(-0.4, -1, 0.05) };
     });
 
@@ -1234,8 +1475,8 @@ export class AgentView {
   buildSkin() {
     this.skeleton = new THREE.Skeleton(this.bones, this.bones.map(() => new THREE.Matrix4()));
     const T = teamMaterials(this.team);
-    this.solidMat = makeSolidMaterial();
-    const mats = { solid: this.solidMat, uniform: T.uniform, carrier: T.carrier, pouch: T.pouch, helmet: T.helmet };
+    this.solidMat = makeSolidMaterial({ detail: 7 }); // 요원마다 (표시등 깜빡임 세기가 다름)
+    const mats = { solid: this.solidMat, uniform: T.uniform, carrier: T.carrier, pouch: T.pouch, helmet: T.helmet, top: T.top, pants: T.pants };
     // [0] 가까이: 정밀 / [1] 멀리: 단순
     this.lods = [1, 0].map((level) => {
       const geos = skinGeometry(this.team, level, this.builds);

@@ -8,6 +8,7 @@ import { GameMap } from '../sim/map.js';
 import { DEFAULT_MAP_ID } from '../sim/maps/index.js';
 import { createTextures } from './textures.js';
 import { RainSystem, coverHeights } from './weather.js';
+import { DETAIL } from './detail.js';
 import { buildWorld } from './world-view.js';
 import { LightRig } from './lights.js';
 
@@ -400,6 +401,7 @@ export class Stage {
     const changed = this.qualityKey !== level;
     this.qualityKey = level;
     this.quality = q;
+    DETAIL.on.value = level === 'low' ? 0 : 1; // 표면 디테일 (낮음: 끔)
     if (changed || this.renderScale > 1) this.renderScale = q.startScale;
     this.scene.environment = q.env ? this.envMap : null;
     // 그림자: 높음에서만, 움직이지 않는 지형만 한 번 그려 둠 (요원은 그림자 패스에서 제외)

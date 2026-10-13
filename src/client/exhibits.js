@@ -172,7 +172,7 @@ function liftFrom(list, start, y) {
 export function buildLabProps(map, only = null) {
   const group = new THREE.Group();
   group.name = 'labProps';
-  const mat = makeSolidMaterial({ strobe: 0 });
+  const mat = makeSolidMaterial({ strobe: 0, detail: 6 });
   const by = {};
   for (const cell of cellsOf(map, 'crate', only ? (c, r) => !only.has(`${c},${r}`) : undefined)) {
     const h = hash(cell.c, cell.r);
@@ -195,7 +195,7 @@ export function buildLabProps(map, only = null) {
 export function buildMuseumProps(map, { atlas, panelCount }) {
   const group = new THREE.Group();
   group.name = 'museumProps';
-  const solid = makeSolidMaterial({ strobe: 1 });
+  const solid = makeSolidMaterial({ strobe: 1, detail: 2.5 });
   const decor = map.def.decor ?? {};
   const pend = decor.pendulum;
   const underPendulum = (c, r) => pend && Math.abs(c - pend.c) < 1.6 && Math.abs(r - pend.r) < 1.6;
@@ -654,7 +654,7 @@ const furnGeo = (key, v) => {
 export function buildLabInterior(map, indoor) {
   const group = new THREE.Group();
   group.name = 'labInterior';
-  const mat = makeSolidMaterial({ strobe: 1 });
+  const mat = makeSolidMaterial({ strobe: 1, detail: 2.5 });
   const area = (c, r) => map.callouts.find((k) => k.f == null && r >= k.r0 && r <= k.r1 && c >= k.c0 && c <= k.c1)?.name ?? '';
   const pick = {
     crate: (a) => (/실험/.test(a) ? 'bench' : /창고/.test(a) ? null : 'desk'),

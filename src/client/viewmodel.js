@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WEAPONS } from '../sim/data.js';
 import { TEAM_INFO } from '../sim/constants.js';
 import { flashTexture } from './textures.js';
+import { addDetail } from './detail.js';
 import { Parts, rbox, cylG, profile, teamMaterials, makeSolidMaterial, mergeSkinned, hideableBone, withDetail } from './agent-view.js';
 
 const sphG = (r, ws = 12, hs = 8) => new THREE.SphereGeometry(r, ws, hs);
@@ -599,7 +600,9 @@ export class ViewModel {
     this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff3a26', transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 
     // 손·총 부품은 총마다 스킨 메시 몇 개로 합쳐 그림 (그리기 호출 54 → 약 5)
-    this.solidMat = makeSolidMaterial({ strobe: 1, grain: 520 });
+    // 1인칭: 눈앞이라 무늬를 곱고 약하게 (천 장갑 짜임 · 폴리머 잔요철 · 금속 긁힘 · 손때)
+    this.solidMat = makeSolidMaterial({ strobe: 1, detail: 9, amt: [0.45, 0.5, 0.9, 0.7], bump: 0.0025, edge: 1 });
+    addDetail(this.mats.sleeve, { scale: 9, kind: 'fabric', amt: [0.4, 1, 1, 0.8], bump: 0.003 });
     this.skeletons = [];
     this.guns = {};
     const GUNS = [
@@ -1018,6 +1021,10 @@ export class ViewModel {
         m.envMapIntensity = ENV[k] ?? 0.1;
         m.needsUpdate = true;
       }
+      // 합쳐 그리는 총·손 재질도 주변 반사 (없으면 금속이 새까맣게 보임)
+      this.solidMat.envMap = this.envSet;
+      this.solidMat.envMapIntensity = 0.28;
+      this.solidMat.needsUpdate = true;
     }
     if (this.current !== s.weapon) {
       this.insp = 0;

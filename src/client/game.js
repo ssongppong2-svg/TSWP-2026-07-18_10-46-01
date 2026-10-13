@@ -106,7 +106,8 @@ export class GameClient {
 
     this.views = new Map();
     for (const a of this.match.agents) {
-      const v = new AgentView(a, { showTag: a.squad === this.player.squad && !a.isPlayer });
+      // CQB 작전의 용의자는 무장한 민간인 차림
+      const v = new AgentView(a, { showTag: a.squad === this.player.squad && !a.isPlayer, civilian: !!this.match.op && a.team === TEAMS.FORCE });
       stage.scene.add(v.root);
       this.views.set(a.id, v);
     }

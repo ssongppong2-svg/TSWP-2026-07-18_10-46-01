@@ -242,7 +242,7 @@ export function buildWallProps(map, { museum = false } = {}) {
     }
   }
   if (solid.length) {
-    const m = new THREE.Mesh(mergeGeometries(solid), makeSolidMaterial({ strobe: 0 }));
+    const m = new THREE.Mesh(mergeGeometries(solid), makeSolidMaterial({ strobe: 0, detail: 3 }));
     m.castShadow = false;
     m.receiveShadow = true;
     group.add(m);
