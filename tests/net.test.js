@@ -334,3 +334,34 @@ test('온라인 동기화: 새 장비 — 참가자 RC카·카메라 보기, 경
   assert.ok(cam && cam.team === hme.team && cam.nz === 1, '카메라');
   assert.ok(me.empT > 2, '내 장비가 EMP로 먹통인 시간');
 });
+
+test('온라인 동기화: 사건이 한꺼번에 몰려 스냅숏이 넘쳐도 맞음 사건은 모두 전달 (발소리·탄 자국부터 덜어냄)', () => {
+  const { host, client } = setup({ seed: 47 });
+  const hs = new HostSync(host);
+  const cs = new ClientSync(client, 'defuse-1');
+  client.localAgent = client.agentById('defuse-1');
+  host.tick(DT);
+  hs.snapshot();
+  // 한 틱에 산탄 여러 알 + 발소리·탄 자국이 잔뜩
+  const shooter = host.agentById('defuse-0'), target = host.agents.find((a) => a.team === TEAMS.FORCE);
+  for (let i = 0; i < 12; i++) host.emit('hit', { target, attacker: shooter, amount: 6 + i, headshot: i === 3, killed: false, weapon: 'shotgun', pos: { x: 1, y: 1.2, z: 3 }, backstab: false, armor: i % 2 === 0, blocked: false, armorBroke: false });
+  host.emit('hit', { target, attacker: null, amount: 30, weapon: 'frag', pos: null });
+  // 맞음 사건 뒤에 나온 것들 (예전엔 오래된 것부터 덜어내서 맞음 사건이 먼저 잘림)
+  for (let i = 0; i < 60; i++) host.emit('footstep', { agent: host.agents[i % host.agents.length], loud: true });
+  for (let i = 0; i < 40; i++) host.emit('impact', { x: i, y: 1, z: 2, nx: 0, ny: 1, nz: 0, kind: 'surface' });
+  const snap = hs.snapshot();
+  assert.ok(Buffer.byteLength(JSON.stringify(snap)) <= hs.maxBytes + 64, '크기 제한 지킴');
+  const got = [];
+  client.events.on('hit', (e) => got.push(e));
+  cs.apply(JSON.parse(JSON.stringify(snap)), host.time);
+  assert.equal(got.length, 13, '맞음 사건 13개 모두 도착');
+  assert.equal(got[3].headshot, true);
+  assert.equal(got[0].armor, true);
+  assert.equal(got[0].weapon, 'shotgun');
+  assert.equal(got[0].attacker?.id, 'defuse-0');
+  assert.equal(got[0].target?.id, target.id);
+  assert.deepEqual(got[0].pos, { x: 1, y: 1.2, z: 3 });
+  assert.equal(got[12].weapon, 'frag', '총이 아닌 무기는 이름 그대로');
+  assert.equal(got[12].attacker, null);
+  assert.equal(got[12].amount, 30);
+});
