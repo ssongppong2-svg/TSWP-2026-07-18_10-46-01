@@ -24,6 +24,9 @@ function buildResearcher(i) {
     shoe: new THREE.MeshStandardMaterial({ color: '#1c1c1e', roughness: 0.6 }),
     dark: new THREE.MeshStandardMaterial({ color: '#141516', roughness: 0.5 }),
     badge: new THREE.MeshStandardMaterial({ color: '#f4f6f8', roughness: 0.5, emissive: '#2a3a52', emissiveIntensity: 0.15 }),
+    lapel: new THREE.MeshStandardMaterial({ color: '#d3d7db', roughness: 0.85 }),
+    tie: new THREE.MeshStandardMaterial({ color: ['#7a2e2e', '#2e3f6a', '#3d4a3a', '#5a4a2e'][i % 4], roughness: 0.7 }),
+    seam: new THREE.MeshStandardMaterial({ color: '#b9bfc5', roughness: 0.9 }),
   };
   const mesh = (geo, mat) => {
     const m = new THREE.Mesh(geo, mat);
@@ -38,22 +41,43 @@ function buildResearcher(i) {
   hips.add(torso);
   const body = mesh(new THREE.CapsuleGeometry(0.15, 0.32, 4, 10).scale(1.18, 1, 0.78).translate(0, 0.27, 0), mats.coat);
   const collar = mesh(new THREE.BoxGeometry(0.16, 0.06, 0.05).translate(0, 0.53, -0.09), mats.shirt);
-  const badge = mesh(new THREE.BoxGeometry(0.06, 0.08, 0.01).translate(0.07, 0.36, -0.125), mats.badge);
+  const badge = mesh(new THREE.BoxGeometry(0.06, 0.08, 0.01).translate(0.08, 0.34, -0.124), mats.badge);
+  // 어깨 (실험복 어깨선이 넓게) · 앞섶: 셔츠·넥타이가 보이는 V 깃 + 접힌 옷깃 + 단추선 + 주머니
+  const shoulders = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 4, 8).rotateZ(Math.PI / 2).scale(1, 1, 0.8).translate(0, 0.47, 0), mats.coat);
+  const vShape = new THREE.Shape([new THREE.Vector2(-0.06, 0), new THREE.Vector2(0.06, 0), new THREE.Vector2(0, -0.17)]);
+  const shirtV = mesh(new THREE.ShapeGeometry(vShape).rotateY(Math.PI).translate(0, 0.53, -0.1185), mats.shirt);
+  const tieMesh = mesh(new THREE.BoxGeometry(0.026, 0.13, 0.008).translate(0, 0.45, -0.121), mats.tie);
+  const lapels = mesh(mergeGeometries([-1, 1].map((sd) => new THREE.BoxGeometry(0.035, 0.19, 0.012).rotateZ(sd * 0.36).translate(sd * 0.04, 0.45, -0.122))), mats.lapel);
+  const seam = mesh(new THREE.BoxGeometry(0.006, 0.36, 0.006).translate(0.006, 0.2, -0.12), mats.seam);
+  const pockets = mesh(mergeGeometries([-1, 1].map((sd) => new THREE.BoxGeometry(0.09, 0.006, 0.008).translate(sd * 0.09, 0.16, -0.12)).concat([new THREE.BoxGeometry(0.07, 0.006, 0.008).translate(-0.08, 0.4, -0.121)])), mats.seam);
+  const pens = mesh(mergeGeometries([0, 1].map((k) => new THREE.CylinderGeometry(0.005, 0.005, 0.06, 6).translate(-0.095 + k * 0.016, 0.415, -0.124))), mats.tie);
   const skirt = mesh(new THREE.CylinderGeometry(0.19, 0.24, 0.42, 12, 1, true).scale(1, 1, 0.82).translate(0, -0.12, 0.01), mats.coat);
   skirt.material = mats.coat.clone();
   skirt.material.side = THREE.DoubleSide;
-  torso.add(body, collar, badge, skirt);
+  torso.add(body, shoulders, collar, shirtV, tieMesh, lapels, seam, pockets, pens, badge, skirt);
   // 머리: 얼굴 + 머리카락 + 안경
   const head = new THREE.Group();
   head.position.set(0, 0.6, 0);
   torso.add(head);
   head.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 8).translate(0, -0.02, 0), mats.skin));
   head.add(mesh(new THREE.SphereGeometry(0.105, 14, 12).scale(0.92, 1.05, 1).translate(0, 0.1, 0), mats.skin));
-  head.add(mesh(new THREE.SphereGeometry(0.11, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.96, 1, 1.02).translate(0, 0.115, 0.01), mats.hair));
+  // 머리카락: 정수리는 이마선까지만, 뒤통수는 목덜미까지 (앞 = −z) — 얼굴이 가려지지 않게
+  head.add(mesh(new THREE.SphereGeometry(0.11, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.34).scale(0.96, 1, 1.02).translate(0, 0.115, 0.01), mats.hair));
+  head.add(mesh(new THREE.SphereGeometry(0.11, 14, 8, -0.15, Math.PI + 0.3, Math.PI * 0.32, Math.PI * 0.44).scale(0.96, 1, 1.02).translate(0, 0.115, 0.01), mats.hair));
+  // 코 · 귀 · 눈썹
+  head.add(mesh(new THREE.BoxGeometry(0.022, 0.04, 0.03).translate(0, 0.082, -0.106), mats.skin));
+  head.add(mesh(mergeGeometries([-1, 1].map((sd) => new THREE.SphereGeometry(0.022, 8, 6).scale(0.5, 1, 0.8).translate(sd * 0.1, 0.1, 0.005))), mats.skin));
+  head.add(mesh(mergeGeometries([-1, 1].map((sd) => new THREE.BoxGeometry(0.035, 0.007, 0.006).translate(sd * 0.037, 0.138, -0.103))), mats.hair));
   const glasses = mergeGeometries([
-    new THREE.TorusGeometry(0.026, 0.004, 6, 14).translate(-0.037, 0.105, -0.098),
-    new THREE.TorusGeometry(0.026, 0.004, 6, 14).translate(0.037, 0.105, -0.098),
-    new THREE.BoxGeometry(0.024, 0.005, 0.005).translate(0, 0.108, -0.098),
+    new THREE.TorusGeometry(0.026, 0.004, 6, 14).translate(-0.037, 0.105, -0.111),
+    new THREE.TorusGeometry(0.026, 0.004, 6, 14).translate(0.037, 0.105, -0.111),
+    new THREE.BoxGeometry(0.024, 0.005, 0.005).translate(0, 0.108, -0.111),
+    // 안경다리
+    new THREE.BoxGeometry(0.004, 0.004, 0.1).translate(-0.064, 0.108, -0.06),
+    new THREE.BoxGeometry(0.004, 0.004, 0.1).translate(0.064, 0.108, -0.06),
+    // 눈
+    new THREE.SphereGeometry(0.009, 6, 4).translate(-0.037, 0.105, -0.1),
+    new THREE.SphereGeometry(0.009, 6, 4).translate(0.037, 0.105, -0.1),
   ]);
   head.add(mesh(glasses, mats.dark));
   // 팔 (어깨 → 팔꿈치 → 손)
