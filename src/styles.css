@@ -4819,6 +4819,15 @@ button {
   fill: currentColor;
 }
 
+.hud .vw-mode {
+  padding: 0 5px;
+  font: 600 10px var(--mono);
+  font-style: normal;
+  color: #cfd6db;
+  border: 1px solid rgba(207, 214, 219, 0.35);
+  border-radius: var(--radius);
+}
+
 .hud .amp-badge {
   display: none;
   position: absolute;

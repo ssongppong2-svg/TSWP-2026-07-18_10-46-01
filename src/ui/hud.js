@@ -472,7 +472,8 @@ export class Hud {
     // 탄약·무기
     const w = WEAPONS[a.weapon];
     const ws = a.weapons[a.weapon];
-    if (!a.equip) this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>`));
+    // 총 이름 + 발사 방식 (점사·단발 총만 작게 표시 — 자동은 기본)
+    if (!a.equip) this.set('wsel', a.weapon, () => (E.wname.innerHTML = `${WEAPON_ICONS[a.weapon] ?? ''}<span>${w.name}</span>${w.burst ? `<em class="vw-mode">${w.burst}점사</em>` : !w.auto && !w.melee ? '<em class="vw-mode">단발</em>' : ''}`));
     // 온라인에서 다른 사람을 관전하면 탄약은 모름 → —
     this.set('mag', w.melee || !ws ? '—' : ws.mag, (v) => {
       E.mag.textContent = v;
