@@ -127,7 +127,7 @@ export function stretchMap(def, plan, extra = {}) {
   const R = indexMap(rows, def.layout.length);
   const C = indexMap(cols, def.layout[0].length);
   const cell = (o) => (o ? { ...o, r: R.idx(o.r), c: C.idx(o.c) } : o);
-  const look = (o) => ({ ...cell(o), ...(o.lr != null ? { lr: R.idx(o.lr), lc: C.idx(o.lc) } : {}) });
+  const look = (o) => ({ ...cell(o), ...(o.lr != null ? { lr: R.idx(o.lr), lc: C.idx(o.lc) } : {}), ...(o.via ? { via: cell(o.via) } : {}) });
   const range = (o) => ({ ...o, r0: R.idx(o.r0), r1: R.end(o.r1), c0: C.idx(o.c0), c1: C.end(o.c1) });
   const out = { ...def, ...extra };
   out.layout = stretchCols(stretchRows(def.layout, rows, false), cols, false);

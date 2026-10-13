@@ -111,13 +111,26 @@ export class TacticalMap {
     b.font = `600 ${Math.max(9, S * 1.05)}px "IBM Plex Sans KR", sans-serif`;
     b.textAlign = 'center';
     b.textBaseline = 'middle';
+    // 이름표끼리 겹치면 구역 안에서 아래로 비켜 놓고, 자리가 없으면 그 이름은 뺌 (좁은 구역이 붙어 있는 곳)
+    const placed = [];
+    const h = Math.max(12, S * 1.4);
     for (const k of map.callouts) {
       if (k.f != null && k.f !== floor) continue;
       // 구역 위쪽 가장자리에 표시 (가운데의 폭탄 표시와 겹치지 않게)
-      const cx = ((k.c0 + k.c1 + 1) / 2) * S, cy = (k.r1 - k.r0 >= 4 ? k.r0 + 1.2 : (k.r0 + k.r1 + 1) / 2) * S;
-      b.fillStyle = k.f === 1 ? 'rgba(20,30,40,0.75)' : 'rgba(0,0,0,0.6)';
+      const cx = ((k.c0 + k.c1 + 1) / 2) * S;
       const w = b.measureText(k.name).width + 8;
-      b.fillRect(cx - w / 2, cy - S * 0.7, w, S * 1.4);
+      const first = (k.r1 - k.r0 >= 4 ? k.r0 + 1.2 : (k.r0 + k.r1 + 1) / 2) * S;
+      let cy = null;
+      for (let y = first; y <= Math.max(first, (k.r1 + 0.5) * S); y += h * 0.6) {
+        if (!placed.some((p) => Math.abs(p.x - cx) < (p.w + w) / 2 + 2 && Math.abs(p.y - y) < h + 1)) {
+          cy = y;
+          break;
+        }
+      }
+      if (cy == null) continue;
+      placed.push({ x: cx, y: cy, w });
+      b.fillStyle = k.f === 1 ? 'rgba(20,30,40,0.75)' : 'rgba(0,0,0,0.6)';
+      b.fillRect(cx - w / 2, cy - h / 2, w, h);
       b.fillStyle = 'rgba(215,220,226,0.82)';
       b.fillText(k.name, cx, cy + 0.5);
     }
@@ -382,7 +395,8 @@ export class TacticalMap {
       g.restore();
     }
 
-    // 아군 (서로 무전으로 위치를 앎)
+    // 아군 (서로 무전으로 위치를 앎) · 이름표가 겹치면 위·아래로 비켜 놓고, 둘 다 막히면 뺌
+    const names = [];
     for (const a of m.agents) {
       if (!a.alive || a.team !== myTeam) continue;
       const [x, y] = this.toPx(a.pos.x, a.pos.z);
@@ -423,9 +437,14 @@ export class TacticalMap {
       g.restore();
       if (a.pos.y > STORY - 1) this.upMark(x, y, me ? '#ffffff' : col);
       if (!me && !this.mini) {
-        g.fillStyle = 'rgba(215,220,226,0.85)';
         g.font = `500 ${Math.max(9, S)}px "IBM Plex Sans KR", sans-serif`;
-        g.fillText(a.name, x, y - S * 1.3);
+        const w = g.measureText(a.name).width, h = Math.max(9, S) + 2;
+        const spot = [y - S * 1.3, y + S * 1.5, y - S * 1.3 - h].find((ny) => !names.some((n) => Math.abs(n.x - x) < (n.w + w) / 2 + 3 && Math.abs(n.y - ny) < h));
+        if (spot != null) {
+          names.push({ x, y: spot, w });
+          g.fillStyle = 'rgba(215,220,226,0.85)';
+          g.fillText(a.name, x, spot);
+        }
       }
     }
   }
