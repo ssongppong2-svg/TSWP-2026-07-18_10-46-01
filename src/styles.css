@@ -1826,6 +1826,52 @@ button {
   background: #ff3a26 !important;
 }
 
+/* 지정사수 저배율 조준경: 넓은 시야 · 굵은 바깥 기둥 + 가는 가운데 십자 · 빨간 꺾쇠 */
+.scope.lpvo {
+  background: radial-gradient(circle at 50% 50%, transparent 0, transparent 40vh, rgba(0, 0, 0, 0.55) 41vh, rgba(0, 0, 0, 0.96) 43vh);
+}
+
+.scope.lpvo .sc-h {
+  left: calc(50% - 41vh);
+  width: 82vh;
+}
+
+.scope.lpvo .sc-v {
+  top: 9vh;
+  height: 82vh;
+}
+
+.scope.lpvo::before,
+.scope.lpvo::after {
+  content: '';
+  position: absolute;
+  background: rgba(0, 0, 0, 0.92);
+}
+
+.scope.lpvo::before {
+  left: calc(50% - 41vh);
+  width: 82vh;
+  top: calc(50% - 2px);
+  height: 5px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.92) 0 35%, transparent 35% 65%, rgba(0, 0, 0, 0.92) 65% 100%);
+}
+
+.scope.lpvo::after {
+  left: calc(50% - 2px);
+  width: 5px;
+  top: calc(50% + 14vh);
+  height: 28vh;
+}
+
+.scope.lpvo .sc-dot {
+  left: calc(50% - 6px);
+  top: 50%;
+  width: 12px;
+  height: 8px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 80% 100%, 50% 32%, 20% 100%, 0 100%);
+}
+
 /* 가운데 큰 알림: 라운드 시작·승리·패배 */
 .vh-round {
   position: absolute;
@@ -2003,15 +2049,108 @@ button {
   gap: 10px;
 }
 
-/* 총: 한 칸에 두 자루를 나란히 */
+/* 총: 한 갈래에 두세 자루를 위아래로 (가로 카드: 그림 | 이름·피해·가격) */
 .shop-cols.big .sc-items {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 
 .shop-cols.big .shop-item {
   margin-bottom: 0;
+}
+
+.shop-item.gun {
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name name price'
+    'icon dmg dmg'
+    'icon mode mode';
+  align-items: center;
+  gap: 1px 8px;
+  padding: 6px 8px 6px;
+}
+
+.shop-item.gun .si-name {
+  grid-area: name;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.shop-item.gun .si-name kbd {
+  position: static;
+  flex: none;
+  min-width: 1.5em;
+  height: 1.45em;
+  padding: 0 0.3em;
+  font-size: 9.5px;
+  align-self: center;
+}
+
+.shop-item.gun .si-name b {
+  flex: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.shop-item.gun .si-name small {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shop-item.gun .si-price {
+  grid-area: price;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.shop-item.gun .si-icon {
+  grid-area: icon;
+  position: relative;
+  height: 34px;
+  margin-top: 2px;
+}
+
+.shop-item.gun .si-icon svg {
+  max-height: 24px;
+}
+
+/* 보유 · 환불 가능: 그림 아래쪽에 작게 */
+.shop-item.gun .si-badge {
+  top: auto;
+  right: auto;
+  left: 50%;
+  bottom: -3px;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.shop-item.gun .si-dmg,
+.shop-item.gun .si-mode {
+  min-width: 0;
+  overflow: hidden;
+  font: 500 10px / 1.35 var(--mono);
+  color: #aeb7bf;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shop-item.gun .si-dmg {
+  grid-area: dmg;
+}
+
+.shop-item.gun .si-mode {
+  grid-area: mode;
+}
+
+.shop-item.gun .si-dmg em {
+  font-style: normal;
+  color: var(--warn);
 }
 
 .shop-item {
@@ -2139,6 +2278,16 @@ button {
   text-overflow: ellipsis;
 }
 
+.shop-item.small .si-name kbd {
+  position: static;
+  min-width: 1.5em;
+  height: 1.45em;
+  margin-right: 5px;
+  padding: 0 0.3em;
+  font-size: 9.5px;
+  vertical-align: 1px;
+}
+
 .si-line {
   display: flex;
   align-items: baseline;
@@ -2175,15 +2324,6 @@ button {
   background: var(--instr);
 }
 
-/* 큰 칸(총)도 조금 낮게 */
-.shop-cols.big .si-icon {
-  height: 36px;
-  margin-top: 8px;
-}
-
-.shop-cols.big .si-icon svg {
-  max-height: 32px;
-}
 
 /* 아래 안내줄: 커서를 올린 장비 설명 */
 .shop-info {
@@ -2432,6 +2572,37 @@ button {
   background: #fff;
   clip-path: polygon(0 0, 100% 62%, 52% 62%, 30% 100%);
   filter: drop-shadow(0 0 2px #000);
+}
+
+/* 좁은 화면(노트북·크롬북): 옆 칸을 줄이고 총 그림을 작게 → 피해 수치가 잘리지 않게 */
+@media (max-width: 1180px) {
+  .shop-body {
+    grid-template-columns: 1fr 232px;
+  }
+
+  .shop-item.gun {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 1px 6px;
+  }
+
+  .shop-item.gun .si-icon svg {
+    max-height: 20px;
+  }
+
+  .shop-item.gun .si-name small {
+    display: none;
+  }
+
+  .shop-item.gun .si-name b,
+  .shop-item.gun .si-price {
+    font-size: 12.5px;
+  }
+
+  .shop-item.gun .si-dmg,
+  .shop-item.gun .si-mode {
+    font-size: 9.5px;
+    letter-spacing: -0.03em;
+  }
 }
 
 @media (max-width: 900px) {

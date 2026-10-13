@@ -20,10 +20,13 @@ const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 // 무전 문구
 const NOISE_TEXT = {
   step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
-  smg: '기관단총 사격음', sniper: '저격총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
+  smg: '기관단총 사격음', sniper: '저격총 사격음', mpistol: '기관권총 사격음', carbine: '카빈 사격음', burst: '점사 사격음', dmr: '지정사수 사격음', lmg: '기관총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
   throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음', drone: '드론 소리',
   door: '문 여닫는 소리', doorQuiet: '문 손잡이 소리', kick: '문 부수는 소리',
 };
+// 이 거리(m)보다 멀면 정조준 · 움직이며 쏘는 총
+const ADS_FROM = { rifle: 14, burst: 12, carbine: 18, lmg: 16, dmr: 5 };
+const RUN_AND_GUN = new Set(['pistol', 'mpistol', 'smg', 'shotgun', 'carbine']);
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 const compass = (dx, dz) => COMPASS[Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
 const ORDER_ACK = {
@@ -280,13 +283,15 @@ export class BotBrain {
       const tol = Math.max(0.025, 0.5 / Math.max(d, 1));
       if (!holdFire && this.reactLeft <= 0 && aimDiff < tol) this.shoot(a, intent, dt);
       else this.burstLeft = 0;
-      // 먼 거리는 정조준 (저격총은 항상 조준경), 연사할 때는 가끔 앉아서 쏨
+      // 먼 거리는 정조준 (저격총은 항상 조준경, 지정사수 소총은 조금만 멀어도), 연사할 때는 가끔 앉아서 쏨
       const wpn = WEAPONS[a.weapon];
-      intent.ads = wpn.scope || (a.weapon === 'rifle' && d > 14);
-      if (wpn.scope && a.adsT < 0.9) intent.fire = false;
-      if (intent.fire && d > 8 && this.crouchShooter && wpn.auto) intent.crouch = true;
-      // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 조금 움직임 (권총·기관단총·산탄총은 움직이며 쏨)
-      const runAndGun = a.weapon === 'pistol' || a.weapon === 'smg' || a.weapon === 'shotgun';
+      const adsFrom = ADS_FROM[a.weapon];
+      const sniperScope = wpn.scope === true; // 저격 조준경 (지정사수의 저배율은 가까우면 안 씀)
+      intent.ads = sniperScope || (adsFrom != null && d > adsFrom);
+      if ((sniperScope && a.adsT < 0.9) || (wpn.scope && intent.ads && a.adsT < 0.6)) intent.fire = false;
+      if (intent.fire && d > 8 && wpn.auto && (this.crouchShooter || a.weapon === 'lmg')) intent.crouch = true;
+      // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 조금 움직임 (권총·기관단총·산탄총·카빈은 움직이며 쏨)
+      const runAndGun = RUN_AND_GUN.has(a.weapon);
       if (!intent.fire || runAndGun) {
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
@@ -453,17 +458,19 @@ export class BotBrain {
         this.burstPause -= dt;
         return;
       }
-      if (this.burstLeft <= 0) this.burstLeft = this.rng.int(this.d.burst[0], this.d.burst[1]);
+      // 경기관총은 길게 긁음 (제압)
+      if (this.burstLeft <= 0) this.burstLeft = Math.round(this.rng.int(this.d.burst[0], this.d.burst[1]) * (a.weapon === 'lmg' ? 1.8 : 1));
       intent.fire = true;
       if (a.fireCd <= dt) {
         this.burstLeft--;
         if (this.burstLeft <= 0) this.burstPause = this.rng.range(0.28, 0.55);
       }
     } else {
+      // 단발·점사: 한 번씩 당김 (점사 총은 한 번에 3발 · 지정사수 소총은 조준을 다시 잡고 천천히)
       this.tapT -= dt;
       if (this.tapT <= 0) {
         intent.fire = true;
-        this.tapT = this.rng.range(0.28, 0.45);
+        this.tapT = a.weapon === 'dmr' ? this.rng.range(0.42, 0.65) : this.rng.range(0.28, 0.45);
       }
     }
   }
@@ -1066,7 +1073,9 @@ export function botBuy(match, a, plan, rng) {
     if (a.credits >= ARMOR[want].price) buy(want);
   };
   if (pistolRound) {
-    if (rng.chance(0.5)) buy('sheriff');
+    const r = rng.next();
+    if (r < 0.35) buy('sheriff');
+    else if (r < 0.6) buy('mpistol');
     else armorTo('light');
     // 첫 라운드는 상대 방탄이 거의 없으므로 확장탄을 가끔
     if (a.credits >= AMMO.hp.price && rng.chance(0.35)) buy('hp');
@@ -1074,14 +1083,18 @@ export function botBuy(match, a, plan, rng) {
   }
   if (!a.primary) {
     if (plan === 'full' || a.credits >= 3900) {
-      const sniper = a.credits >= 5700 && rng.chance(plan === 'full' ? 0.18 : 0.1);
-      if (sniper) buy('sniper');
-      else if (a.credits >= 2900) buy('rifle');
+      // 풀 구매: 저격총·지정사수·경기관총은 가끔, 대부분 소총 (3점사 소총 3할)
+      if (a.credits >= 5700 && rng.chance(plan === 'full' ? 0.16 : 0.08)) buy('sniper');
+      else if (a.credits >= 4500 && rng.chance(0.14)) buy('dmr');
+      else if (a.credits >= 4300 && rng.chance(0.1)) buy('lmg');
+      else if (a.credits >= 2900) buy(rng.chance(0.3) ? 'burst' : 'rifle');
       else if (a.credits >= 1600) buy('smg');
     } else if (plan === 'half') {
-      buy(a.credits >= 2000 && rng.chance(0.7) ? 'smg' : 'shotgun');
+      buy(a.credits >= 2900 && rng.chance(0.3) ? 'carbine' : a.credits >= 2000 && rng.chance(0.7) ? 'smg' : 'shotgun');
     } else if (a.credits >= 1400 && rng.chance(0.4)) {
       buy('sheriff');
+    } else if (a.credits >= 900 && rng.chance(0.3)) {
+      buy('mpistol');
     }
   }
   if (a.credits >= ARMOR.heavy.price + (plan === 'eco' ? 1500 : 0)) armorTo('heavy');

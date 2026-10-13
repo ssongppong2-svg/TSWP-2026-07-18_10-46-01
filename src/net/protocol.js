@@ -10,10 +10,11 @@ import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 8;
+export const PROTOCOL = 9;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
-const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
-const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
+// 총 번호 (뒤에만 덧붙임 · 총이 늘면 PROTOCOL도 올림: ITEMS 번호가 밀리기 때문)
+const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper', 'mpistol', 'carbine', 'burst', 'dmr', 'lmg'];
+const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것
 const ARMOR_KINDS = [null, 'light', 'heavy'];
 // 손에 든 장비: 0 없음 · 1~5 투척물 · 6 C4 · 7 기폭기
 const encEquip = (e) => (!e ? 0 : e.kind === 'throw' ? 1 + THROW_ORDER.indexOf(e.id) : e.kind === 'c4' ? 6 : e.kind === 'det' ? 7 : 0);

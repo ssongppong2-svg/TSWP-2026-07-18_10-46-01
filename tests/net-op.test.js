@@ -98,7 +98,8 @@ test('CQB 온라인 동기화: 봇 분대로 끝까지 (과학관·어려움 = 1
   let maxBytes = 0, kills = 0;
   client.events.on('kill', () => kills++);
   let k = 0;
-  while (host.phase !== 'ended' && k < 60 * 60 * 13) {
+  const limit = (MISSIONS.find((x) => x.id === 'hall').time + 180) / DT; // 작전 시간 + 준비 + 여유 (봇이 끝까지 수색해도)
+  while (host.phase !== 'ended' && k < limit) {
     client.tick(DT);
     host.tick(DT);
     if (k % 3 === 0) {

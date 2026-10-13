@@ -268,7 +268,7 @@ export class GameClient {
       if (local) {
         this.viewmodel.shot(e.agent.adsT > 0.5);
         // 발사 충격: 화면은 조금만 흔들림 (무기마다 세기)
-        const heavy = { pistol: 1, sheriff: 1.8, shotgun: 2.2, sniper: 2.6, smg: 0.55 }[e.weapon] ?? 0.8;
+        const heavy = { pistol: 1, mpistol: 0.6, sheriff: 1.8, shotgun: 2.2, sniper: 2.6, dmr: 1.7, smg: 0.55, carbine: 0.75, burst: 0.85, lmg: 0.95 }[e.weapon] ?? 0.8;
         this.kickVel.x += (Math.random() - 0.5) * 0.025 * heavy;
         this.kickVel.y += (0.03 + Math.random() * 0.015) * heavy;
         this.rollKick += (Math.random() - 0.5) * 0.012 * heavy;
@@ -276,6 +276,13 @@ export class GameClient {
       }
       A.play(e.weapon, { pos: local ? null : e.origin });
       if (e.amp && local) A.play('ampShot');
+      // 남은 탄을 귀로: 탄창 1/5 이하에서 가벼운 쇳소리 · 마지막 탄은 노리쇠 걸리는 소리
+      const ws = local ? e.agent.weapons?.[e.weapon] : null;
+      const W = WEAPONS[e.weapon];
+      if (ws && W && W.magSize >= 8) {
+        if (ws.mag === 0) A.play('boltLock');
+        else if (ws.mag <= Math.max(3, Math.round(W.magSize * 0.2))) A.play('lastRounds', { vol: 1 - ws.mag / (W.magSize * 0.25 + 1) });
+      }
     });
     // ── 문: 여닫기·살짝 열기·잠김·발차기·자물쇠 파손·폭파 (철문·나무문 소리가 다름)
     const DOOR_SND = { open: 'doorOpen', close: 'doorClose', shut: 'doorShut', crack: 'doorCreak', crackClose: 'doorCreak', locked: 'doorLocked', kick: 'doorKick', kickFail: 'kickFail', lockBreak: 'lockBreak', breach: 'doorBreach' };

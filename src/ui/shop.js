@@ -6,15 +6,16 @@ import { carriedMass, loadFactors } from '../sim/agent.js';
 import { GEAR_ICONS, WEAPON_ICONS } from './icons.js';
 
 // 보급 단말기 (구매 시간에 B): 에너지(J)로 장비를 받고, 보급 점검 문제를 맞히면 에너지를 더 받음.
-// 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~8로도 받음 (총·방탄).
-// 위 줄: 총 (큰 칸) / 아래 줄: 방탄·탄종 (작은 칸)
+// 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~0 · − · = 로도 받음 (총·방탄).
+// 위 줄: 총 (가로 카드, 네 갈래) / 아래 줄: 방탄·탄종 (작은 칸)
 const SECTIONS = [
   {
     kind: 'big',
     cols: [
-      { title: '보조무기', items: ['pistol', 'sheriff'] },
-      { title: '근접 화기', items: ['shotgun', 'smg'] },
-      { title: '소총 · 저격총', items: ['rifle', 'sniper'] },
+      { title: '보조무기', items: ['pistol', 'mpistol', 'sheriff'] },
+      { title: '근접 화기', items: ['shotgun', 'smg', 'carbine'] },
+      { title: '소총', items: ['burst', 'rifle', 'lmg'] },
+      { title: '정밀 사격', items: ['dmr', 'sniper'] },
     ],
   },
   {
@@ -28,8 +29,13 @@ const SECTIONS = [
   },
 ];
 const MARK = ['①', '②', '③', '④'];
-export const SHOP_KEYS = { pistol: 1, sheriff: 2, shotgun: 3, smg: 4, rifle: 5, sniper: 6, light: 7, heavy: 8 };
+// 기본 권총은 공짜라 키 없이 클릭으로만 (다시 들 때)
+export const SHOP_KEYS = { mpistol: '1', sheriff: '2', shotgun: '3', smg: '4', carbine: '5', burst: '6', rifle: '7', dmr: '8', lmg: '9', sniper: '0', light: '−', heavy: '=' };
 const BY_KEY = Object.fromEntries(Object.entries(SHOP_KEYS).map(([k, v]) => [v, k]));
+const KEY_OF_CODE = { Minus: '−', NumpadSubtract: '−', Equal: '=', NumpadAdd: '=' };
+
+// 발사 방식: 자동 · 3점사 · 단발
+export const fireMode = (w) => (w.burst ? `${w.burst}점사` : w.auto ? '자동' : '단발');
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const money = (n) => Math.round(n).toLocaleString('en-US');
@@ -47,7 +53,9 @@ export function itemInfo(id) {
       kind: w.kind,
       price: w.price,
       icon: WEAPON_ICONS[id],
-      stats: [`몸통 ${dmg} · 머리 ${head}`, `관통 ${w.pen ?? 0} · ${w.mass} kg`, `${w.auto ? '자동' : '단발'} · ${w.magSize}발`],
+      head,
+      dmg,
+      stats: [`몸통 ${dmg} · 머리 ${w.headKill ? '한 방' : head}`, `관통 ${w.pen ?? 0} · ${w.mass} kg`, `${fireMode(w)} · ${w.magSize}발${w.scope ? ' · 조준경' : ''}`],
     };
   }
   const a = ARMOR[id];
@@ -94,7 +102,7 @@ export function itemInfo(id) {
   };
 }
 
-// 큰 칸(총): 그림·이름·수치 / 작은 칸(방탄·탄종·장비): 그림 + 이름 + 한 줄 요약 + 가격 (자세한 설명은 아래 안내줄)
+// 큰 칸(총): 가로 카드 (키·이름·종류 | 가격 / 그림 | 피해 · 발사 방식, 보유·환불 표시는 그림 아래) / 작은 칸(방탄·탄종·장비): 그림 + 이름 + 한 줄 요약 + 가격 (자세한 설명은 아래 안내줄)
 const card = (id, small) => {
   const it = itemInfo(id);
   const key = SHOP_KEYS[id];
@@ -103,17 +111,17 @@ const card = (id, small) => {
     return `<button class="shop-item small" data-item="${id}">
     <span class="si-badge"></span>
     <div class="si-icon">${it.icon}</div>
-    <div class="si-name"><b>${esc(it.card ?? it.name)}</b></div>
+    <div class="si-name"><b>${key ? `<kbd>${key}</kbd>` : ''}${esc(it.card ?? it.name)}</b></div>
     <div class="si-line"><span class="si-short">${esc(it.short ?? it.stats[0])}</span><span class="si-price">${price}</span></div>
   </button>`;
   }
-  return `<button class="shop-item" data-item="${id}">
-    ${key ? `<kbd>${key}</kbd>` : ''}
-    <span class="si-badge"></span>
-    <div class="si-icon">${it.icon}</div>
-    <div class="si-name"><b>${esc(it.name)}</b><small>${esc(it.kind)}</small></div>
-    <div class="si-stats">${it.stats.map((x) => `<span>${esc(x)}</span>`).join('')}</div>
+  const w = WEAPONS[id];
+  return `<button class="shop-item gun" data-item="${id}">
+    <div class="si-name">${key ? `<kbd>${key}</kbd>` : ''}<b>${esc(it.name)}</b><small>${esc(it.kind)}</small></div>
     <div class="si-price">${it.price ? `${money(it.price)} J` : '기본 지급'}</div>
+    <div class="si-icon">${it.icon}<span class="si-badge"></span></div>
+    <span class="si-dmg">몸통 ${esc(it.dmg)} · 머리 ${w.headKill ? '<em>한 방</em>' : it.head}</span>
+    <span class="si-mode">${fireMode(w)} · ${w.magSize}발</span>
   </button>`;
 };
 
@@ -146,7 +154,7 @@ export class Shop {
             <section class="shop-team"><h4>분대 보급 현황</h4><div class="st-list"></div></section>
           </aside>
         </div>
-        <div class="shop-info"><b class="sf-name">보급할 장비에 커서를 올리면 설명이 나옴</b><span class="sf-desc">클릭 또는 숫자 키(1~8)로 보급 · 이번 보급 시간에 받은 것을 다시 누르면 반납</span></div>
+        <div class="shop-info"><b class="sf-name">보급할 장비에 커서를 올리면 설명이 나옴</b><span class="sf-desc">클릭 또는 키(1~0 · − · =)로 보급 · 이번 보급 시간에 받은 것을 다시 누르면 반납</span></div>
         <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span class="sf-load"></span></footer>
       </div>
       <div class="shop-cursor"></div>`;
@@ -234,8 +242,8 @@ export class Shop {
   }
 
   key(code) {
-    const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
-    const item = BY_KEY[digit];
+    const k = KEY_OF_CODE[code] ?? (code.startsWith('Digit') ? code.slice(5) : code.startsWith('Numpad') ? code.slice(6) : '');
+    const item = BY_KEY[k];
     if (this.isOpen && item) {
       this.onBuy?.(item);
       return true;

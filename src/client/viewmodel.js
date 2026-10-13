@@ -158,8 +158,8 @@ const RB = 0.045; // 소총 총열 높이
 const ENV = { shell: 0.08, metal: 0.16, dark: 0.04, poly: 0.08, furn: 0.08, rubber: 0.03, glove: 0.05, gloveHard: 0.09, sleeve: 0.04, watch: 0.1, steel: 0.45, blade: 0.22, brass: 0.35, copper: 0.3, glass: 0.5, lensW: 0.3, accent: 0.04, core: 0.1 };
 const OPTIC = { y: 0.1135, z: -0.068 };
 
-function buildRifleParts() {
-  const P = new Parts();
+// AR 계열 공통: 하부 리시버(탄창 삽입구·방아쇠울·권총 손잡이) · 상부 리시버(배출구·전진기·장전 손잡이·윗레일)
+function arLower(P) {
   // ── 하부 리시버 (탄창 삽입구 · 방아쇠울)
   P.add('metal', profile([[-0.085, 0.03], [0.125, 0.03], [0.128, -0.004], [0.133, -0.046], [0.125, -0.052], [0.046, -0.052], [0.042, -0.038], [0.04, -0.012], [0.036, -0.033], [0.0, -0.036], [-0.006, -0.03], [-0.04, -0.004], [-0.085, 0.0]], 0.024, 0.0025, [[[0.006, -0.013], [0.031, -0.013], [0.029, -0.029], [0.008, -0.03]]]));
   P.add('metal', rbox(0.029, 0.05, 0.086, 0.004), [0, -0.025, -0.086]);
@@ -173,6 +173,8 @@ function buildRifleParts() {
   // ── 권총 손잡이
   P.add('furn', profile([[-0.004, 0.0], [0.007, -0.024], [0.0, -0.046], [-0.005, -0.066], [-0.019, -0.106], [-0.059, -0.114], [-0.068, -0.103], [-0.05, -0.04], [-0.043, -0.006], [-0.03, 0.004]], 0.031, 0.006));
   for (let i = 0; i < 6; i++) P.add('poly', rbox(0.026, 0.003, 0.004, 0.001), [0, -0.05 - i * 0.01, 0.052 + i * 0.0035], [-0.35, 0, 0]);
+}
+function arUpper(P) {
   // ── 상부 리시버 · 배출구 · 전진기 · 탄피 멈치 · 장전 손잡이
   P.add('metal', rbox(0.03, 0.034, 0.21, 0.004), [0, RB, -0.02]);
   P.add('dark', rbox(0.002, 0.014, 0.052, 0.001), [0.0152, 0.049, -0.008]);
@@ -184,6 +186,12 @@ function buildRifleParts() {
   P.add('metal', rbox(0.02, 0.008, 0.035, 0.002), [0, 0.066, 0.094]);
   P.add('metal', rbox(0.042, 0.007, 0.012, 0.003), [0, 0.066, 0.106]);
   rail(P, 0.0665, 0.085, -0.125);
+}
+
+function buildRifleParts() {
+  const P = new Parts();
+  arLower(P);
+  arUpper(P);
   // ── M-LOK 핸드가드 + 레일 + 슬롯
   P.add('metal', rbox(0.05, 0.052, 0.33, 0.014, 3), [0, RB - 0.002, -0.29]);
   rail(P, 0.0745, -0.125, -0.455);
@@ -341,12 +349,8 @@ function buildSmgParts() {
   P.add('dark', cylG(0.007, 0.007, 0.002, 12), [0, SB, -0.383], [Math.PI / 2, 0, 0]);
   // 손잡이 앞 엄지 받침
   P.add('poly', rbox(0.04, 0.012, 0.03, 0.004), [0, 0.0, -0.17]);
-  // 도트 조준경 (작은 원통 + 받침)
-  P.add('poly', rbox(0.024, 0.012, 0.034, 0.003), [0, 0.084, DOT.z]);
-  P.add('metal', cylG(0.015, 0.015, 0.05, 16), [0, DOT.y, DOT.z], [Math.PI / 2, 0, 0]);
-  P.add('metal', cylG(0.0165, 0.0165, 0.006, 16), [0, DOT.y, DOT.z - 0.026], [Math.PI / 2, 0, 0]);
-  P.add('metal', cylG(0.006, 0.006, 0.01, 8), [0.017, DOT.y, DOT.z], [0, 0, Math.PI / 2]);
-  P.add('glass', cylG(0.013, 0.013, 0.0015, 16), [0, DOT.y, DOT.z - 0.024], [Math.PI / 2, 0, 0]);
+  // 도트 조준경 (작은 원통 + 받침 · 들여다볼 수 있게 뚫린 경통)
+  redDot(P, DOT, 0.077, 0.015, 0.05);
   // 철사 개머리판 + 고무 패드
   for (const [y, x] of [[0.05, 0.012], [0.05, -0.012], [-0.006, 0]]) P.add('steel', cylG(0.0042, 0.0042, 0.2, 8), [x, y, 0.17], [Math.PI / 2, 0, 0]);
   P.add('rubber', rbox(0.034, 0.085, 0.014, 0.005), [0, 0.022, 0.272]);
@@ -449,6 +453,252 @@ function buildSniperMag() {
   const P = new Parts();
   P.add('poly', rbox(0.032, 0.062, 0.085, 0.005), [0, -0.031, 0]);
   P.add('brass', cylG(0.006, 0.006, 0.05, 10), [0, 0.004, 0.0], [Math.PI / 2, 0, 0]);
+  return P;
+}
+
+// 들여다보는 원통 (조준경 경통): 양 끝이 뚫려 있고, 안쪽 벽은 뒤집은 원통으로 그림 · 뒤 끝에 테두리 고리
+function sightTube(P, mat, r, len, at, wall = 0.0014) {
+  P.add(mat, cylG(r, r, len, 18, true), [0, at.y, at.z], [Math.PI / 2, 0, 0]);
+  P.add('dark', cylG(r - wall, r - wall, len, 18, true), [0, at.y, at.z], [Math.PI / 2, 0, 0], [-1, 1, 1]);
+  P.add(mat, new THREE.RingGeometry(r - wall, r, 18), [0, at.y, at.z + len / 2]);
+  P.add(mat, new THREE.RingGeometry(r - wall, r, 18), [0, at.y, at.z - len / 2], [0, Math.PI, 0]);
+}
+
+// 도트 조준경 (작은 원통형 · 받침 · 다이얼 · 앞뒤 유리). at = 경통 가운데, base = 받침 아래 높이
+function redDot(P, at, base, r = 0.0145, len = 0.042) {
+  P.add('poly', rbox(0.024, at.y - base, 0.032, 0.003), [0, (at.y + base) / 2 - 0.004, at.z]);
+  sightTube(P, 'metal', r, len, at);
+  sightTube(P, 'metal', r + 0.002, 0.008, { y: at.y, z: at.z - len / 2 - 0.003 }); // 앞 후드
+  P.add('metal', cylG(0.0058, 0.0058, 0.01, 10), [r + 0.002, at.y, at.z], [0, 0, Math.PI / 2]);
+  P.add('metal', cylG(0.0058, 0.0058, 0.009, 10), [0, at.y + r + 0.002, at.z + 0.004]);
+  P.add('glass', cylG(r - 0.0015, r - 0.0015, 0.0015, 16), [0, at.y, at.z - len / 2 + 0.002], [Math.PI / 2, 0, 0]);
+  P.add('glass', cylG(r - 0.0015, r - 0.0015, 0.0015, 16), [0, at.y, at.z + len / 2 - 0.002], [Math.PI / 2, 0, 0]);
+}
+
+// 단축 카빈 (가속 C-10): AR 몸통 + 짧은 M-LOK 핸드가드 · 짧은 총열·새장형 소염기 · 줄인 개머리판 · 도트 조준경
+const CDOT = { y: 0.094, z: -0.035 };
+function buildCarbineParts() {
+  const P = new Parts();
+  arLower(P);
+  arUpper(P);
+  P.add('metal', rbox(0.048, 0.05, 0.19, 0.013, 3), [0, RB - 0.002, -0.22]);
+  rail(P, 0.0735, -0.125, -0.31);
+  for (let i = 0; i < 3; i++) {
+    const z = -0.17 - i * 0.05;
+    for (const s of [-1, 1]) P.add('dark', rbox(0.0022, 0.008, 0.03, 0.001), [s * 0.0242, RB - 0.004, z]);
+    P.add('dark', rbox(0.008, 0.0022, 0.03, 0.001), [0, RB - 0.0272, z]);
+  }
+  P.add('metal', cylG(0.0205, 0.0205, 0.01, 16), [0, RB, -0.122], [Math.PI / 2, 0, 0]);
+  // 총열 · 새장형 소염기 (홈 4줄 · 구멍)
+  P.add('metal', cylG(0.0092, 0.0092, 0.05, 14), [0, RB, -0.34], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0118, 0.0118, 0.046, 14), [0, RB, -0.388], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 4; i++) {
+    const a = (i * Math.PI) / 2 + Math.PI / 4;
+    P.add('dark', rbox(0.0026, 0.0026, 0.03, 0.0008), [Math.cos(a) * 0.0112, RB + Math.sin(a) * 0.0112, -0.393]);
+  }
+  P.add('dark', cylG(0.0058, 0.0058, 0.002, 12), [0, RB, -0.4115], [Math.PI / 2, 0, 0]);
+  // 접이식 가늠자·가늠쇠 · 핸드스톱 · 소형 조명
+  P.add('metal', rbox(0.018, 0.009, 0.026, 0.003), [0, 0.081, -0.298]);
+  P.add('metal', rbox(0.02, 0.01, 0.026, 0.003), [0, 0.076, 0.072]);
+  P.add('poly', profile([[0.27, RB - 0.026], [0.31, RB - 0.026], [0.305, RB - 0.045], [0.29, RB - 0.046]], 0.022, 0.003));
+  P.add('metal', rbox(0.011, 0.014, 0.026, 0.003), [0.026, RB + 0.012, -0.27], [0, 0, -0.6]);
+  P.add('metal', cylG(0.0098, 0.0098, 0.062, 14), [0.034, RB + 0.017, -0.272], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.012, 0.011, 0.018, 14), [0.034, RB + 0.017, -0.31], [Math.PI / 2, 0, 0]);
+  P.add('lensW', cylG(0.0102, 0.0102, 0.002, 14), [0.034, RB + 0.017, -0.32], [Math.PI / 2, 0, 0]);
+  P.add('accent', rbox(0.0495, 0.0518, 0.009, 0.013), [0, RB - 0.002, -0.15]);
+  // 완충관 · 줄인 개머리판 · 고무 패드
+  P.add('metal', cylG(0.0155, 0.0155, 0.17, 14), [0, 0.042, 0.18], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.019, 0.019, 0.012, 12), [0, 0.042, 0.092], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.13, 0.064], [-0.27, 0.073], [-0.295, 0.07], [-0.298, -0.066], [-0.282, -0.072], [-0.23, -0.045], [-0.16, -0.01], [-0.132, 0.018]], 0.044, 0.007));
+  P.add('rubber', rbox(0.046, 0.14, 0.014, 0.006), [0, 0.002, 0.298]);
+  P.add('dark', rbox(0.01, 0.008, 0.03, 0.002), [0, 0.016, 0.16]);
+  redDot(P, CDOT, 0.072);
+  return P;
+}
+
+// 3점사 소총 (탄성 B-3): AR 몸통 + 둥근 폴리머 핸드가드(통풍구) · 3갈래 소염기 · 고정 개머리판 · 열린 반사식 조준기
+const REFLEX = { y: 0.094, z: -0.05 };
+function buildBurstParts() {
+  const P = new Parts();
+  arLower(P);
+  arUpper(P);
+  P.add('poly', cylG(0.0262, 0.0262, 0.29, 10), [0, RB - 0.002, -0.27], [Math.PI / 2, 0, Math.PI / 10]);
+  for (let i = 0; i < 6; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.002, 0.006, 0.022, 0.0008), [s * 0.0258, RB + 0.002, -0.16 - i * 0.042]);
+  for (let i = 0; i < 6; i++) P.add('dark', rbox(0.006, 0.002, 0.022, 0.0008), [0, RB - 0.0282, -0.16 - i * 0.042]);
+  P.add('metal', cylG(0.0282, 0.0282, 0.012, 16), [0, RB - 0.002, -0.124], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.022, 0.022, 0.01, 16), [0, RB - 0.002, -0.418], [Math.PI / 2, 0, 0]);
+  // 총열 · 낮은 가스 블록 · 3갈래 소염기
+  P.add('metal', cylG(0.009, 0.009, 0.13, 14), [0, RB, -0.488], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.022, 0.02, 0.026, 0.003), [0, RB + 0.002, -0.44]);
+  P.add('metal', cylG(0.012, 0.012, 0.012, 14), [0, RB, -0.558], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
+    P.add('metal', rbox(0.006, 0.006, 0.038, 0.0015), [Math.cos(a) * 0.0085, RB + Math.sin(a) * 0.0085, -0.582]);
+  }
+  P.add('dark', cylG(0.006, 0.006, 0.002, 12), [0, RB, -0.565], [Math.PI / 2, 0, 0]);
+  // 고정 개머리판 (뒤 덮개 홈) · 고무 패드
+  P.add('furn', profile([[-0.085, 0.064], [-0.33, 0.066], [-0.342, 0.058], [-0.342, -0.07], [-0.326, -0.077], [-0.2, -0.03], [-0.11, 0.0], [-0.085, 0.016]], 0.042, 0.007));
+  P.add('dark', rbox(0.043, 0.0022, 0.05, 0.001), [0, 0.03, 0.28]);
+  P.add('rubber', rbox(0.045, 0.138, 0.014, 0.006), [0, -0.004, 0.345]);
+  P.add('steel', rbox(0.012, 0.012, 0.012, 0.003), [0, -0.035, 0.31]); // 멜빵 고리
+  P.add('accent', rbox(0.0545, 0.0545, 0.009, 0.014), [0, RB - 0.002, -0.4]);
+  // 열린 반사식 조준기 (받침 · 창틀 · 기울어진 유리 · 밝기 버튼)
+  P.add('metal', rbox(0.03, 0.012, 0.052, 0.003), [0, 0.0765, REFLEX.z]);
+  P.add('poly', rbox(0.032, 0.008, 0.044, 0.003), [0, 0.0855, REFLEX.z]);
+  for (const s of [-1, 1]) P.add('poly', rbox(0.0045, 0.03, 0.012, 0.0015), [s * 0.0165, REFLEX.y + 0.002, REFLEX.z - 0.012], [-0.12, 0, 0]);
+  P.add('poly', rbox(0.0375, 0.0045, 0.014, 0.0015), [0, REFLEX.y + 0.018, REFLEX.z - 0.014], [-0.12, 0, 0]);
+  P.add('glass', rbox(0.029, 0.026, 0.0012, 0.0005), [0, REFLEX.y + 0.003, REFLEX.z - 0.012], [-0.12, 0, 0]);
+  P.add('dark', rbox(0.006, 0.004, 0.006, 0.0015), [0.012, 0.0905, REFLEX.z + 0.014]);
+  return P;
+}
+
+// 지정사수 소총 (관성 M-14): AR-10 몸통 · 긴 M-LOK 핸드가드 · 홈 판 총열 · 제퇴기 · 볼 받침 개머리판 · 저배율 조준경
+const LPVO = { y: 0.106, z: -0.07 };
+function buildDmrParts() {
+  const P = new Parts();
+  arLower(P);
+  arUpper(P);
+  P.add('metal', rbox(0.05, 0.052, 0.42, 0.014, 3), [0, RB - 0.002, -0.335]);
+  rail(P, 0.0745, -0.125, -0.54);
+  for (let i = 0; i < 7; i++) {
+    const z = -0.17 - i * 0.055;
+    for (const s of [-1, 1]) P.add('dark', rbox(0.0022, 0.008, 0.032, 0.001), [s * 0.0252, RB - 0.004, z]);
+    P.add('dark', rbox(0.008, 0.0022, 0.032, 0.001), [0, RB - 0.0282, z]);
+  }
+  P.add('metal', cylG(0.0205, 0.0205, 0.01, 16), [0, RB, -0.122], [Math.PI / 2, 0, 0]);
+  // 홈 판 총열 (6줄) + 제퇴기 (옆 구멍 3쌍)
+  P.add('metal', cylG(0.011, 0.011, 0.2, 16), [0, RB, -0.645], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    P.add('dark', rbox(0.0026, 0.0026, 0.16, 0.0008), [Math.cos(a) * 0.0103, RB + Math.sin(a) * 0.0103, -0.645]);
+  }
+  P.add('metal', rbox(0.026, 0.024, 0.052, 0.005), [0, RB, -0.771]);
+  for (let i = 0; i < 3; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.002, 0.012, 0.008, 0.0008), [s * 0.0131, RB, -0.756 - i * 0.014]);
+  P.add('dark', cylG(0.0062, 0.0062, 0.002, 12), [0, RB, -0.7975], [Math.PI / 2, 0, 0]);
+  // 앞 지지 손잡이(멈춤) · 양각대 받침 · 오른쪽 조명
+  P.add('poly', profile([[0.4, RB - 0.026], [0.44, RB - 0.026], [0.435, RB - 0.045], [0.42, RB - 0.046]], 0.022, 0.003));
+  P.add('metal', rbox(0.024, 0.012, 0.03, 0.003), [0, RB - 0.031, -0.5]);
+  P.add('metal', cylG(0.0098, 0.0098, 0.062, 14), [0.034, RB + 0.017, -0.46], [Math.PI / 2, 0, 0]);
+  P.add('lensW', cylG(0.0102, 0.0102, 0.002, 14), [0.034, RB + 0.017, -0.492], [Math.PI / 2, 0, 0]);
+  P.add('accent', rbox(0.0515, 0.0538, 0.009, 0.014), [0, RB - 0.002, -0.2]);
+  // 완충관 · 정밀 개머리판 (볼 받침 · 길이 조절 버튼) · 고무 패드
+  P.add('metal', cylG(0.0155, 0.0155, 0.17, 14), [0, 0.042, 0.175], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.1, 0.07], [-0.33, 0.072], [-0.346, 0.066], [-0.346, -0.086], [-0.33, -0.092], [-0.24, -0.05], [-0.17, -0.02], [-0.1, 0.0]], 0.044, 0.007, [[[-0.16, 0.026], [-0.22, 0.026], [-0.23, -0.012], [-0.17, -0.004]]]));
+  P.add('furn', rbox(0.036, 0.024, 0.13, 0.008), [0, 0.09, 0.24]);
+  for (const z of [0.2, 0.28]) P.add('metal', cylG(0.0035, 0.0035, 0.04, 8), [0, 0.078, z]);
+  P.add('rubber', rbox(0.046, 0.16, 0.016, 0.006), [0, -0.01, 0.354]);
+  // 저배율 조준경: 고정 링 2 · 경통 · 대물 · 접안 · 배율 손잡이 · 다이얼 (정조준은 조준경 화면으로)
+  for (const z of [LPVO.z - 0.06, LPVO.z + 0.05]) {
+    P.add('metal', rbox(0.036, 0.01, 0.02, 0.003), [0, 0.078, z]);
+    for (const s of [-1, 1]) P.add('metal', rbox(0.006, 0.03, 0.02, 0.002), [s * 0.0168, 0.094, z]);
+    P.add('metal', cylG(0.0185, 0.0185, 0.018, 18), [0, LPVO.y, z], [Math.PI / 2, 0, 0]);
+  }
+  P.add('metal', cylG(0.0155, 0.0155, 0.2, 18), [0, LPVO.y, LPVO.z], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0225, 0.0155, 0.045, 18), [0, LPVO.y, LPVO.z - 0.122], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0225, 0.0225, 0.02, 18), [0, LPVO.y, LPVO.z - 0.154], [Math.PI / 2, 0, 0]);
+  P.add('glass', cylG(0.019, 0.019, 0.002, 18), [0, LPVO.y, LPVO.z - 0.165], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0195, 0.0155, 0.05, 18), [0, LPVO.y, LPVO.z + 0.115], [Math.PI / 2, 0, 0]);
+  P.add('rubber', cylG(0.0198, 0.0198, 0.016, 18), [0, LPVO.y, LPVO.z + 0.146], [Math.PI / 2, 0, 0]);
+  P.add('glass', cylG(0.017, 0.017, 0.002, 18), [0, LPVO.y, LPVO.z + 0.155], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.006, 0.012, 0.01, 0.002), [0.019, LPVO.y + 0.004, LPVO.z + 0.1]);
+  P.add('metal', cylG(0.011, 0.011, 0.018, 14), [0, LPVO.y + 0.022, LPVO.z]);
+  P.add('metal', cylG(0.011, 0.011, 0.018, 14), [0.022, LPVO.y, LPVO.z], [0, 0, Math.PI / 2]);
+  P.add('red', cylG(0.006, 0.006, 0.006, 10), [-0.019, LPVO.y, LPVO.z], [0, 0, Math.PI / 2]); // 밝기 다이얼
+  return P;
+}
+// 10발 상자 탄창 (원점 = 윗면 뒤쪽)
+function buildDmrMag() {
+  const P = new Parts();
+  P.add('poly', profile([[0.0, 0.004], [0.084, 0.004], [0.088, -0.07], [0.086, -0.096], [0.008, -0.096], [0.004, -0.06]], 0.026, 0.0025));
+  for (let i = 0; i < 4; i++) for (const sx of [-1, 1]) P.add('dark', rbox(0.0016, 0.004, 0.06, 0.0008), [sx * 0.0132, -0.03 - i * 0.014, -0.046]);
+  P.add('poly', rbox(0.031, 0.01, 0.09, 0.004), [0, -0.098, -0.046]);
+  P.add('brass', cylG(0.0058, 0.0058, 0.05, 12), [0, 0.01, -0.035], [Math.PI / 2, 0, 0]);
+  P.add('copper', cylG(0.0003, 0.0056, 0.026, 12), [0, 0.01, -0.073], [-Math.PI / 2, 0, 0]);
+  return P;
+}
+
+// 경기관총 (질량 L-60): 큰 상자형 몸통 · 급탄 덮개 · 탄띠 · 방열 덮개 · 두꺼운 총열 · 접힌 양각대 · 고정 개머리판 · 도트 조준경
+const LB = 0.05;
+const LDOT = { y: 0.118, z: -0.03 };
+function buildLmgParts() {
+  const P = new Parts();
+  gripParts(P);
+  P.add('metal', profile([[-0.09, 0.07], [0.2, 0.07], [0.212, 0.06], [0.212, 0.004], [0.06, 0.0], [0.0, 0.0], [-0.09, 0.008]], 0.05, 0.005));
+  for (let i = 0; i < 3; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.002, 0.03, 0.004, 0.001), [s * 0.0252, 0.035, 0.04 - i * 0.012]);
+  // 급탄 덮개 (앞 경첩 · 뒤 걸쇠) + 윗레일
+  P.add('metal', rbox(0.054, 0.018, 0.19, 0.004), [0, 0.079, -0.03]);
+  P.add('dark', cylG(0.0052, 0.0052, 0.056, 10), [0, 0.078, -0.127], [0, 0, Math.PI / 2]);
+  P.add('metal', rbox(0.022, 0.01, 0.018, 0.003), [0, 0.088, 0.06]);
+  rail(P, 0.0885, 0.04, -0.11);
+  // 급탄구 (왼쪽) + 들어가는 탄띠 (실탄 3발 · 고리)
+  P.add('metal', rbox(0.016, 0.034, 0.056, 0.003), [-0.032, 0.046, -0.06]);
+  for (let i = 0; i < 3; i++) {
+    const x = -0.045 - i * 0.011, y = 0.05 - i * 0.012;
+    P.add('brass', cylG(0.0042, 0.0042, 0.034, 10), [x, y, -0.052], [Math.PI / 2, 0, 0]);
+    P.add('copper', cylG(0.0003, 0.004, 0.02, 10), [x, y, -0.078], [-Math.PI / 2, 0, 0]);
+    P.add('dark', rbox(0.011, 0.004, 0.012, 0.001), [x, y - 0.004, -0.045]);
+  }
+  // 배출구 · 장전 손잡이 (오른쪽)
+  P.add('dark', rbox(0.002, 0.016, 0.05, 0.001), [0.0255, 0.042, -0.04]);
+  P.add('metal', rbox(0.016, 0.012, 0.022, 0.003), [0.033, 0.03, -0.15]);
+  P.add('metal', rbox(0.004, 0.01, 0.07, 0.001), [0.026, 0.03, -0.125]);
+  // 방열 덮개 (통풍구) + 아래 레일
+  P.add('poly', rbox(0.05, 0.048, 0.22, 0.01), [0, LB - 0.004, -0.31]);
+  for (let i = 0; i < 6; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.002, 0.012, 0.018, 0.0008), [s * 0.0252, LB + 0.006, -0.225 - i * 0.033]);
+  rail(P, LB - 0.031, -0.22, -0.4);
+  // 두꺼운 총열 · 왼쪽 총열 손잡이 · 가스 블록(가늠쇠) · 소염기
+  P.add('metal', cylG(0.0128, 0.0128, 0.21, 14), [0, LB, -0.525], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.01, 0.012, 0.02, 0.003), [-0.024, LB + 0.004, -0.44]);
+  P.add('poly', cylG(0.0085, 0.0085, 0.09, 10), [-0.038, LB + 0.004, -0.4], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.024, 0.032, 0.026, 0.004), [0, LB + 0.002, -0.6]);
+  P.add('metal', rbox(0.004, 0.02, 0.006, 0.0015), [0, LB + 0.026, -0.6]);
+  P.add('metal', cylG(0.0138, 0.0138, 0.05, 14), [0, LB, -0.652], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 4; i++) {
+    const a = (i * Math.PI) / 2 + Math.PI / 4;
+    P.add('dark', rbox(0.003, 0.003, 0.034, 0.0008), [Math.cos(a) * 0.0132, LB + Math.sin(a) * 0.0132, -0.657]);
+  }
+  P.add('dark', cylG(0.007, 0.007, 0.002, 12), [0, LB, -0.678], [Math.PI / 2, 0, 0]);
+  // 접힌 양각대 (다리 2 · 고무 발)
+  P.add('metal', rbox(0.04, 0.014, 0.02, 0.004), [0, LB - 0.036, -0.43]);
+  for (const s of [-1, 1]) {
+    P.add('metal', cylG(0.0056, 0.0056, 0.2, 8), [s * 0.014, LB - 0.04, -0.53], [Math.PI / 2, 0, 0]);
+    P.add('rubber', rbox(0.014, 0.012, 0.022, 0.004), [s * 0.014, LB - 0.04, -0.635]);
+  }
+  P.add('accent', rbox(0.0515, 0.0495, 0.009, 0.01), [0, LB - 0.004, -0.39]);
+  // 고정 개머리판 (손잡이 구멍) · 고무 패드
+  P.add('furn', profile([[-0.09, 0.066], [-0.33, 0.06], [-0.346, 0.054], [-0.346, -0.08], [-0.33, -0.086], [-0.22, -0.04], [-0.14, -0.012], [-0.09, 0.004]], 0.046, 0.007, [[[-0.17, 0.04], [-0.27, 0.036], [-0.27, -0.01], [-0.18, 0.004]]]));
+  P.add('rubber', rbox(0.048, 0.138, 0.016, 0.006), [0, -0.01, 0.352]);
+  redDot(P, LDOT, 0.093);
+  return P;
+}
+// 100발 상자 탄창 (원점 = 윗면 뒤쪽 · 몸통 아래 왼쪽으로)
+function buildLmgBox() {
+  const P = new Parts();
+  P.add('poly', rbox(0.052, 0.11, 0.104, 0.007), [-0.01, -0.058, -0.052]);
+  P.add('dark', rbox(0.0535, 0.004, 0.106, 0.001), [-0.01, -0.03, -0.052]);
+  for (let i = 0; i < 3; i++) P.add('dark', rbox(0.0535, 0.003, 0.004, 0.001), [-0.01, -0.07 - i * 0.012, -0.004]);
+  P.add('metal', rbox(0.02, 0.012, 0.02, 0.003), [-0.01, -0.012, -0.004]); // 걸쇠
+  P.add('rubber', rbox(0.03, 0.006, 0.07, 0.003), [-0.01, -0.115, -0.052]);
+  return P;
+}
+
+// 기관권총 (진동 MP-3): 권총 몸통 + 슬라이드 위 보정기 · 조정간 · 긴 탄창
+function buildCompParts() {
+  const P = new Parts();
+  P.add('slide', rbox(0.0255, 0.031, 0.026, 0.0022), [0, 0.0335, -0.166]);
+  for (let i = 0; i < 3; i++) P.add('dark', rbox(0.008, 0.0016, 0.005, 0.0006), [0, 0.0494, -0.158 - i * 0.008]);
+  for (const s of [-1, 1]) P.add('dark', rbox(0.0012, 0.01, 0.014, 0.0005), [s * 0.0128, 0.04, -0.166]);
+  P.add('dark', cylG(0.0046, 0.0046, 0.0008, 12), [0, PB, -0.1795], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.003, 0.009, 0.012, 0.001), [-0.0135, 0.034, 0.024]); // 조정간 (연발 · 점사)
+  P.add('red', rbox(0.0008, 0.003, 0.003, 0.0004), [-0.0152, 0.036, 0.017]);
+  return P;
+}
+function buildMpistolMag() {
+  const P = new Parts();
+  P.add('poly', rbox(0.019, 0.158, 0.03, 0.004), [0, -0.079, 0]);
+  for (let i = 0; i < 4; i++) P.add('dark', cylG(0.0018, 0.0018, 0.0195, 8), [0, -0.11 - i * 0.012, 0.006], [0, 0, Math.PI / 2]);
+  P.add('poly', rbox(0.026, 0.012, 0.044, 0.004), [0, -0.162, -0.002]);
+  P.add('brass', cylG(0.0045, 0.0045, 0.02, 10), [0, 0.003, -0.002], [Math.PI / 2, 0, 0]);
   return P;
 }
 
@@ -597,7 +847,8 @@ export class ViewModel {
       tape: std({ color: '#2b3a52', roughness: 0.8 }),
       red: std({ color: '#c8281e', roughness: 0.5, emissive: '#c8281e', emissiveIntensity: 0.2 }),
     };
-    this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff3a26', transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
+    // 조준선: 밝은 배경에서도 빨갛게 보이도록 덧셈 섞기 대신 불투명에 가깝게
+    this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff2a18', transparent: true, opacity: 0.92, depthWrite: false, toneMapped: false });
 
     // 손·총 부품은 총마다 스킨 메시 몇 개로 합쳐 그림 (그리기 호출 54 → 약 5)
     // 1인칭: 눈앞이라 무늬를 곱고 약하게 (천 장갑 짜임 · 폴리머 잔요철 · 금속 긁힘 · 손때)
@@ -608,6 +859,7 @@ export class ViewModel {
     const GUNS = [
       ['rifle', () => this.buildRifle()], ['pistol', () => this.buildPistol()], ['knife', () => this.buildKnife()],
       ['smg', () => this.buildSmg()], ['shotgun', () => this.buildShotgun()], ['sniper', () => this.buildSniper()], ['sheriff', () => this.buildSheriff()],
+      ['mpistol', () => this.buildMpistol()], ['carbine', () => this.buildCarbine()], ['burst', () => this.buildBurst()], ['dmr', () => this.buildDmr()], ['lmg', () => this.buildLmg()],
       ...['frag', 'stun', 'flash', 'smoke', 'gas', 'c4', 'det', 'drone'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
     ];
     for (const [id, build] of GUNS) {
@@ -749,16 +1001,26 @@ export class ViewModel {
   }
 
   buildPistol() {
+    return this.buildSidearm({ mag: buildPistolMag(), muzzleZ: -0.156 });
+  }
+
+  // 기관권총: 같은 권총 몸통에 보정기(슬라이드와 함께 움직임) · 긴 탄창
+  buildMpistol() {
+    return this.buildSidearm({ mag: buildMpistolMag(), comp: buildCompParts(), muzzleZ: -0.18 });
+  }
+
+  buildSidearm({ mag: magParts, comp = null, muzzleZ }) {
     const g = new THREE.Group();
     this.mount(g, buildPistolFrame());
     const slide = new THREE.Group();
     this.mount(slide, buildPistolSlide());
+    if (comp) this.mount(slide, comp);
     g.add(slide);
     const mag = hideableBone(new THREE.Group());
     const magHome = new V3(0, 0.0, -0.002);
     mag.position.copy(magHome);
     mag.rotation.x = -0.36;
-    this.mount(mag, buildPistolMag());
+    this.mount(mag, magParts);
     g.add(mag);
     const core = new THREE.Mesh(rbox(0.003, 0.008, 0.05, 0.001), this.mats.core);
     core.position.set(0.0132, 0.008, -0.085);
@@ -775,7 +1037,7 @@ export class ViewModel {
       thumb: { yaw: 0.25, roll: 0.0, curl: [0.0, 0.05, 0.05] },
     }, { at: new V3(-0.006, -0.06, -0.012), f: new V3(0.1, -0.3, -0.95), b: new V3(-1, -0.05, 0.1), anchor: new V3(0, -0.04, -0.075), arm: new V3(-0.42, -0.55, 0.72), watch: true });
     const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, PB, -0.156);
+    muzzle.position.set(0, PB, muzzleZ);
     g.add(muzzle);
     const port = new THREE.Object3D();
     port.position.set(0.014, 0.046, -0.03);
@@ -833,7 +1095,7 @@ export class ViewModel {
   }
 
   // 긴 총 공통: 총 부품 + 탄창(또는 펌프) + 합력 코어 + 두 손
-  buildLong({ parts, mag, magHome, leftAt, muzzleZ, bore, port, sight, eye, hip, hipRot, scale, kind = 'long', coreAt, dot = null }) {
+  buildLong({ parts, mag, magHome, leftAt, muzzleZ, bore, port, sight, eye, hip, hipRot, scale, kind = 'long', coreAt, dot = null, reticleKind = 'dot' }) {
     const g = new THREE.Group();
     this.mount(g, parts);
     let magBone = null;
@@ -863,16 +1125,25 @@ export class ViewModel {
     const portO = new THREE.Object3D();
     portO.position.copy(port);
     g.add(portO);
-    // 도트 조준경 점 (정조준 때만)
+    // 도트 조준경 점 · 반사식 꺾쇠 (정조준 때만, 무한 원점에 맺힘)
     let reticle = null;
     if (dot) {
       reticle = new THREE.Group();
       reticle.position.copy(dot);
       const D = 2.5;
-      const m = new THREE.Mesh(new THREE.CircleGeometry(D * Math.tan(0.0032), 16), this.reticleMat);
-      m.position.z = -D;
-      m.renderOrder = 5;
-      reticle.add(m);
+      const add = (geo, x = 0, y = 0, rz = 0) => {
+        const m = new THREE.Mesh(geo, this.reticleMat);
+        m.position.set(x, y, -D);
+        m.rotation.z = rz;
+        m.renderOrder = 5;
+        reticle.add(m);
+      };
+      if (reticleKind === 'chevron') {
+        // ^ 모양 꺾쇠: 꼭짓점이 조준점
+        const L = D * 0.016, W = D * 0.003;
+        for (const sx of [-1, 1]) add(new THREE.PlaneGeometry(W, L), sx * L * 0.35, -L * 0.36, sx * 0.78);
+        add(new THREE.CircleGeometry(D * 0.0013, 10), 0, -D * 0.009);
+      } else add(new THREE.CircleGeometry(D * Math.tan(0.0032), 16));
       reticle.visible = false;
       g.add(reticle);
     }
@@ -911,6 +1182,47 @@ export class ViewModel {
       coreAt: new V3(-0.029, 0.035, -0.3),
       sight: new V3(0, SCOPE.y, SCOPE.z + 0.2), eye: 0.12, scale: 0.72,
       hip: new V3(0.18, -0.18, -0.4), hipRot: new THREE.Euler(0.02, 0.03, 0.06),
+    });
+  }
+
+  buildCarbine() {
+    return this.buildLong({
+      parts: buildCarbineParts(), mag: buildMagParts(), magHome: new V3(0, -0.032, -0.044),
+      leftAt: new V3(0, RB, -0.25), muzzleZ: -0.412, bore: RB, port: new V3(0.02, 0.05, -0.008),
+      coreAt: new V3(-0.0275, RB + 0.004, -0.2), dot: new V3(0, CDOT.y, CDOT.z),
+      sight: new V3(0, CDOT.y, CDOT.z), eye: 0.21, scale: 0.82,
+      hip: new V3(0.165, -0.15, -0.33), hipRot: new THREE.Euler(0.02, 0.035, 0.07),
+    });
+  }
+
+  buildBurst() {
+    return this.buildLong({
+      parts: buildBurstParts(), mag: buildMagParts(), magHome: new V3(0, -0.032, -0.044),
+      leftAt: new V3(0, RB - 0.002, -0.3), muzzleZ: -0.6, bore: RB, port: new V3(0.02, 0.05, -0.008),
+      coreAt: new V3(-0.03, RB + 0.004, -0.33), dot: new V3(0, REFLEX.y, REFLEX.z), reticleKind: 'chevron',
+      sight: new V3(0, REFLEX.y, REFLEX.z), eye: 0.2, scale: 0.8,
+      hip: new V3(0.17, -0.152, -0.34), hipRot: new THREE.Euler(0.02, 0.035, 0.07),
+    });
+  }
+
+  // 지정사수 소총: 정조준하면 조준경 화면(HUD)으로 바뀌므로 조준점은 경통 뒤
+  buildDmr() {
+    return this.buildLong({
+      parts: buildDmrParts(), mag: buildDmrMag(), magHome: new V3(0, -0.032, -0.044),
+      leftAt: new V3(0, RB, -0.4), muzzleZ: -0.8, bore: RB, port: new V3(0.02, 0.05, -0.008),
+      coreAt: new V3(-0.0285, RB + 0.004, -0.3),
+      sight: new V3(0, LPVO.y, LPVO.z + 0.16), eye: 0.12, scale: 0.74,
+      hip: new V3(0.175, -0.165, -0.37), hipRot: new THREE.Euler(0.02, 0.03, 0.065),
+    });
+  }
+
+  buildLmg() {
+    return this.buildLong({
+      parts: buildLmgParts(), mag: buildLmgBox(), magHome: new V3(0, -0.004, -0.06),
+      leftAt: new V3(0, LB - 0.006, -0.33), muzzleZ: -0.68, bore: LB, port: new V3(0.026, 0.045, -0.04),
+      coreAt: new V3(-0.028, LB + 0.004, -0.27), dot: new V3(0, LDOT.y, LDOT.z),
+      sight: new V3(0, LDOT.y, LDOT.z), eye: 0.22, scale: 0.76,
+      hip: new V3(0.18, -0.17, -0.36), hipRot: new THREE.Euler(0.025, 0.03, 0.06),
     });
   }
 
@@ -967,14 +1279,14 @@ export class ViewModel {
       this.cylT = 0.12;
     } else {
       // 무기마다 반동 세기: 기관단총은 가볍게, 산탄총·저격총은 크게
-      const k = { smg: 0.55, shotgun: 1.9, sniper: 2.3 }[this.current] ?? 1;
+      const k = { smg: 0.55, carbine: 0.8, burst: 0.85, lmg: 1.05, dmr: 1.6, shotgun: 1.9, sniper: 2.3 }[this.current] ?? 1;
       this.kick.impulse(new V3(r() * 0.07 * s, 0.07 * s * k, 0.95 * s * Math.sqrt(k)));
       this.kickRot.impulse(new V3((1.9 + Math.random() * 0.7) * s * k, r() * 0.8 * s, r() * 1.6 * s * Math.min(1.4, k)));
       if (kind === 'pump') this.pumpT = 0.55;
     }
     this.flashT = 0.045;
     this.flash.material.rotation = Math.random() * Math.PI;
-    const big = { rifle: 0.2, shotgun: 0.3, sniper: 0.32, smg: 0.12, sheriff: 0.2 }[this.current] ?? 0.14;
+    const big = { rifle: 0.2, carbine: 0.24, burst: 0.19, dmr: 0.26, lmg: 0.24, shotgun: 0.3, sniper: 0.32, smg: 0.12, sheriff: 0.2, mpistol: 0.15 }[this.current] ?? 0.14;
     const sz = big * (0.85 + Math.random() * 0.3) * (ads ? 0.8 : 1);
     this.flash.scale.set(sz, sz, sz);
   }

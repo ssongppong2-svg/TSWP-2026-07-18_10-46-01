@@ -1090,6 +1090,125 @@ function buildSheriff() {
   P.add('metal', profile([[-0.004, 0.0], [0.034, 0.0], [0.03, -0.024], [0.004, -0.024]], 0.008, 0.002, [[[0.008, -0.004], [0.026, -0.004], [0.024, -0.017], [0.01, -0.018]]]));
   return P;
 }
+// AR 계열 3인칭 공통: 하부(탄창 삽입구·손잡이) + 상부 리시버 + 장전 손잡이
+function arTP(P, bore) {
+  P.add('metal', profile([[-0.08, 0.035], [0.13, 0.035], [0.132, -0.04], [0.124, -0.048], [0.044, -0.048], [0.04, -0.012], [0.034, -0.034], [0.002, -0.036], [-0.003, -0.03], [-0.04, 0.0], [-0.08, 0.004]], 0.026, 0.003, [[[0.006, -0.012], [0.03, -0.012], [0.028, -0.027], [0.008, -0.027]]]));
+  P.add('furn', profile([[-0.002, -0.004], [0.012, -0.03], [-0.02, -0.105], [-0.058, -0.112], [-0.066, -0.1], [-0.046, -0.01], [-0.034, 0.004]], 0.032, 0.005));
+  P.add('metal', rbox(0.03, 0.034, 0.215, 0.005), [0, bore, -0.025]);
+  P.add('metal', rbox(0.022, 0.009, 0.215, 0.002), [0, 0.068, -0.025]);
+  P.add('metal', rbox(0.045, 0.01, 0.022, 0.003), [0, 0.06, 0.085]);
+  P.add('metal', cylG(0.007, 0.007, 0.03, 8), [0.02, 0.05, 0.03], [Math.PI / 2, 0, 0]);
+}
+const tpDot = (P, y, z) => {
+  P.add('poly', rbox(0.024, 0.014, 0.03, 0.003), [0, y - 0.018, z]);
+  P.add('metal', cylG(0.014, 0.014, 0.042, 12), [0, y, z], [Math.PI / 2, 0, 0]);
+  P.add('lens', cylG(0.011, 0.011, 0.002, 12), [0, y, z - 0.022], [Math.PI / 2, 0, 0]);
+};
+
+// 단축 카빈: 짧은 핸드가드 · 새장형 소염기 · 줄인 개머리판 · 도트
+const CARBINE = { bore: 0.047, butt: new V3(0, 0.01, 0.27), muzzle: new V3(0, 0.047, -0.43), magPos: RIFLE.magPos };
+function buildCarbine() {
+  const P = new Parts();
+  arTP(P, CARBINE.bore);
+  P.add('metal', cylG(0.025, 0.025, 0.19, 8), [0, CARBINE.bore, -0.225], [Math.PI / 2, 0, Math.PI / 8]);
+  P.add('metal', rbox(0.02, 0.008, 0.19, 0.002), [0, 0.075, -0.225]);
+  P.add('metal', cylG(0.0085, 0.0085, 0.06, 10), [0, CARBINE.bore, -0.35], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.012, 0.012, 0.05, 10), [0, CARBINE.bore, -0.405], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.01, 0.01, 0.06, 10), [0.032, 0.062, -0.27], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.015, 0.015, 0.17, 10), [0, 0.04, 0.17], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.12, 0.064], [-0.255, 0.07], [-0.267, 0.064], [-0.267, -0.055], [-0.253, -0.062], [-0.18, -0.016], [-0.125, 0.018]], 0.042, 0.006));
+  P.add('rubber', rbox(0.044, 0.124, 0.014, 0.005), [0, 0.006, 0.27]);
+  tpDot(P, 0.096, -0.04);
+  P.add('accent', rbox(0.052, 0.052, 0.008, 0.01), [0, CARBINE.bore, -0.15]);
+  return P;
+}
+
+// 3점사 소총: 둥근 핸드가드 · 3갈래 소염기 · 고정 개머리판 · 반사식 조준기
+const BURST = { bore: 0.047, butt: new V3(0, 0.0, 0.345), muzzle: new V3(0, 0.047, -0.6), magPos: RIFLE.magPos };
+function buildBurstTP() {
+  const P = new Parts();
+  arTP(P, BURST.bore);
+  P.add('poly', cylG(0.027, 0.027, 0.29, 10), [0, BURST.bore, -0.27], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.029, 0.029, 0.012, 10), [0, BURST.bore, -0.125], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0088, 0.0088, 0.14, 10), [0, BURST.bore, -0.49], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.022, 0.02, 0.026, 0.003), [0, BURST.bore + 0.002, -0.44]);
+  P.add('metal', cylG(0.012, 0.01, 0.04, 6), [0, BURST.bore, -0.578], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.085, 0.064], [-0.33, 0.066], [-0.342, 0.058], [-0.342, -0.07], [-0.326, -0.077], [-0.2, -0.03], [-0.11, 0.0], [-0.085, 0.016]], 0.042, 0.006));
+  P.add('rubber', rbox(0.045, 0.138, 0.014, 0.005), [0, -0.004, 0.345]);
+  P.add('poly', rbox(0.03, 0.012, 0.048, 0.003), [0, 0.079, -0.05]);
+  P.add('poly', rbox(0.036, 0.03, 0.012, 0.003), [0, 0.098, -0.062], [-0.12, 0, 0]);
+  P.add('lens', rbox(0.028, 0.024, 0.002, 0.001), [0, 0.098, -0.056], [-0.12, 0, 0]);
+  P.add('accent', rbox(0.056, 0.056, 0.008, 0.012), [0, BURST.bore, -0.4]);
+  return P;
+}
+
+// 지정사수 소총: 긴 핸드가드 · 홈 판 총열 · 제퇴기 · 볼 받침 개머리판 · 저배율 조준경
+const DMR3 = { bore: 0.047, butt: new V3(0, -0.005, 0.355), muzzle: new V3(0, 0.047, -0.8), magPos: new V3(0, -0.035, -0.088) };
+function buildDmrTP() {
+  const P = new Parts();
+  arTP(P, DMR3.bore);
+  P.add('metal', cylG(0.026, 0.026, 0.42, 8), [0, DMR3.bore, -0.335], [Math.PI / 2, 0, Math.PI / 8]);
+  P.add('metal', rbox(0.02, 0.008, 0.42, 0.002), [0, 0.076, -0.335]);
+  P.add('metal', cylG(0.011, 0.011, 0.2, 10), [0, DMR3.bore, -0.645], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.026, 0.024, 0.052, 0.005), [0, DMR3.bore, -0.771]);
+  P.add('metal', cylG(0.015, 0.015, 0.17, 10), [0, 0.04, 0.17], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.1, 0.07], [-0.33, 0.072], [-0.346, 0.066], [-0.346, -0.086], [-0.33, -0.092], [-0.24, -0.05], [-0.17, -0.02], [-0.1, 0.0]], 0.044, 0.006));
+  P.add('furn', rbox(0.036, 0.024, 0.13, 0.008), [0, 0.09, 0.24]);
+  P.add('rubber', rbox(0.046, 0.16, 0.016, 0.005), [0, -0.01, 0.355]);
+  for (const z of [-0.13, -0.02]) P.add('metal', rbox(0.036, 0.034, 0.018, 0.004), [0, 0.09, z]);
+  P.add('metal', cylG(0.0155, 0.0155, 0.2, 12), [0, 0.106, -0.07], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.022, 0.0155, 0.06, 12), [0, 0.106, -0.2], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.019, 0.0155, 0.05, 12), [0, 0.106, 0.045], [Math.PI / 2, 0, 0]);
+  P.add('lens', cylG(0.02, 0.02, 0.002, 12), [0, 0.106, -0.231], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.01, 0.01, 0.018, 8), [0, 0.128, -0.07]);
+  P.add('accent', rbox(0.053, 0.053, 0.008, 0.01), [0, DMR3.bore, -0.2]);
+  return P;
+}
+function buildDmrMagTP() {
+  const P = new Parts();
+  P.add('poly', rbox(0.026, 0.1, 0.085, 0.004), [0, -0.05, 0.0], [0.06, 0, 0]);
+  return P;
+}
+
+// 경기관총: 큰 상자 몸통 · 급탄 덮개 · 방열 덮개 · 두꺼운 총열 · 양각대 · 상자 탄창 · 고정 개머리판
+const LMG3 = { bore: 0.05, butt: new V3(0, -0.008, 0.352), muzzle: new V3(0, 0.05, -0.68), magPos: new V3(0, -0.004, -0.11) };
+function buildLmgTP() {
+  const P = new Parts();
+  gripTP(P);
+  P.add('metal', rbox(0.05, 0.072, 0.3, 0.006), [0, 0.035, -0.06]);
+  P.add('metal', rbox(0.054, 0.018, 0.19, 0.004), [0, 0.079, -0.03]);
+  P.add('metal', rbox(0.016, 0.034, 0.056, 0.003), [-0.032, 0.046, -0.06]);
+  P.add('poly', rbox(0.05, 0.048, 0.22, 0.01), [0, LMG3.bore - 0.004, -0.31]);
+  P.add('metal', cylG(0.0128, 0.0128, 0.21, 10), [0, LMG3.bore, -0.525], [Math.PI / 2, 0, 0]);
+  P.add('metal', rbox(0.024, 0.04, 0.026, 0.004), [0, LMG3.bore + 0.006, -0.6]);
+  P.add('metal', cylG(0.0138, 0.0138, 0.05, 10), [0, LMG3.bore, -0.652], [Math.PI / 2, 0, 0]);
+  P.add('poly', cylG(0.0085, 0.0085, 0.09, 8), [-0.038, LMG3.bore + 0.004, -0.4], [Math.PI / 2, 0, 0]);
+  for (const sx of [-1, 1]) P.add('metal', cylG(0.0056, 0.0056, 0.2, 6), [sx * 0.014, LMG3.bore - 0.04, -0.53], [Math.PI / 2, 0, 0]);
+  P.add('furn', profile([[-0.09, 0.066], [-0.33, 0.06], [-0.346, 0.054], [-0.346, -0.08], [-0.33, -0.086], [-0.22, -0.04], [-0.14, -0.012], [-0.09, 0.004]], 0.046, 0.006));
+  P.add('rubber', rbox(0.048, 0.138, 0.016, 0.005), [0, -0.01, 0.352]);
+  tpDot(P, 0.118, -0.03);
+  P.add('accent', rbox(0.053, 0.051, 0.008, 0.01), [0, LMG3.bore - 0.004, -0.39]);
+  return P;
+}
+function buildLmgBoxTP() {
+  const P = new Parts();
+  P.add('poly', rbox(0.052, 0.11, 0.104, 0.006), [-0.01, -0.058, 0.0]);
+  return P;
+}
+
+// 기관권총: 권총 + 보정기 + 긴 탄창
+const MPISTOL = { muzzle: new V3(0, 0.035, -0.182) };
+function buildMpistolTP() {
+  const P = buildPistol();
+  P.add('metal', rbox(0.026, 0.03, 0.026, 0.004), [0, 0.035, -0.166]);
+  return P;
+}
+function buildMpistolMagTP() {
+  const P = new Parts();
+  P.add('poly', rbox(0.019, 0.14, 0.03, 0.004), [0, -0.07, 0.0]);
+  P.add('poly', rbox(0.024, 0.012, 0.04, 0.004), [0, -0.142, 0.0]);
+  return P;
+}
 function buildEmpty() {
   const P = new Parts();
   P.add('metal', rbox(0.002, 0.002, 0.002, 0.0005), [0, 0, 0]);
@@ -1190,15 +1309,22 @@ const GRIPS = {
 const longGrip = (y, z) => ({ R: GRIPS.rifle.R, L: { p: new V3(-0.004, y, z), t: GRIPS.rifle.L.t, w: GRIPS.rifle.L.w } });
 
 // 3인칭 총 목록: 주무기(긴 총)는 소총 자세, 보조무기는 권총 자세
-const LONG = new Set(['rifle', 'smg', 'shotgun', 'sniper']);
+const LONG = new Set(['rifle', 'smg', 'shotgun', 'sniper', 'carbine', 'burst', 'dmr', 'lmg']);
 const GUN3P = {
   rifle: { build: buildRifle, mag: buildRifleMag, magPos: RIFLE.magPos, muzzle: RIFLE.muzzle, butt: RIFLE.butt, grip: GRIPS.rifle },
   smg: { build: buildSmg, mag: buildSmgMag, magPos: SMG.magPos, muzzle: SMG.muzzle, butt: SMG.butt, grip: longGrip(SMG.bore - 0.006, -0.22) },
   shotgun: { build: buildShotgun, mag: buildShotgunPump, magPos: SHOTGUN.magPos, muzzle: SHOTGUN.muzzle, butt: SHOTGUN.butt, grip: longGrip(0.022, -0.31), pump: true },
   sniper: { build: buildSniper, mag: buildSniperMag, magPos: SNIPER.magPos, muzzle: SNIPER.muzzle, butt: SNIPER.butt, grip: longGrip(SNIPER.bore - 0.012, -0.33) },
+  carbine: { build: buildCarbine, mag: buildRifleMag, magPos: CARBINE.magPos, muzzle: CARBINE.muzzle, butt: CARBINE.butt, grip: longGrip(CARBINE.bore - 0.004, -0.25) },
+  burst: { build: buildBurstTP, mag: buildRifleMag, magPos: BURST.magPos, muzzle: BURST.muzzle, butt: BURST.butt, grip: longGrip(BURST.bore - 0.004, -0.3) },
+  dmr: { build: buildDmrTP, mag: buildDmrMagTP, magPos: DMR3.magPos, muzzle: DMR3.muzzle, butt: DMR3.butt, grip: longGrip(DMR3.bore - 0.004, -0.38) },
+  lmg: { build: buildLmgTP, mag: buildLmgBoxTP, magPos: LMG3.magPos, muzzle: LMG3.muzzle, butt: LMG3.butt, grip: longGrip(0.022, -0.33) },
   pistol: { build: buildPistol, mag: buildPistolMag, muzzle: PISTOL.muzzle, grip: GRIPS.pistol },
+  mpistol: { build: buildMpistolTP, mag: buildMpistolMagTP, muzzle: MPISTOL.muzzle, grip: GRIPS.pistol },
   sheriff: { build: buildSheriff, mag: buildEmpty, muzzle: SHERIFF.muzzle, grip: GRIPS.pistol },
 };
+// 3인칭 발사 반동 세기 (몸이 뒤로 밀리는 정도)
+const KICK3P = { shotgun: 1.6, sniper: 1.6, sheriff: 1.6, dmr: 1.3, lmg: 1.1, carbine: 0.85, smg: 0.7, mpistol: 0.6 };
 const slotOf = (W) => (W === 'knife' ? 'knife' : LONG.has(W) ? 'primary' : 'secondary');
 
 // 요원 한 명의 3D 모형 + 애니메이션 (걷기·앉기·기울이기·조준·재장전·락픽·피격 움찔·쓰러짐)
@@ -1564,7 +1690,7 @@ export class AgentView {
     const since = a.sinceShot ?? 99;
     if (a.alive && since < this.lastSince - 1e-4 && since < 0.2 && !melee) {
       const pistol = !LONG.has(W);
-      const heavy = W === 'shotgun' || W === 'sniper' || W === 'sheriff' ? 1.6 : W === 'smg' ? 0.7 : 1;
+      const heavy = KICK3P[W] ?? 1;
       this.kick.v.x += (pistol ? 9 : 6 + Math.random() * 2) * heavy;
       this.kick.v.z += (pistol ? 2.2 : 2.8) * heavy;
       this.kick.v.y += (Math.random() - 0.5) * 3;

@@ -47,6 +47,16 @@ export const WEAPON_ICONS = {
   shotgun: `<svg viewBox="0 0 120 30" fill="currentColor"><path d="M2 10h70V8h44v6H76v3h-8l-2 4H50v-3H36l-8 9H16l5-9H2z"/><path d="M78 16h24v5H78z"/></svg>`,
   smg: `<svg viewBox="0 0 90 40" fill="currentColor"><path d="M4 10h22l4-4h40v4h16v6H70l-2 3H54v16h-8l-2-16H34l-6 8H18l3-8H4z"/><path d="M70 19h6v9h-6z"/></svg>`,
   sniper: `<svg viewBox="0 0 140 36" fill="currentColor"><path d="M2 16h30l4-4h50v4h38v3h22v4h-22v2H82l-4 3h-8v7h-8l-2-7H44l-8 7H26l3-7H2z"/><path d="M44 5h34v6H44z"/><path d="M39 4h5v8h-5zM78 4h5v8h-5z"/></svg>`,
+  // 기관권총: 권총 몸체 + 긴 탄창 + 앞손잡이
+  mpistol: `<svg viewBox="0 0 70 42" fill="currentColor"><path d="M2 6h60v10H38l-2 4h-4l-2 20h-9l2-20h-3l-3-4H2z"/><path d="M46 16h6v11h-6z"/><path d="M62 9h5v4h-5z"/></svg>`,
+  // 단축 카빈: 짧은 총열 · 접이식 개머리 · 조준기
+  carbine: `<svg viewBox="0 0 104 38" fill="currentColor"><path d="M2 14h6l2-4h10l3-2h44v-1h7v1h14v4h8v4h-8v4H64l-3 3h-7v11h-8l-2-11H34l-6 8H18l4-8h-6l-2-3H2z"/><path d="M38 2h12v6H38z"/></svg>`,
+  // 3점사 소총: 운반 손잡이 · 곧은 탄창
+  burst: `<svg viewBox="0 0 120 38" fill="currentColor"><path d="M4 16h22l4-4h44v-2h8v2h22v4h12v4h-12v3H74l-3 3h-8l-2 10h-9l1-10H40l-7 9H22l4-9H4z"/><path d="M44 4h26v3h-3v3h-2V7H51v3h-2V7h-5z"/></svg>`,
+  // 지정사수 소총: 긴 총열 · 저배율 조준경 · 짧은 탄창
+  dmr: `<svg viewBox="0 0 140 38" fill="currentColor"><path d="M2 17h28l6-5h50v3h32v3h20v4h-20v2H84l-4 3h-6v8h-8l-2-8H46l-9 7H26l3-7H2z"/><path d="M46 4h28v6H46z"/><path d="M50 10h3v2h-3zM67 10h3v2h-3z"/></svg>`,
+  // 경기관총: 상자 탄창 · 양각대 · 손잡이
+  lmg: `<svg viewBox="0 0 140 46" fill="currentColor"><path d="M2 14h24l4-4h56v-2h10v2h30v4h12v4h-12v4H90l-3 3H74v2h-6l-2-2H48l-6 8H30l4-8H2z"/><path d="M50 22h17v14H50z"/><path d="M111 22l-7 20h3l5-14 5 14h3l-7-20z"/><path d="M64 3h16v3h-3v3h-2V6h-6v3h-2V6h-3z"/></svg>`,
 };
 
 // 방탄·처치 표시 아이콘

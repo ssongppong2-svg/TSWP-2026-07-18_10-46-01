@@ -61,8 +61,8 @@ export function makeOpRoster(playerName, count, { me = true } = {}) {
   return roster;
 }
 
-// 용의자 무장 (무작위): 권총 · 기관단총 · 산탄총 · 소총, 일부는 경량 방탄
-const SUSPECT_ARMS = [['pistol', 0.25], ['smg', 0.32], ['shotgun', 0.18], ['rifle', 0.25]];
+// 용의자 무장 (무작위): 권총 · 기관단총 · 산탄총 · 단축 카빈 · 소총 (모두 주무기, 권총은 그대로), 일부는 경량 방탄
+const SUSPECT_ARMS = [['pistol', 0.2], ['smg', 0.28], ['shotgun', 0.16], ['carbine', 0.14], ['rifle', 0.22]];
 
 export class Operation {
   constructor(match, mission, { difficulty = 'normal' } = {}) {

@@ -4,6 +4,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeSolidMaterial } from './agent-view.js';
 import { createBombScreen, glowTexture, holeTexture, labelTexture, smokeTexture } from './textures.js';
 
+// 3인칭 총구 불꽃 크기 (배율)
+const FLASH3P = { smg: 0.55, mpistol: 0.75, pistol: 0.85, carbine: 1.25, burst: 1, rifle: 1, lmg: 1.2, dmr: 1.3, sniper: 1.45, shotgun: 1.4, sheriff: 1.15 };
+
 // 포스 패치 표시 색 (채도를 낮춘 현실적인 톤)
 export const PATCH_COLORS = {
   gravityVeil: '#8fa3c9',
@@ -558,6 +561,10 @@ export class Effects {
       f.sprite.position.copy(muzzlePos);
       f.sprite.visible = true;
       f.t = 0.05;
+      // 총마다 불꽃 크기 (짧은 총열·큰 탄일수록 큼, 소음기 기관단총은 작게)
+      const sz = 0.45 * (FLASH3P[e.weapon] ?? 1) * (0.85 + Math.random() * 0.3);
+      f.sprite.scale.set(sz, sz, sz);
+      f.sprite.material.rotation = Math.random() * Math.PI;
       f.sprite.material.color.set(e.amp ? '#ffb15a' : '#ffc27a');
     }
     this.lights?.flash(muzzlePos, isLocal ? 9 : 14);

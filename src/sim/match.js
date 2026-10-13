@@ -286,7 +286,7 @@ export class Match {
       a.adsT = 0;
       a.reloadT = a.swapT = a.fireCd = a.meleeCd = 0;
       a.bloom = a.recoil = a.recoilYaw = a.punch = 0;
-      a.sprayIndex = 0;
+      a.sprayIndex = a.burstLeft = 0;
       a.ampT = a.bounceT = a.tagT = 0;
       a.crouch = a.lean = a.leanOffset = 0;
       a.stamina = STAMINA.max;
@@ -819,6 +819,7 @@ export class Match {
       a.swapT = WEAPONS[a.weapon].draw;
       a.reloadT = 0;
       a.bloom = 0;
+      a.burstLeft = 0;
       a.triggerLatch = intent.fire;
       a.adsLatch = intent.ads;
       this.emit('swap', { agent: a, weapon: a.weapon });
@@ -858,6 +859,7 @@ export class Match {
     }
     const startReload = () => {
       a.reloadT = w.reload;
+      a.burstLeft = 0;
       this.makeNoise(a, 'reload');
       this.emit('reload', { agent: a, weapon: w.id });
     };
@@ -867,19 +869,33 @@ export class Match {
       return;
     }
     const pressed = intent.fire && !a.triggerLatch;
-    const want = w.auto ? intent.fire : pressed;
     a.triggerLatch = intent.fire;
+    // 점사 총: 한 번 당기면 w.burst발이 이어서 나감 (손을 떼도 끝까지 · 탄이 떨어지거나 못 쏘게 되면 멈춤)
+    if (w.burst && a.burstLeft > 0) {
+      if (!canFire || ws.mag <= 0) a.burstLeft = 0;
+      else if (a.fireCd <= 0) this.fire(a, w, ws);
+      return;
+    }
+    const want = w.auto ? intent.fire : pressed;
     if (!want || !canFire || a.fireCd > 0) return;
     if (ws.mag <= 0) {
       if (pressed) this.emit('dryFire', { agent: a });
       return;
+    }
+    if (w.burst) {
+      a.burstLeft = w.burst;
+      a.sprayIndex = 0; // 점사마다 같은 반동 무늬
     }
     this.fire(a, w, ws);
   }
 
   fire(a, w, ws) {
     ws.mag--;
-    a.fireCd = 60 / w.rpm;
+    if (w.burst) {
+      // 점사 안에서는 빠르게, 점사가 끝나면 다음 점사까지 쉼
+      a.burstLeft = Math.max(0, (a.burstLeft ?? 0) - 1);
+      a.fireCd = 60 / (a.burstLeft > 0 ? w.burstRpm : w.rpm);
+    } else a.fireCd = 60 / w.rpm;
     if (a.sinceShot > 0.4) a.sprayIndex = 0;
     a.sinceShot = 0;
     // 빗나감: 움직이는 빠르기만큼 커짐 (멈춰 서서 쏘면 정확) · 공중에서는 크게
@@ -1193,6 +1209,11 @@ export class Match {
         t.armorKind = null;
       }
       armorHit = r.penetrated ? 'pen' : 'block';
+    }
+    // 저격총 머리: 헬멧이 있어도 한 방 (헬멧은 그대로 닳음)
+    if (headshot && WEAPONS[weapon]?.headKill) {
+      hpLoss = Math.max(hpLoss, t.hp);
+      if (armorHit) armorHit = 'pen';
     }
     const dealt = Math.round(armorLoss) + Math.min(Math.max(0, t.hp), hpLoss);
     t.hp -= hpLoss;

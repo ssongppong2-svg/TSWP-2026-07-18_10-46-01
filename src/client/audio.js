@@ -575,6 +575,13 @@ const GUN = {
   shotgun: { vol: 0.86, crack: 1900, body: [1000, 300, 0.18], thump: [54, 26, 0.32, 1.25], mech: [[0.34, 1500, 0.55, 0.06], [0.48, 2200, 0.6, 0.05]], rev: 0.5, echo: 0.65 },
   smg: { vol: 0.52, crack: 3600, body: [2600, 1100, 0.05], thump: [118, 62, 0.08, 0.5], mech: [[0.02, 4400, 0.3]], rev: 0.22, echo: 0.25 },
   rifle: { vol: 0.72, crack: 2800, body: [1900, 650, 0.08], thump: [76, 36, 0.2, 1.0], mech: [[0.028, 3600, 0.4]], rev: 0.38, echo: 0.5 },
+  // 기관권총: 권총보다 가볍고 빠른 '탁탁탁' · 단축 카빈: 짧은 총열이라 폭음이 크고 거칠게 · 3점사 소총: 단단하고 짧게
+  mpistol: { vol: 0.56, crack: 3500, body: [2500, 1000, 0.05], thump: [112, 56, 0.08, 0.55], mech: [[0.022, 4100, 0.3]], rev: 0.24, echo: 0.28 },
+  carbine: { vol: 0.78, crack: 2500, body: [1700, 560, 0.095], thump: [70, 32, 0.22, 1.05], mech: [[0.026, 3500, 0.38]], rev: 0.42, echo: 0.55 },
+  burst: { vol: 0.7, crack: 3000, body: [2050, 720, 0.07], thump: [80, 38, 0.18, 0.95], mech: [[0.022, 3900, 0.34]], rev: 0.36, echo: 0.5 },
+  // 지정사수 소총: 큰 탄 · 깊은 폭음과 긴 울림 · 경기관총: 묵직한 연사 + 탄띠 고리 소리
+  dmr: { vol: 0.9, crack: 3300, body: [1450, 440, 0.12], thump: [56, 25, 0.36, 1.25], mech: [[0.03, 3000, 0.5]], rev: 0.6, echo: 0.8 },
+  lmg: { vol: 0.8, crack: 2700, body: [1650, 520, 0.1], thump: [64, 30, 0.26, 1.12], mech: [[0.028, 2600, 0.42], [0.046, 5200, 0.22, 0.012]], rev: 0.46, echo: 0.62 },
   sniper: { vol: 0.98, crack: 3800, body: [1600, 420, 0.13], thump: [50, 22, 0.45, 1.3], mech: [[0.55, 2200, 0.5, 0.04], [0.68, 3000, 0.45], [0.82, 2600, 0.5], [0.93, 1800, 0.55, 0.05]], rev: 0.7, echo: 0.9 },
 };
 function gunshot(a, t, pos, vol, spec) {
@@ -594,6 +601,11 @@ function gunshot(a, t, pos, vol, spec) {
   if (near < 0.9) a.noise(o, t, 0.16, { type: 'lowpass', freq: 900, gain: 0.9 * (1 - near), attack: 0.003, sweepTo: 240 });
   // 작동음은 가까울 때만 (내 총이면 확실히)
   if (near > 0.5) for (const [dt, f, g, len] of spec.mech) a.noise(o, t + dt, len ?? 0.022, { type: 'bandpass', freq: f, q: 6, gain: g * near, attack: 0.0006 });
+  // 실내(지붕 아래): 가까운 벽에서 바로 튕겨 오는 짧은 반사음 두 번 → 좁은 곳일수록 '쾅' 하고 울림
+  if ((a.indoorMap || a.cover > 0.5) && near > 0.25) {
+    a.noise(o, t + 0.019, 0.05, { type: 'bandpass', freq: b0 * 0.75, q: 0.9, gain: 0.5 * near, attack: 0.001, sweepTo: b1 });
+    a.noise(o, t + 0.043, 0.07, { type: 'bandpass', freq: b0 * 0.55, q: 0.8, gain: 0.32 * near, attack: 0.002, sweepTo: b1 * 0.8 });
+  }
 }
 
 const SOUNDS = {
@@ -616,9 +628,25 @@ const SOUNDS = {
   },
   smg: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.smg),
   sniper: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.sniper),
+  mpistol: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.mpistol),
+  carbine: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.carbine),
+  burst: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.burst),
+  dmr: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.dmr),
+  lmg: (a, t, pos, vol) => gunshot(a, t, pos, vol, GUN.lmg),
   ampShot(a, t) {
     const o = a.out(null, 0.15, 0.2, 0);
     a.tone(o, t, 0.08, { type: 'sawtooth', freq: 520, to: 780, gain: 0.12 });
+  },
+  // 탄창이 거의 비었을 때: 쏠 때마다 가벼운 쇳소리 (남은 탄을 귀로 앎) · 마지막 탄: 노리쇠가 뒤에 걸리는 '철컥'
+  lastRounds(a, t, pos, vol) {
+    const o = a.out(null, 0.2 * vol, 0.2, 0.02);
+    a.tone(o, t + 0.03, 0.05, { type: 'triangle', freq: 2700, gain: 0.25 });
+    a.click(o, t + 0.034, 5400, 0.3, 4);
+  },
+  boltLock(a, t) {
+    const o = a.out(null, 0.5, 0.3, 0.05);
+    a.click(o, t + 0.05, 2300, 0.9, 5);
+    a.noise(o, t + 0.056, 0.045, { type: 'bandpass', freq: 1700, q: 3, gain: 0.5 });
   },
   dry(a, t) {
     const o = a.out(null, 0.5, 0.1, 0.05);

@@ -539,7 +539,10 @@ export class Hud {
     // 조준점: 정조준(저격 조준경)·해체·상점 중에는 숨김
     const chOff = this.settings.crosshair === 'off';
     const scoped = !!w.scope && a.adsT > 0.5;
+    // 정조준하면 총의 조준기(도트·꺾쇠·가늠쇠)로 겨눔 → 화면 조준점은 숨김
+    const sighted = !w.melee && !a.equip && a.adsT > 0.7;
     this.set('scope', a.alive && !!w.scope && a.adsT > 0.85, (v) => E.scope.classList.toggle('show', v));
+    this.set('scopeKind', w.scope === 'lpvo', (v) => E.scope.classList.toggle('lpvo', v)); // 지정사수 저배율 조준경
     // 드론 조종 화면: 배터리·조작법, 보통 조준점은 숨김
     const drone = a.drone ? (m.drones ?? []).find((d) => d.id === a.drone) : null;
     this.set('drone', !!drone, (v) => {
@@ -560,7 +563,7 @@ export class Hud {
       E.mirror.classList.toggle('show', v);
       this.root.classList.toggle('mirroring', v);
     });
-    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || wheel !== null || shopOpen || drone || mirror), (v) => E.crosshair.classList.toggle('hide', v));
+    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || sighted || wheel !== null || shopOpen || drone || mirror), (v) => E.crosshair.classList.toggle('hide', v));
     this.hitT -= dt;
     if (this.hitT <= 0) E.hitmarker.classList.remove('show');
 
