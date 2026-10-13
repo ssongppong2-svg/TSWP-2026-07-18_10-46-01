@@ -135,6 +135,7 @@ export const BodycamShader = {
     flash: { value: 0 },
     blur: { value: 0 },
     rain: { value: 0 },
+    supp: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -142,7 +143,7 @@ export const BodycamShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain;
+    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp;
     varying vec2 vUv;
     float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
     vec2 lens(vec2 uv) {
@@ -187,15 +188,20 @@ export const BodycamShader = {
       float edge = dot(d, d);
       float ca = chroma * (0.4 + edge * 6.0) * (1.0 + damage * 3.0);
       vec3 col = sampleCA(uv, ca);
+      // 제압(총알이 바로 옆을 스침): 가장자리만 흐려지고 어두워짐 — 가운데 조준점 주변은 또렷하게
+      float rr = length((vUv - 0.5) * vec2(aspect, 1.0));
+      float sEdge = supp * smoothstep(0.28, 0.85, rr);
       // 큰 피해 직후 흐려짐
-      if (blur > 0.001) {
-        vec2 px = vec2(blur * 0.004);
+      float bl = blur + sEdge * 1.4;
+      if (bl > 0.001) {
+        vec2 px = vec2(bl * 0.004);
         col = (col + sampleCA(uv + vec2(px.x, 0.0), ca) + sampleCA(uv - vec2(px.x, 0.0), ca) + sampleCA(uv + vec2(0.0, px.y), ca) + sampleCA(uv - vec2(0.0, px.y), ca)) / 5.0;
       }
       col *= 1.0 - rim * 0.35 * rain;
       // 체력이 낮을수록 색이 조금 빠지고 가장자리가 붉게 물듦 (화면 가운데는 늘 잘 보이게 — 어둡게 가리지 않음)
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
-      col = mix(col, vec3(lum), damage * 0.4);
+      col = mix(col, vec3(lum), damage * 0.4 + supp * 0.22);
+      col *= 1.0 - sEdge * 0.5;
       float r = length((vUv - 0.5) * vec2(aspect, 1.0));
       float v = smoothstep(0.95, 0.25, r);
       col *= mix(1.0 - vignette - damage * 0.12, 1.0, v);
@@ -529,7 +535,7 @@ export class Stage {
   }
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
-  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0 } = {}) {
+  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0 } = {}) {
     const u = this.bodycam.uniforms;
     const on = !!this.settings.bodycam;
     // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
@@ -541,6 +547,7 @@ export class Stage {
     u.pulse.value = pulse;
     u.flash.value = flash;
     u.blur.value = blur;
+    u.supp.value = supp;
     u.rain.value = on && this.map?.weather === 'rain' ? this.lensWet ?? 1 : 0;
   }
 

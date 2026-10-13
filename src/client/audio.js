@@ -637,6 +637,14 @@ const SOUNDS = {
     const o = a.out(null, 0.15, 0.2, 0);
     a.tone(o, t, 0.08, { type: 'sawtooth', freq: 520, to: 780, gain: 0.12 });
   },
+  // 총알이 머리 옆을 스침: 아주 가까우면 날카로운 '딱'(음속을 넘은 탄의 충격파), 그다음 고음이 내려가며 '휙' 지나감
+  whiz(a, t, pos, vol) {
+    const d = a.dist(pos);
+    const o = a.out(pos, 0.6 * vol, 0.4, 0.05);
+    if (d < 0.9) a.noise(o, t, 0.012, { type: 'highpass', freq: 4300, gain: 1.4, attack: 0.0004 });
+    a.noise(o, t + 0.004, 0.14, { type: 'bandpass', freq: 3400 + Math.random() * 900, q: 2.4, gain: 0.85, attack: 0.004, sweepTo: 650 });
+    a.tone(o, t + 0.012, 0.1, { type: 'sine', freq: 2300 + Math.random() * 400, to: 850, gain: 0.07 });
+  },
   // 탄창이 거의 비었을 때: 쏠 때마다 가벼운 쇳소리 (남은 탄을 귀로 앎) · 마지막 탄: 노리쇠가 뒤에 걸리는 '철컥'
   lastRounds(a, t, pos, vol) {
     const o = a.out(null, 0.2 * vol, 0.2, 0.02);

@@ -481,7 +481,7 @@ export class ClientSync {
         if (!a || mine(a)) return;
         const weapon = WEAP[wi] ?? 'rifle';
         const speed = WEAPONS[weapon]?.speed ?? 300;
-        const proj = { id: `n${pid}`, pos: { x: ox, y: oy, z: oz }, prev: { x: ox, y: oy, z: oz }, vel: { x: dx * speed, y: dy * speed, z: dz * speed }, life: PROJECTILE.life, amp: !!amp, weapon };
+        const proj = { id: `n${pid}`, pos: { x: ox, y: oy, z: oz }, prev: { x: ox, y: oy, z: oz }, vel: { x: dx * speed, y: dy * speed, z: dz * speed }, life: PROJECTILE.life, amp: !!amp, weapon, team: a.team, ownerId: a.id };
         m.projectiles.push(proj);
         a.sinceShot = 0;
         m.emit('shot', { agent: a, weapon, origin: { x: ox, y: oy, z: oz }, dir: { x: dx, y: dy, z: dz }, amp: !!amp, projectile: proj });

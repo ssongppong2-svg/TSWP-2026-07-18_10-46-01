@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
-import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { PATCHES, PATCH_ORDER, WEAPONS } from '../sim/data.js';
 import { ClientSync, HostSync, InputRecorder, RemoteController, rosterFor, unpackPlan } from '../net/protocol.js';
 import { Match } from '../sim/match.js';
@@ -623,6 +623,15 @@ export class GameClient {
     });
     ev.on('swap', (e) => viewing(e.agent) && A.play('swap'));
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
+    // 총알이 내 머리 옆을 스침: 휙·딱 소리 + 고개가 살짝 움찔 (화면 가장자리 어둠은 제압 수치로)
+    ev.on('nearMiss', (e) => {
+      if (!viewing(e.agent) || !e.agent.alive) return;
+      const near = 1 - e.d / SUPPRESS.radius;
+      A.play('whiz', { pos: { x: e.x, y: e.y, z: e.z }, vol: 0.55 + near * 0.45 });
+      this.kickVel.x += (Math.random() - 0.5) * 0.02 * near;
+      this.kickVel.y += (Math.random() - 0.3) * 0.012 * near;
+      this.shake = Math.min(1, this.shake + 0.08 * near);
+    });
     ev.on('padLaunch', (e) => {
       A.play('pad', { pos: e.agent.pos, vol: viewing(e.agent) ? 1.2 : 1 });
       if (isMe(e.agent)) this.study.devices++;
@@ -819,7 +828,10 @@ export class GameClient {
     const flashed = va.alive ? Math.min(1, (va.flashT ?? 0) / 1.2) : 0;
     const stunned = va.alive ? Math.min(1, (va.stunT ?? 0) / 2.5) : 0;
     const gassed = va.alive && (va.gasT ?? 0) > 0 ? 1 : 0;
-    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25 });
+    // 제압: 화면 가장자리가 어두워지고 흐려짐 (빠르게 들어오고 천천히 빠짐)
+    const suppT = va.alive ? va.suppress ?? 0 : 0;
+    this.suppVis = (this.suppVis ?? 0) + (suppT - (this.suppVis ?? 0)) * Math.min(1, dt * (suppT > (this.suppVis ?? 0) ? 14 : 3));
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis });
     this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85));
     if (gassed && this.started && !this.paused) {
       this.coughT = (this.coughT ?? 0.5) - dt;

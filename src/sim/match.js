@@ -3,7 +3,7 @@ import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
 import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
 import {
-  BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, STAMINA, TEAM_SIZE, TEAMS, ULT, otherTeam,
+  BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, STAMINA, SUPPRESS, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
@@ -287,6 +287,7 @@ export class Match {
       a.reloadT = a.swapT = a.fireCd = a.meleeCd = 0;
       a.bloom = a.recoil = a.recoilYaw = a.punch = 0;
       a.sprayIndex = a.burstLeft = 0;
+      a.suppress = a.suppressHold = 0;
       a.ampT = a.bounceT = a.tagT = 0;
       a.crouch = a.lean = a.leanOffset = 0;
       a.stamina = STAMINA.max;
@@ -788,6 +789,11 @@ export class Match {
     a.fireCd = Math.max(0, a.fireCd - dt);
     a.meleeCd = Math.max(0, a.meleeCd - dt);
     a.sinceShot += dt;
+    // 제압은 잠깐 머문 뒤 줄어듦
+    if ((a.suppress ?? 0) > 0) {
+      a.suppressHold = (a.suppressHold ?? 0) - dt;
+      if (a.suppressHold <= 0) a.suppress = Math.max(0, a.suppress - SUPPRESS.decay * dt);
+    }
     if (!w.melee) {
       a.bloom = Math.max(0, a.bloom - w.bloomRecover * dt);
       if (a.sinceShot > 0.12) {
@@ -905,6 +911,8 @@ export class Match {
     // 이명·최루: 조준이 흔들림
     if ((a.stunT ?? 0) > 0) spread += EFFECT.stunSpread * Math.min(1, a.stunT / 2);
     if ((a.gasT ?? 0) > 0) spread += EFFECT.gasSpread;
+    // 제압: 총알이 바로 옆을 스치면 손이 떨림
+    spread += SUPPRESS.spread * (a.suppress ?? 0);
     // 숨이 차면 조준이 흔들림 (지구력이 바닥날수록)
     if ((a.stamina ?? STAMINA.max) < STAMINA.swayBelow) spread += ((STAMINA.swayBelow - a.stamina) / STAMINA.swayBelow) * STAMINA.sway;
     const aim = dirFromAngles(a.yaw + a.recoilYaw, a.pitch + a.recoil + a.punch);
@@ -1029,7 +1037,10 @@ export class Match {
       p.prev.y = p.pos.y;
       p.prev.z = p.pos.z;
       const next = { x: p.pos.x + p.vel.x * dt, y: p.pos.y + p.vel.y * dt, z: p.pos.z + p.vel.z * dt };
-      if (this.map.raycast(p.pos, next)) continue;
+      const wall = this.map.raycast(p.pos, next);
+      // 이 화면에서도 스침 판정 (휙 소리·화면 가장자리 — 피해는 방장이 판정)
+      this.nearMiss(p, p.pos, wall ? { x: wall.x, y: wall.y, z: wall.z } : next, null, !!wall);
+      if (wall) continue;
       p.pos.x = next.x;
       p.pos.y = next.y;
       p.pos.z = next.z;
@@ -1118,6 +1129,8 @@ export class Match {
         }
       }
       const at = (t) => ({ x: p.pos.x + (next.x - p.pos.x) * t, y: p.pos.y + (next.y - p.pos.y) * t, z: p.pos.z + (next.z - p.pos.z) * t });
+      // 머리 옆을 스친 탄 → 제압 (맞은 요원은 제외, 벽·문에 박힌 곳까지만)
+      if (!p.harmless) this.nearMiss(p, p.pos, tHit <= 1 ? at(tHit) : next, target, tHit <= 1);
       // CQB 작전: 연구원 (누가 쏜 탄이든 맞음)
       const hh = !p.harmless && this.op ? this.op.hitTest(p.pos, next, tHit) : null;
       if (hh) {
@@ -1191,6 +1204,35 @@ export class Match {
       if (p.life > 0) keep.push(p);
     }
     this.projectiles = keep;
+  }
+
+  // 총알이 머리 옆을 스침 → 제압 (같은 편·맞은 요원·이 탄이 이미 스친 요원은 제외)
+  //   a0→a1 = 이번 틱에 탄이 지난 구간. final = 여기서 멈춤(벽·몸) → 끝점이 가장 가까울 수 있음
+  nearMiss(p, a0, a1, hitAgent, final) {
+    if (p.harmless || p.team == null) return;
+    const R = SUPPRESS.radius;
+    const dx = a1.x - a0.x, dy = a1.y - a0.y, dz = a1.z - a0.z;
+    const L2 = dx * dx + dy * dy + dz * dz;
+    if (L2 < 1e-9) return;
+    for (const a of this.agents) {
+      if (!a.alive || a.team === p.team || a === hitAgent || p.whiz?.includes(a.id)) continue;
+      const e = eyePos(a);
+      let t = ((e.x - a0.x) * dx + (e.y - a0.y) * dy + (e.z - a0.z) * dz) / L2;
+      // 가장 가까운 점이 아직 앞에 있으면 다음 틱에 (단, 여기서 멈추면 끝점), 이미 지나갔으면 이전 틱에서 처리됨
+      if (t > 1 && !final) continue;
+      if (t < 0) continue;
+      t = Math.min(1, t);
+      const cx = a0.x + dx * t, cy = a0.y + dy * t, cz = a0.z + dz * t;
+      const d = Math.hypot(e.x - cx, e.y - cy, e.z - cz);
+      if (d > R) continue;
+      (p.whiz ??= []).push(a.id);
+      const w = WEAPONS[p.weapon];
+      const k = clamp((w?.damage ?? 11) / 11, 0.7, 1.8) * (w?.supp ?? 1) * (p.pellet ? 0.25 : 1);
+      const near = 1 - d / R;
+      a.suppress = Math.min(1, (a.suppress ?? 0) + SUPPRESS.add * k * (0.35 + 0.65 * near));
+      a.suppressHold = SUPPRESS.hold;
+      this.emit('nearMiss', { agent: a, x: cx, y: cy, z: cz, d, weapon: p.weapon, owner: p.ownerId ?? null });
+    }
   }
 
   // pen: 탄의 관통력, wear: 방탄을 닳게 하는 배율 (탄종). 방탄이 덮는 곳(몸통, 중량은 머리도)에 맞으면 관통 판정

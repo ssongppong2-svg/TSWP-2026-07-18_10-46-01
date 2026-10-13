@@ -292,6 +292,8 @@ export class BotBrain {
       if (intent.fire && d > 8 && wpn.auto && (this.crouchShooter || a.weapon === 'lmg')) intent.crouch = true;
       // 쏠 때는 멈추고(정확도), 쉬는 동안 좌우로 조금 움직임 (권총·기관단총·산탄총·카빈은 움직이며 쏨)
       const runAndGun = RUN_AND_GUN.has(a.weapon);
+      // 심하게 제압당하면 몸을 낮춤 (움직이며 쏘는 총은 그대로 움직임)
+      if ((a.suppress ?? 0) > 0.55 && !runAndGun) intent.crouch = true;
       if (!intent.fire || runAndGun) {
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
@@ -404,7 +406,8 @@ export class BotBrain {
     if (this.jitT <= 0) {
       this.jitT = 0.25;
       // 멀수록(어둡고 비 오는 밤) 조준이 흔들림 · 이명·눈부심·최루에 걸리면 크게 흔들림
-      const dazed = a ? 1 + Math.min(2, (a.stunT ?? 0) * 0.8 + (a.flashT ?? 0) * 1.2 + ((a.gasT ?? 0) > 0 ? 0.8 : 0)) : 1;
+      // 제압(총알이 옆을 스침)도 손을 떨게 함
+      const dazed = a ? 1 + Math.min(2, (a.stunT ?? 0) * 0.8 + (a.flashT ?? 0) * 1.2 + ((a.gasT ?? 0) > 0 ? 0.8 : 0) + (a.suppress ?? 0) * 1.6) : 1;
       const e = this.d.aimError * 0.35 * (1 + Math.max(0, range - 10) / 22) * dazed;
       this.jit.y = this.rng.range(-e, e);
       this.jit.p = this.rng.range(-e, e) * 0.6;

@@ -420,6 +420,7 @@ export const WEAPONS = {
     crouchSpread: 0.7, // 앉아서 쏘면 훨씬 안정
     moveMult: 0.86,
     adsMoveMult: 0.4,
+    supp: 1.5, // 제압 세기 배율 (긁어서 머리를 못 들게)
   },
   knife: {
     id: 'knife',

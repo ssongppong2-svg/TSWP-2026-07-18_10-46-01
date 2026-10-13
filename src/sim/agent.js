@@ -81,6 +81,8 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     recoilYaw: 0,
     sprayIndex: 0,
     burstLeft: 0, // 점사 총: 이번 점사에서 남은 발 수
+    suppress: 0, // 제압 (0~1): 적 총알이 바로 옆을 스치면 쌓임
+    suppressHold: 0,
     punch: 0, // 피격 시 조준이 튀는 양
     tagT: 0, // 피격 시 잠깐 느려지는 시간
     sinceShot: 99,

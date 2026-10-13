@@ -116,6 +116,10 @@ export const STAMINA = {
   sway: 0.012,
 };
 
+// 제압: 적 총알이 머리 가까이(radius m 안)를 스치면 쌓이고(add × 총 세기 × 가까움), hold초 뒤부터 decay/초로 줄어듦.
+// 쌓일수록 조준이 흔들림 (빗나감 +spread × 제압) — 사람·봇 모두
+export const SUPPRESS = { radius: 1.6, add: 0.2, hold: 0.6, decay: 0.5, spread: 0.035 };
+
 // 소리: 적이 들을 수 있는 거리(m). 정보는 소리로만 얻는다.
 export const NOISE = {
   rifle: 75,
