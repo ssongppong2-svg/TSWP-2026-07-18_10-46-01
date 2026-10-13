@@ -454,7 +454,7 @@ export class GameClient {
       const v = audible(e, 25);
       if (v > 0) A.play('gadgetBreak', { pos: e, vol: v });
       const name = e.dev.kind === 'cam' ? '카메라' : '경보 센서';
-      if (e.dev.team === this.team) this.hud.banner(`${name} 부서짐`, e.dev.ownerId === this.player.id ? '내 장비' : '', 'small');
+      if (e.dev.team === this.team) this.hud.banner(`${name} 부서짐`, [e.place && `적 근처 · ${e.place}`, e.dev.ownerId === this.player.id && '내 장비'].filter(Boolean).join(' · '), 'small');
       else if (e.by?.id === this.player.id) this.hud.banner(`적 ${name} 파괴`, '', 'good');
     });
     ev.on('pulse', (e) => {

@@ -1,6 +1,6 @@
 import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
 import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
-import { TEAMS } from '../sim/constants.js';
+import { ROUND_TIME, TEAMS } from '../sim/constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
 import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
 import { DOOR } from '../sim/door-geo.js';
@@ -238,6 +238,8 @@ export class BotBrain {
       desired = anglesTo(eye, this.alertLook.point);
       desired.pitch = clamp(desired.pitch, -0.5, 0.5);
     }
+    // 심장 박동 센서: 소리·무전이 난 쪽으로 부채꼴을 돌림
+    if (!desired && this.pulsePlan?.at) desired = { yaw: anglesTo(eye, this.pulsePlan.at).yaw, pitch: 0 };
 
     // ── 이동 방향 정하기 (소리를 듣고 경계 중이면 멈춤)
     let wish = null;
@@ -549,12 +551,19 @@ export class BotBrain {
     const consider = (pos, maxD, out = 0) => {
       const dx = pos.x - eye.x, dz = pos.z - eye.z, l = Math.hypot(dx, dz);
       if (l > Math.min(bestD, maxD) || (l > 3 && (dx * fx + dz * fz) / l < 0.2)) return;
+      // 벽·천장에 붙은 장비는 앞면이 이쪽을 향해야 보임 (문틀 안쪽 면의 센서는 문 앞에 거의 와야 눈에 띔)
+      if (out && pos.nx != null) {
+        const dy = pos.y - eye.y, l3 = Math.hypot(dx, dy, dz) || 1;
+        if (-(dx * pos.nx + dy * (pos.ny ?? 0) + dz * pos.nz) / l3 < 0.35) return;
+      }
       if (!match.map.lineOfSight(eye, out ? { x: pos.x + (pos.nx ?? 0) * out, y: pos.y + (pos.ny ?? 0) * out, z: pos.z + (pos.nz ?? 0) * out } : pos)) return;
       best = { pos: { x: pos.x, y: pos.y, z: pos.z } };
       bestD = l;
     };
     for (const d of match.drones) if (d.team !== a.team) consider(d.kind === 'rc' ? { x: d.pos.x, y: d.pos.y + 0.09, z: d.pos.z } : d.pos, 22);
-    for (const dev of [...match.gadgets.cams, ...match.gadgets.alarms]) if (dev.team !== a.team) consider(dev, 18, 0.12);
+    // 카메라·경보 센서는 손바닥만 해서 가까이 와야 눈에 띔 (경보는 희미한 줄 끝의 작은 상자)
+    for (const dev of match.gadgets.cams) if (dev.team !== a.team) consider(dev, 12, 0.12);
+    for (const dev of match.gadgets.alarms) if (dev.team !== a.team) consider(dev, 8, 0.12);
     this.droneSeen = best ? (this.droneSeen ?? 0) + dt : 0;
     return best;
   }
@@ -928,17 +937,28 @@ export class BotBrain {
     const atHold = dist2(hold, a.pos) < 2;
     this.goal = { point: { x: hold.x, y: hold.y, z: hold.z }, arrive: 0.6, look: { x: hold.lookX, y: hold.lookY, z: hold.lookZ }, quiet: atHold, crouchAtGoal: this.holdCrouch };
     if (atHold && !(a.visibleEnemies ?? []).length) {
-      // 지키는 자리에 오면: 적이 올 길목에 경보 센서 · 가끔 심장 박동 센서로 벽 너머 확인
+      // 지키는 자리에 오면: 적이 올 길목에 경보 센서 · 심장 박동 센서로 벽 너머 확인
+      //   소리·무전으로 근처(4~26 m)에 적 기척이 있으면 그쪽으로 · 기척이 없으면 공격팀이 올 무렵(20초 뒤)부터 가끔 지키는 방향으로
       if (!this.alarmDone && (a.gear?.alarm ?? 0) > 0) this.placeAlarmAhead(match, a, hold);
       if ((a.gear?.pulse ?? 0) > 0 && !this.pulsePlan && this.pulseT <= 0 && (a.empT ?? 0) <= 0) {
-        this.pulsePlan = { t: this.rng.range(1.6, 2.4) };
-        this.pulseT = this.rng.range(9, 15);
+        const cue = [this.heard, ...(match.intel[a.team] ?? [])]
+          .filter((i) => i && match.time - i.t < 5 && dist2(i, a.pos) > 4 && dist2(i, a.pos) < 26)
+          .sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos))[0];
+        if (cue) {
+          this.pulsePlan = { t: this.rng.range(1.6, 2.4), at: { x: cue.x, y: cue.y ?? a.pos.y, z: cue.z } };
+          this.pulseT = this.rng.range(5, 8);
+        } else if (match.timeLeft < ROUND_TIME - 20) {
+          this.pulsePlan = { t: this.rng.range(1.6, 2.4) };
+          this.pulseT = this.rng.range(14, 20);
+        }
       }
     }
   }
 
-  // 공격팀이 올 길(공격팀이 모이는 곳 → 지키는 폭탄) 위, 폭탄에서 5~20 m 앞의 좁은 길목(양쪽 벽 사이 5 m 이하)에 무릎 높이 경보 줄
+  // 공격팀이 올 길(공격팀이 모이는 곳 → 지키는 폭탄) 위, 폭탄에서 5~24 m 앞의 좁은 길목(문간·복도: 양쪽 벽 사이 6.6 m 이하)에 무릎 높이 경보 줄
   // (봇은 설치하러 걸어가는 대신 준비 시간에 놓아 둔 것으로 침)
+  //   길찾기 경로는 꺾이는 점만 남긴 것 → 구간을 1 m씩 따라가며 확인. 맵 벽은 동서·남북뿐이라 두 축으로 양쪽 벽을 재고,
+  //   지나가는 방향과 거의 나란한 축은 뺌 (대각선으로 방을 가로질러 문간을 지나가도 찾음)
   placeAlarmAhead(match, a, hold) {
     this.alarmDone = true;
     // 공격팀이 모이는 곳(이 구역 담당) → 지키는 폭탄
@@ -949,24 +969,36 @@ export class BotBrain {
     if (!from) return false;
     const path = match.nav.findPath({ x: from.x, y: from.y ?? 0, z: from.z }, { x: bomb.x, y: bomb.y ?? 0, z: bomb.z });
     if (!path?.length) return false;
+    const PROBE = 6.6;
     let acc = 0;
     for (let i = path.length - 1; i > 0; i--) {
       const p = path[i], q = path[i - 1];
-      const dx = p.x - q.x, dz = p.z - q.z, l = Math.hypot(dx, dz);
+      const dx = q.x - p.x, dz = q.z - p.z, l = Math.hypot(dx, dz);
+      if (l < 0.1) continue;
+      const ux = dx / l, uz = dz / l;
+      for (let s = 0; s < l; s += 1) {
+        const d = acc + s;
+        if (d < 5) continue;
+        if (d > 24) return false;
+        const gy = (p.y ?? 0) + ((q.y ?? 0) - (p.y ?? 0)) * (s / l), y = gy + 0.45;
+        const c = { x: p.x + ux * s, y, z: p.z + uz * s };
+        if (Math.abs(match.map.groundHeight(c.x, c.z, 0.2, y) - gy) > 0.3) continue;
+        let best = null;
+        for (const [ax, az] of [[1, 0], [0, 1]]) {
+          if (Math.abs(ax * ux + az * uz) > 0.8) continue;
+          const L = match.map.raycast(c, { x: c.x + ax * PROBE, y, z: c.z + az * PROBE });
+          const R = match.map.raycast(c, { x: c.x - ax * PROBE, y, z: c.z - az * PROBE });
+          if (!L || !R || L.door != null || R.door != null) continue;
+          const w = Math.hypot(L.x - R.x, L.z - R.z);
+          if (w <= PROBE && (!best || w < best.w)) best = { L, w };
+        }
+        if (!best) continue;
+        const { L } = best;
+        const spot = { x: L.x + L.nx * 0.04, y, z: L.z + L.nz * 0.04, nx: L.nx, ny: 0, nz: L.nz };
+        if (match.gadgets.alarmSpot(spot).reason) continue;
+        if (match.gadgets.attachAlarm(a, spot)) return true;
+      }
       acc += l;
-      if (acc < 5 || l < 0.1) continue;
-      if (acc > 20) break;
-      const y = (q.y ?? 0) + 0.45;
-      const c = { x: q.x, y, z: q.z };
-      if (Math.abs(match.map.groundHeight(c.x, c.z, 0.2, y) - (q.y ?? 0)) > 0.3) continue;
-      // 지나가는 방향에 수직인 양쪽 벽
-      const px = -dz / l, pz = dx / l;
-      const L = match.map.raycast(c, { x: c.x + px * 3, y, z: c.z + pz * 3 });
-      const R = match.map.raycast(c, { x: c.x - px * 3, y, z: c.z - pz * 3 });
-      if (!L || !R || L.door != null || R.door != null || Math.hypot(L.x - R.x, L.z - R.z) > 5) continue;
-      const spot = { x: L.x + L.nx * 0.04, y, z: L.z + L.nz * 0.04, nx: L.nx, ny: 0, nz: L.nz };
-      if (match.gadgets.alarmSpot(spot).reason) continue;
-      if (match.gadgets.attachAlarm(a, spot)) return true;
     }
     return false;
   }

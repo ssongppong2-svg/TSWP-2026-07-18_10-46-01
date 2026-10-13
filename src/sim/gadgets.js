@@ -318,7 +318,14 @@ export class Gadgets {
     if (dev.kind === 'cam') {
       this.cams = this.cams.filter((c) => c !== dev); // 보던 사람은 control()에서 다음 카메라로 넘어감
     } else this.alarms = this.alarms.filter((x) => x !== dev);
-    m.emit('gadgetBroken', { dev, reason, by, x: dev.x, y: dev.y, z: dev.z });
+    // 적이 쏴서 부수면 신호가 끊기며 설치한 팀이 알아챔 → 쏜 적 근처를 팀 지도에 '?'로 (봇도 그쪽을 경계)
+    let place = null;
+    const owner = m.agentById(dev.ownerId);
+    if (reason === 'shot' && by && owner && by.team !== dev.team) {
+      place = m.map.calloutAt(by.pos.x, by.pos.z, by.pos.y) ?? null;
+      m.shareIntel(owner, { x: by.pos.x, y: by.pos.y, z: by.pos.z, kind: 'report' });
+    }
+    m.emit('gadgetBroken', { dev, reason, by, place, x: dev.x, y: dev.y, z: dev.z });
   }
 
   // 세열·C4 폭발: 반경 6할 안(벽 뒤 제외)의 카메라·경보 센서는 부서짐
