@@ -10,15 +10,21 @@ import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 9;
+export const PROTOCOL = 10;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 // 총 번호 (뒤에만 덧붙임 · 총이 늘면 PROTOCOL도 올림: ITEMS 번호가 밀리기 때문)
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper', 'mpistol', 'carbine', 'burst', 'dmr', 'lmg'];
 const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것
 const ARMOR_KINDS = [null, 'light', 'heavy'];
-// 손에 든 장비: 0 없음 · 1~5 투척물 · 6 C4 · 7 기폭기
-const encEquip = (e) => (!e ? 0 : e.kind === 'throw' ? 1 + THROW_ORDER.indexOf(e.id) : e.kind === 'c4' ? 6 : e.kind === 'det' ? 7 : 0);
-const decEquip = (k) => (k >= 1 && k <= 5 ? { kind: 'throw', id: THROW_ORDER[k - 1] } : k === 6 ? { kind: 'c4' } : k === 7 ? { kind: 'det' } : null);
+// 손에 든 장비: 0 없음 · 1~6 투척물 · 그다음 C4 · 기폭기 · 드론 · RC카 · 경보 센서 · 카메라 · 카메라 보기 · 심박 센서
+const HELD_KINDS = ['c4', 'det', 'drone', 'rc', 'alarm', 'cam', 'camview', 'pulse'];
+const encEquip = (e) => (!e ? 0 : e.kind === 'throw' ? 1 + THROW_ORDER.indexOf(e.id) : HELD_KINDS.includes(e.kind) ? 1 + THROW_ORDER.length + HELD_KINDS.indexOf(e.kind) : 0);
+const decEquip = (k) => {
+  if (k >= 1 && k <= THROW_ORDER.length) return { kind: 'throw', id: THROW_ORDER[k - 1] };
+  const h = HELD_KINDS[k - 1 - THROW_ORDER.length];
+  return h ? { kind: h } : null;
+};
+const REMOTE_KINDS = ['drone', 'rc'];
 const PHASES = ['buy', 'live', 'roundEnd', 'ended'];
 const REASONS = ['폭탄 2기 해체 완료', '해체팀 전원 제압', '포스팀 전원 제압', '제한 시간 종료 — 폭탄 폭발'];
 const BOMB_STATES = ['armed', 'defused', 'exploded'];
@@ -32,7 +38,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const r1 = (v) => Math.round(v * 10) / 10;
 
 // 참가자 화면에서 미리 보여 준 자기 사건 (방장이 보낸 같은 사건은 건너뜀)
-const PREDICTED = new Set(['shot', 'reload', 'swap', 'dryFire', 'footstep', 'land', 'melee', 'jump', 'reloadDone']);
+const PREDICTED = new Set(['shot', 'reload', 'swap', 'dryFire', 'footstep', 'land', 'melee', 'jump', 'reloadDone', 'pulse']);
 // 화면에 쓰이지 않는 사건
 const SKIP = new Set(['jump', 'reloadDone', 'scanPing']);
 
@@ -159,6 +165,9 @@ export class HostSync {
         sp: Math.round(a.stamina ?? 100),
         g: GEAR_ORDER.map((id) => a.gear?.[id] ?? 0),
         db: r1(a.droneBat ?? 0), // 손에 있는 드론 배터리
+        rb: r1(a.rcBat ?? 0), // 손에 있는 RC카 배터리
+        em: r1(a.empT ?? 0), // EMP로 장비가 먹통인 남은 시간
+        cv: a.camView ? [a.camView.id, r3(a.camView.yaw), r3(a.camView.pitch)] : 0, // 보고 있는 카메라
         fx: [r2(a.stunT ?? 0), r2(a.flashT ?? 0), r2(a.gasT ?? 0)],
         bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
@@ -187,9 +196,11 @@ export class HostSync {
       C: m.concepts.map((c) => c.takenBy.map((id) => this.idx.get(id))),
       D: m.devices.pack(), // 맵 장치 (셔터 닫힘·승강기 높이·발판 반동)
       X: m.doors.pack(), // 문 (각도·잠김·부서짐)
-      G: (m.throwables ?? []).map((t) => [t.id, THROW_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물
-      K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz)]), // C4
-      Q: (m.drones ?? []).map((d) => [d.id, this.ai(m.agentById(d.ownerId)), r2(d.pos.x), r2(d.pos.y), r2(d.pos.z), r3(d.yaw), r3(d.pitch), r1(d.battery)]), // 드론
+      G: (m.throwables ?? []).map((t) => [t.id, GEAR_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물 · 날아가는 카메라
+      K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz), r1(Math.max(0, (c.offUntil ?? -99) - m.time))]), // C4
+      Q: (m.drones ?? []).map((d) => [d.id, this.ai(m.agentById(d.ownerId)), r2(d.pos.x), r2(d.pos.y), r2(d.pos.z), r3(d.yaw), r3(d.pitch), r1(d.battery), REMOTE_KINDS.indexOf(d.kind ?? 'drone')]), // 드론 · RC카
+      W: m.gadgets.cams.map((c) => [c.id, this.ai(m.agentById(c.ownerId)), TEAMS_.indexOf(c.team), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz), r2(c.yaw0 ?? 0), r1(Math.max(0, (c.offUntil ?? -99) - m.time))]), // 던진 카메라
+      L: m.gadgets.alarms.map((l) => [l.id, this.ai(m.agentById(l.ownerId)), TEAMS_.indexOf(l.team), r2(l.x), r2(l.y), r2(l.z), r2(l.nx), r2(l.nz), r2(l.ex), r2(l.ez), r1(Math.max(0, (l.offUntil ?? -99) - m.time)), r1(Math.min(9, m.time - (l.trippedT ?? -99)))]), // 경보 센서
       P: m.op ? m.op.pack((id) => this.idx.get(id) ?? -1) : 0, // CQB 작전 (연구원·자료·발견·장치 해체)
       E: this.events.map((e) => [e.s, e.p]),
     };
@@ -326,6 +337,13 @@ export class ClientSync {
       a.gear = emptyGear();
       (h.g ?? []).forEach((n, k) => (a.gear[GEAR_ORDER[k]] = n));
       if (h.db != null) a.droneBat = h.db;
+      if (h.rb != null) a.rcBat = h.rb;
+      a.empT = h.em ?? 0;
+      // 카메라 보기: 들어가거나 다른 카메라로 바뀌면 방장 방향으로 시작 (그 뒤 방향은 이 화면에서 미리)
+      if (h.cv) {
+        const [cid, cyaw, cpitch] = h.cv;
+        if (!a.camView || a.camView.id !== cid) a.camView = { id: cid, yaw: cyaw, pitch: cpitch, home: { yaw: a.yaw, pitch: a.pitch }, fresh: true };
+      } else if (a.camView) a.camView = null;
       if (h.fx) [a.stunT, a.flashT, a.gasT] = h.fx;
       // 지구력: 이 화면도 같은 규칙으로 계산하므로 많이 어긋날 때만 맞춤
       if (h.sp != null && Math.abs(h.sp - (a.stamina ?? 100)) > 8) {
@@ -372,7 +390,7 @@ export class ClientSync {
     if (snap.G) {
       const old = new Map((m.throwables ?? []).map((t) => [t.id, t]));
       m.throwables = snap.G.map(([id, k, tx, ty, tz, rest]) => {
-        const t = old.get(id) ?? { id, kind: THROW_ORDER[k] ?? 'frag', pos: { x: tx, y: ty, z: tz }, prev: { x: tx, y: ty, z: tz }, vel: { x: 0, y: 0, z: 0 } };
+        const t = old.get(id) ?? { id, kind: GEAR_ORDER[k] ?? 'frag', pos: { x: tx, y: ty, z: tz }, prev: { x: tx, y: ty, z: tz }, vel: { x: 0, y: 0, z: 0 } };
         t.prev = { ...t.pos };
         t.pos = { x: tx, y: ty, z: tz };
         t.rest = !!rest;
@@ -382,9 +400,10 @@ export class ClientSync {
     // 드론: 내 드론은 이 화면에서 미리 날리므로 많이 어긋날 때만 맞춤, 다른 드론은 받은 위치로
     if (snap.Q) {
       const old = new Map((m.drones ?? []).map((d) => [d.id, d]));
-      m.drones = snap.Q.map(([id, oi, dx, dy, dz, yaw, pitch, battery]) => {
+      m.drones = snap.Q.map(([id, oi, dx, dy, dz, yaw, pitch, battery, kk]) => {
         const owner = m.agents[oi];
-        const d = old.get(id) ?? { id, ownerId: owner?.id ?? null, team: owner?.team ?? null, pos: { x: dx, y: dy, z: dz }, prev: { x: dx, y: dy, z: dz }, vel: { x: 0, y: 0, z: 0 }, yaw, pitch };
+        const kind = REMOTE_KINDS[kk] ?? 'drone';
+        const d = old.get(id) ?? { id, kind, ownerId: owner?.id ?? null, team: owner?.team ?? null, pos: { x: dx, y: dy, z: dz }, prev: { x: dx, y: dy, z: dz }, vel: { x: 0, y: 0, z: 0 }, yaw, pitch, onGround: kind === 'rc' };
         d.battery = battery;
         if (owner === this.local && d.predicted) {
           const err = Math.hypot(dx - d.pos.x, dy - d.pos.y, dz - d.pos.z);
@@ -404,7 +423,14 @@ export class ClientSync {
       });
       for (const a of m.agents) a.drone = m.drones.find((d) => d.ownerId === a.id)?.id ?? null;
     }
-    if (snap.K) m.charges = snap.K.map(([id, oi, cx, cy, cz, nx, ny, nz]) => ({ id, kind: 'c4', ownerId: m.agents[oi]?.id ?? null, team: m.agents[oi]?.team ?? null, x: cx, y: cy, z: cz, nx, ny, nz }));
+    if (snap.K) m.charges = snap.K.map(([id, oi, cx, cy, cz, nx, ny, nz, off]) => ({ id, kind: 'c4', ownerId: m.agents[oi]?.id ?? null, team: m.agents[oi]?.team ?? null, x: cx, y: cy, z: cz, nx, ny, nz, offUntil: off > 0 ? m.time + off : -99 }));
+    // 던진 카메라 · 경보 센서
+    if (snap.W) m.gadgets.cams = snap.W.map(([id, oi, ti, cx, cy, cz, nx, ny, nz, yaw0, off]) => ({ id, kind: 'cam', ownerId: m.agents[oi]?.id ?? null, team: TEAMS_[ti] ?? null, x: cx, y: cy, z: cz, nx, ny, nz, yaw0, offUntil: off > 0 ? m.time + off : -99 }));
+    if (snap.L) {
+      m.gadgets.alarms = snap.L.map(([id, oi, ti, lx, ly, lz, nx, nz, ex, ez, off, ago]) => ({
+        id, kind: 'alarm', ownerId: m.agents[oi]?.id ?? null, team: TEAMS_[ti] ?? null, x: lx, y: ly, z: lz, nx, nz, ex, ey: ly, ez, len: Math.hypot(ex - lx, ez - lz), offUntil: off > 0 ? m.time + off : -99, trippedT: m.time - ago,
+      }));
+    }
     m.zones = mergeById(m.zones, snap.Z);
     m.veils = mergeById(m.veils, snap.V);
     m.shields = mergeById(m.shields, snap.S);

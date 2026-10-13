@@ -123,6 +123,7 @@ export function emptyIntent(agent) {
     switchTo: null,
     equip: null, // 장비 손에 들기: 'throw' (4: 투척물, 다시 누르면 다음 것) · 'gadget' (5: C4 · 기폭기)
     useGear: null, // 봇 전용: { id, mode } 지금 조준한 방향으로 바로 던짐
+    equipKind: null, // 봇 전용: 이 장비를 바로 손에 ('pulse' 등)
     buy: null, // 상점: 무기 id 또는 'light'·'heavy' (같은 것을 다시 사면 이번 구매 시간 안에서 환불)
     patch: [false, false, false, false],
     interact: false,

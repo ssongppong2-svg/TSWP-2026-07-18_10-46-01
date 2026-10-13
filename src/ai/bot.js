@@ -21,7 +21,7 @@ const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const NOISE_TEXT = {
   step: '발소리', land: '착지음', rifle: '소총 사격음', pistol: '권총 사격음', sheriff: '리볼버 사격음', shotgun: '산탄총 사격음',
   smg: '기관단총 사격음', sniper: '저격총 사격음', mpistol: '기관권총 사격음', carbine: '카빈 사격음', burst: '점사 사격음', dmr: '지정사수 사격음', lmg: '기관총 사격음', reload: '재장전 소리', knife: '근접 공격음', patch: '장비 작동음', lockpick: '해체 작업음',
-  throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음', drone: '드론 소리',
+  throw: '투척 소리', gear: '투척물 터지는 소리', blast: '폭발음', drone: '드론 소리', rc: 'RC카 소리', alarm: '경보음',
   door: '문 여닫는 소리', doorQuiet: '문 손잡이 소리', kick: '문 부수는 소리',
 };
 // 이 거리(m)보다 멀면 정조준 · 움직이며 쏘는 총
@@ -88,6 +88,9 @@ export class BotBrain {
     this.gearPlan = null; // { id, mode, yaw, pitch, t } 조준을 맞춘 뒤 던짐
     this.avoidT = 0; // 섬광을 던진 뒤 고개를 돌리는 시간
     this.entryDone = false; // 이번 라운드 진입용 섬광·이명을 썼는지
+    this.pulseT = this.rng.range(4, 9); // 다음 심장 박동 탐지까지
+    this.pulsePlan = null; // { t } 심박 센서를 들고 누르고 있는 남은 시간
+    this.alarmDone = false; // 이번 라운드 경보 센서를 설치했는지
     this.doorT = 0; // 문을 다시 건드리기까지 (여닫기를 반복하지 않게)
     this.doorWant = null; // 이번 틱에 할 문 행동 { act, id }
     this.assignRoles(agent, match);
@@ -331,6 +334,26 @@ export class BotBrain {
     else if (a.weapon === a.secondary && primAmmo > 0 && !engaging) intent.switchTo = a.primary;
     if (!engaging && !WEAPONS[a.weapon].melee && a.weapons[a.weapon].mag < WEAPONS[a.weapon].magSize * 0.4 && this.pauseT <= 0) intent.reload = true;
 
+    // ── 심장 박동 센서: 들고 잠깐 누르고 있다가 다시 총으로 (적이 보이면 바로 총)
+    this.pulseT -= dt;
+    if (this.pulsePlan && live) {
+      intent.switchTo = null;
+      if (engaging || visible || a.lockpick) {
+        this.pulsePlan = null;
+        if (a.equip?.kind === 'pulse') intent.switchTo = a.weapon;
+      } else if (a.equip?.kind !== 'pulse') intent.equipKind = 'pulse';
+      else {
+        intent.fire = true;
+        intent.moveX = intent.moveZ = 0;
+        this.pulsePlan.t -= dt;
+        if (this.pulsePlan.t <= 0) {
+          this.pulsePlan = null;
+          intent.fire = false;
+          intent.switchTo = a.weapon;
+        }
+      }
+    }
+
     // ── CQB 작전: 가까운 연구원·자료 (F)
     if (this.wantOpTask) {
       this.wantOpTask = false;
@@ -519,18 +542,19 @@ export class BotBrain {
     this.dodgeFlash(match, a);
   }
 
-  // 가까이(22 m) 보이는 적 드론 (보이기 시작한 시간을 셈)
+  // 가까이(22 m) 보이는 적 드론·RC카 · 18 m 안 적 카메라·경보 센서 (보이기 시작한 시간을 셈)
   spotDrone(match, a, eye, dt) {
     let best = null, bestD = 22;
     const fx = -Math.sin(this.aimYaw), fz = -Math.cos(this.aimYaw);
-    for (const d of match.drones) {
-      if (d.team === a.team) continue;
-      const dx = d.pos.x - eye.x, dz = d.pos.z - eye.z, l = Math.hypot(dx, dz);
-      if (l > bestD || (l > 3 && (dx * fx + dz * fz) / l < 0.2)) continue;
-      if (!match.map.lineOfSight(eye, d.pos)) continue;
-      best = d;
+    const consider = (pos, maxD, out = 0) => {
+      const dx = pos.x - eye.x, dz = pos.z - eye.z, l = Math.hypot(dx, dz);
+      if (l > Math.min(bestD, maxD) || (l > 3 && (dx * fx + dz * fz) / l < 0.2)) return;
+      if (!match.map.lineOfSight(eye, out ? { x: pos.x + (pos.nx ?? 0) * out, y: pos.y + (pos.ny ?? 0) * out, z: pos.z + (pos.nz ?? 0) * out } : pos)) return;
+      best = { pos: { x: pos.x, y: pos.y, z: pos.z } };
       bestD = l;
-    }
+    };
+    for (const d of match.drones) if (d.team !== a.team) consider(d.kind === 'rc' ? { x: d.pos.x, y: d.pos.y + 0.09, z: d.pos.z } : d.pos, 22);
+    for (const dev of [...match.gadgets.cams, ...match.gadgets.alarms]) if (dev.team !== a.team) consider(dev, 18, 0.12);
     this.droneSeen = best ? (this.droneSeen ?? 0) + dt : 0;
     return best;
   }
@@ -584,7 +608,7 @@ export class BotBrain {
 
   considerGear(match, a) {
     const has = (id) => (a.gear?.[id] ?? 0) > 0;
-    if (!['frag', 'stun', 'flash', 'smoke', 'gas', 'drone'].some(has)) return;
+    if (!['frag', 'stun', 'flash', 'smoke', 'gas', 'drone', 'rc'].some(has)) return;
     // 진입 명령 중에는 스스로 던지지 않음 (섬광은 진입 계획대로)
     if (ENTRY_MODE[match.orders[a.team]?.type]) return;
     const tryThrow = (id, point, minD = 7) => this.planThrow(match, a, id, point, minD);
@@ -592,13 +616,15 @@ export class BotBrain {
     if (a.team === TEAMS.DEFUSE) {
       // 정찰 드론: 목표 폭탄까지 18~40 m에서 한 번, 드론을 먼저 보내 수비 위치를 찾음
       const target = armed.find((b) => b.id === this.assignedBomb);
-      if (target && (a.gear?.drone ?? 0) > 0 && !this.droneDone && this.goal?.point && dist2(this.goal.point, target) < 4) {
+      // (RC카가 있으면 RC카로: 바닥으로 조용히)
+      const remote = has('rc') && (!has('drone') || this.index % 2) ? 'rc' : has('drone') ? 'drone' : null;
+      if (target && remote && !this.droneDone && this.goal?.point && dist2(this.goal.point, target) < 4) {
         const d = dist2(target, a.pos);
         if (d > 18 && d < 40) {
           const path = match.nav.findPath({ x: a.pos.x, y: a.pos.y, z: a.pos.z }, { x: target.x, y: target.y ?? 0, z: target.z });
           if (path?.length) {
             this.droneDone = true;
-            match.launchDrone(a, { path, i: 0 });
+            match.launchDrone(a, { path, i: 0 }, remote);
             return;
           }
         }
@@ -901,6 +927,48 @@ export class BotBrain {
     }
     const atHold = dist2(hold, a.pos) < 2;
     this.goal = { point: { x: hold.x, y: hold.y, z: hold.z }, arrive: 0.6, look: { x: hold.lookX, y: hold.lookY, z: hold.lookZ }, quiet: atHold, crouchAtGoal: this.holdCrouch };
+    if (atHold && !(a.visibleEnemies ?? []).length) {
+      // 지키는 자리에 오면: 적이 올 길목에 경보 센서 · 가끔 심장 박동 센서로 벽 너머 확인
+      if (!this.alarmDone && (a.gear?.alarm ?? 0) > 0) this.placeAlarmAhead(match, a, hold);
+      if ((a.gear?.pulse ?? 0) > 0 && !this.pulsePlan && this.pulseT <= 0 && (a.empT ?? 0) <= 0) {
+        this.pulsePlan = { t: this.rng.range(1.6, 2.4) };
+        this.pulseT = this.rng.range(9, 15);
+      }
+    }
+  }
+
+  // 공격팀이 올 길(공격팀이 모이는 곳 → 지키는 폭탄) 위, 폭탄에서 5~20 m 앞의 좁은 길목(양쪽 벽 사이 5 m 이하)에 무릎 높이 경보 줄
+  // (봇은 설치하러 걸어가는 대신 준비 시간에 놓아 둔 것으로 침)
+  placeAlarmAhead(match, a, hold) {
+    this.alarmDone = true;
+    // 공격팀이 모이는 곳(이 구역 담당) → 지키는 폭탄
+    const site = this.homeSite === 'mid' ? (this.index % 2 ? 'B' : 'A') : this.homeSite;
+    const stage = match.map.staging?.[site] ?? [];
+    const from = stage[this.index % Math.max(1, stage.length)] ?? match.map.spawns[TEAMS.DEFUSE]?.[0];
+    const bomb = match.bombs.find((b) => b.id === site) ?? hold;
+    if (!from) return false;
+    const path = match.nav.findPath({ x: from.x, y: from.y ?? 0, z: from.z }, { x: bomb.x, y: bomb.y ?? 0, z: bomb.z });
+    if (!path?.length) return false;
+    let acc = 0;
+    for (let i = path.length - 1; i > 0; i--) {
+      const p = path[i], q = path[i - 1];
+      const dx = p.x - q.x, dz = p.z - q.z, l = Math.hypot(dx, dz);
+      acc += l;
+      if (acc < 5 || l < 0.1) continue;
+      if (acc > 20) break;
+      const y = (q.y ?? 0) + 0.45;
+      const c = { x: q.x, y, z: q.z };
+      if (Math.abs(match.map.groundHeight(c.x, c.z, 0.2, y) - (q.y ?? 0)) > 0.3) continue;
+      // 지나가는 방향에 수직인 양쪽 벽
+      const px = -dz / l, pz = dx / l;
+      const L = match.map.raycast(c, { x: c.x + px * 3, y, z: c.z + pz * 3 });
+      const R = match.map.raycast(c, { x: c.x - px * 3, y, z: c.z - pz * 3 });
+      if (!L || !R || L.door != null || R.door != null || Math.hypot(L.x - R.x, L.z - R.z) > 5) continue;
+      const spot = { x: L.x + L.nx * 0.04, y, z: L.z + L.nz * 0.04, nx: L.nx, ny: 0, nz: L.nz };
+      if (match.gadgets.alarmSpot(spot).reason) continue;
+      if (match.gadgets.attachAlarm(a, spot)) return true;
+    }
+    return false;
   }
 
   // 아군이 최근 4초 안에 본 적이 둘 이상 몰려 있는 폭탄 구역
@@ -1109,9 +1177,16 @@ export function botBuy(match, a, plan, rng) {
     gear('frag', 0.3);
     if (a.team === TEAMS.DEFUSE) {
       gear('smoke', 0.35);
-      gear('drone', 0.3);
-    } else gear('gas', 0.25);
-  } else if (plan === 'half') gear('stun', 0.35);
+      gear(rng.chance(0.5) ? 'drone' : 'rc', 0.35); // 정찰: 드론(위에서 넓게) · RC카(바닥으로 조용히)
+    } else {
+      gear('gas', 0.25);
+      gear('alarm', 0.2); // 수비: 공격팀이 올 길목에 경보 줄
+      gear('pulse', 0.2); // 벽 너머 심장 박동
+    }
+  } else if (plan === 'half') {
+    gear('stun', 0.35);
+    if (a.team !== TEAMS.DEFUSE) gear('alarm', 0.12);
+  }
   // 다음 라운드를 위해 900 J는 남기고, 남는 에너지로 가끔 관통탄 (상대가 방탄을 살 만한 라운드)
   if (plan !== 'eco' && a.primary && a.credits >= AMMO.ap.price + 900 && rng.chance(plan === 'full' ? 0.35 : 0.15)) buy('ap');
 }

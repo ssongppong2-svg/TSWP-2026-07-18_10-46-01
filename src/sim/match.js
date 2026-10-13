@@ -7,7 +7,8 @@ import {
 } from './constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
-import { DRONE, EFFECT, GEAR, GADGET_ORDER, emptyGear, exposure, nextThrowable, placeTarget, stepDrone, stepThrown, throwVelocity } from './gear.js';
+import { BAT_KEY, DRONE, EFFECT, GEAR, RC, emptyGear, exposure, nextThrowable, placeTarget, remoteEye, remoteHitSphere, stepDrone, stepRC, stepThrown, throwVelocity } from './gear.js';
+import { Gadgets, PULSE } from './gadgets.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
@@ -91,7 +92,8 @@ export class Match {
     this.zones = [];
     this.shields = [];
     this.throwables = []; // 날아가거나 바닥에 있는 투척물 (gear.js)
-    this.drones = []; // 날고 있는 정찰 드론
+    this.drones = []; // 날고 있는 정찰 드론 · 달리는 RC카 (kind: 'drone' | 'rc')
+    this.gadgets = new Gadgets(this); // 경보 센서 · 던지는 카메라 · 심장 박동 센서 · EMP
     this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
     this.scans = []; // 작동 중인 무게 감지기
     this.orders = { defuse: null, force: null }; // 팀 지휘 명령
@@ -244,6 +246,7 @@ export class Match {
     this.throwables = [];
     this.charges = [];
     this.drones = [];
+    this.gadgets.reset();
     this.noises = [];
     this.scans = [];
     this.orders = { defuse: null, force: null };
@@ -273,8 +276,13 @@ export class Match {
       a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
       a.equip = null;
       a.drone = null;
-      a.droneBat = GEAR.drone.battery; // 라운드마다 드론 배터리 가득
+      a.droneBat = GEAR.drone.battery; // 라운드마다 드론·RC카 배터리 가득
+      a.rcBat = GEAR.rc.battery;
       a.mirror = null;
+      a.camView = null;
+      a.empT = 0;
+      a.pulseOn = false;
+      a.pulseHits = [];
       a.kickT = 0;
       a.stunT = a.flashT = a.gasT = 0;
       a.alive = true;
@@ -398,7 +406,7 @@ export class Match {
           const [b] = a.bought.splice(i, 1);
           a.credits += b.price;
           a.gear[item] = have - 1;
-          if (a.equip && (a.equip.id === item || (item === 'c4' && a.equip.kind === 'c4')) && !a.gear[item]) a.equip = null;
+          if (a.equip && (a.equip.id === item || a.equip.kind === item) && !a.gear[item]) a.equip = null;
           this.emit('buy', { agent: a, item, sold: true });
           return true;
         }
@@ -407,7 +415,7 @@ export class Match {
       }
       a.credits -= gear.price;
       a.gear[item] = have + 1;
-      if (item === 'drone') a.droneBat = GEAR.drone.battery; // 새 드론은 가득
+      if (BAT_KEY[item]) a[BAT_KEY[item]] = gear.battery; // 새 드론·RC카는 가득
       a.bought.push({ item, price: gear.price });
       this.emit('buy', { agent: a, item });
       return true;
@@ -576,6 +584,7 @@ export class Match {
     this.updateProjectiles(dt);
     this.updateThrowables(dt);
     this.updateDrones(dt);
+    this.gadgets.update(dt);
     this.updateVisibility(dt);
     this.noises = this.noises.filter((n) => this.time - n.t < NOISE.memory);
     this.scans = this.scans.filter((s) => s.until > this.time);
@@ -597,6 +606,8 @@ export class Match {
   stepAgent(a, intent, dt, live, mobile = live) {
     // 드론을 조종하는 동안: 입력은 드론으로, 몸은 앉은 채 가만히 (시점도 그대로)
     if (a.drone) intent = this.droneControl(a, intent);
+    // 던진 카메라를 보는 동안: 시점은 카메라로, 몸은 앉은 채 가만히
+    else if (a.camView) intent = this.gadgets.control(a, intent);
     // 문 밑 카메라를 쥔 동안: 시점은 카메라로, 몸은 앉은 채 가만히
     else if (a.mirror) intent = this.doors.mirrorControl(a, intent);
     a.yaw = intent.yaw;
@@ -608,13 +619,17 @@ export class Match {
     }
     if (a.ampT > 0) a.ampT = Math.max(0, a.ampT - dt);
     if (a.bounceT > 0) a.bounceT = Math.max(0, a.bounceT - dt);
-    // 손에 있는 드론은 천천히 충전
-    if (!a.drone && (a.gear?.drone ?? 0) > 0 && (a.droneBat ?? GEAR.drone.battery) < GEAR.drone.battery) a.droneBat = Math.min(GEAR.drone.battery, (a.droneBat ?? 0) + DRONE.recharge * dt);
+    // 손에 있는 드론·RC카는 천천히 충전
+    for (const kind of ['drone', 'rc']) {
+      const key = BAT_KEY[kind], full = GEAR[kind].battery;
+      if ((a.gear?.[kind] ?? 0) > 0 && (a[key] ?? full) < full) a[key] = Math.min(full, (a[key] ?? 0) + (kind === 'rc' ? RC : DRONE).recharge * dt);
+    }
     if (a.tagT > 0) a.tagT = Math.max(0, a.tagT - dt);
     this.decayEffects(a, dt);
     a.punch *= Math.exp(-dt * 8);
     if (live) a.ult = Math.min(ULT.max, a.ult + ULT.perSecond * dt);
     if (intent.equip && !a.lockpick && !a.held) this.equipGear(a, intent.equip);
+    else if (intent.equipKind && !a.lockpick && !a.held) this.equipTo(a, intent.equipKind);
     if (intent.useGear && live && !a.lockpick && !a.held) this.throwGear(a, intent.useGear.id, intent.useGear.mode);
 
     const canAct = live && !a.held;
@@ -638,6 +653,9 @@ export class Match {
     a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
     a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
     this.stepWeapon(a, intent, dt, live && !a.lockpick && !(a.kickT > 0) && !a.opTask);
+    // 심장 박동 센서를 보는 동안: 화면을 보느라 느리게 걸음
+    this.gadgets.stepPulse(a, dt);
+    if (a.pulseOn) intent = { ...intent, moveX: intent.moveX * PULSE.slow, moveZ: intent.moveZ * PULSE.slow, jump: false };
     this.moveAgent(a, intent, dt, live, mobile && !a.opTask);
   }
 
@@ -789,6 +807,7 @@ export class Match {
   // ───────────────────────── 총기 ─────────────────────────
   stepWeapon(a, intent, dt, canFire) {
     const w = WEAPONS[a.weapon];
+    if (a.equip?.kind !== 'pulse') a.pulseOn = false; // 심박 센서를 내려놓으면 꺼짐
     const ws = a.weapons[a.weapon];
     a.fireCd = Math.max(0, a.fireCd - dt);
     a.meleeCd = Math.max(0, a.meleeCd - dt);
@@ -1013,8 +1032,14 @@ export class Match {
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
       myDrone.prev = { ...myDrone.pos };
-      stepDrone(this.map, myDrone, { mx: intent.moveX, mz: intent.moveZ, up: intent.jump, down: intent.crouch, yaw: intent.yaw, pitch: intent.pitch }, dt);
+      (myDrone.kind === 'rc' ? stepRC : stepDrone)(this.map, myDrone, { mx: intent.moveX, mz: intent.moveZ, up: intent.jump, down: intent.crouch, yaw: intent.yaw, pitch: intent.pitch }, dt);
       myDrone.predicted = true;
+    } else if (a?.alive && a.camView && this.phase !== 'ended') {
+      // 던진 카메라: 몸은 그대로, 카메라 방향만 이 화면에서 바로 (바꾸기·표시·거두기는 방장이 처리)
+      const ctrl = this.controllers.get(a.id);
+      const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
+      a.camView.yaw = intent.yaw;
+      a.camView.pitch = intent.pitch;
     } else if (a?.alive && a.mirror && this.phase !== 'ended') {
       // 문 밑 카메라: 몸은 그대로, 카메라 방향만 이 화면에서 바로 (거두기 등 동작은 방장이 처리)
       const ctrl = this.controllers.get(a.id);
@@ -1032,7 +1057,9 @@ export class Match {
       a.ads = live && !!intent.ads && !w.melee && !a.lockpick && !a.held && a.reloadT <= 0 && a.swapT <= 0;
       a.adsT = clamp(a.adsT + (a.ads ? 1 : -1) * dt * (w.adsRate ?? 7), 0, 1);
       this.stepWeapon(a, intent, dt, live && !a.lockpick && !a.held);
-      if (!a.held) this.moveAgent(a, intent, dt, live, this.mobile);
+      this.gadgets.stepPulse(a, dt);
+      const move = a.pulseOn ? { ...intent, moveX: intent.moveX * PULSE.slow, moveZ: intent.moveZ * PULSE.slow, jump: false } : intent;
+      if (!a.held) this.moveAgent(a, move, dt, live, this.mobile);
     }
     // 다른 요원의 총알 궤적 (화면용)
     const keep = [];
@@ -1096,16 +1123,25 @@ export class Match {
           shield = sh;
         }
       }
-      let drone = null;
+      let drone = null, device = null;
       if (!p.harmless) {
         for (const d of this.drones) {
           if (d.team === p.team) continue;
-          const td = segmentSphere(p.pos, next, d.pos, DRONE.radius + 0.06);
+          const hs = remoteHitSphere(d);
+          const td = segmentSphere(p.pos, next, hs.c, hs.r);
           if (td >= 0 && td < tHit) {
             tHit = td;
             drone = d;
             shield = null;
           }
+        }
+        // 적 카메라·경보 센서 (한 발에 부서짐)
+        const dh = this.gadgets.hitTest(p.pos, next, p.team, tHit);
+        if (dh) {
+          tHit = dh.t;
+          device = dh.dev;
+          drone = null;
+          shield = null;
         }
         for (const a of this.agents) {
           if (!a.alive || a.team === p.team) continue;
@@ -1116,6 +1152,7 @@ export class Match {
             head = true;
             shield = null;
             drone = null;
+            device = null;
           }
           const tb = segmentAabb(
             p.pos,
@@ -1129,6 +1166,7 @@ export class Match {
             head = false;
             shield = null;
             drone = null;
+            device = null;
           }
         }
       }
@@ -1145,9 +1183,14 @@ export class Match {
         continue;
       }
       if (drone) {
-        // 드론은 한 발에 떨어짐
+        // 드론·RC카는 한 발에 떨어짐
         this.emit('impact', { ...at(tHit), kind: 'surface', projectile: p });
         this.endDrone(drone, 'shot');
+        continue;
+      }
+      if (device) {
+        this.emit('impact', { ...at(tHit), kind: 'surface', projectile: p });
+        this.gadgets.destroy(device, 'shot', this.agentById(p.ownerId));
         continue;
       }
       if (target) {
@@ -1267,6 +1310,7 @@ export class Match {
     t.lastHurtBy = attacker?.id ?? null;
     // 드론 조종 중에 몸이 맞으면 화면이 몸으로 돌아옴
     if (t.drone && hpLoss > 0) this.endDrone(this.drones.find((d) => d.id === t.drone), 'hurt');
+    if (t.camView && hpLoss > 0) this.gadgets.exitCams(t, 'hurt');
     if (t.mirror && hpLoss > 0) this.doors.endMirror(t, 'hurt');
     if (t.opTask && hpLoss > 0) this.op.cancelTask(t, 'hit');
     // 피격 반응: 조준이 위로 튀고 잠깐 느려짐
@@ -1293,6 +1337,8 @@ export class Match {
     t.armorKind = null;
     t.equip = null;
     if (t.drone) this.endDrone(this.drones.find((d) => d.id === t.drone), 'dead');
+    if (t.camView) this.gadgets.exitCams(t, 'dead');
+    t.pulseOn = false;
     if (t.mirror) this.doors.endMirror(t, 'dead');
     if (t.opTask) this.op.cancelTask(t, 'dead');
     t.kickT = 0;
@@ -1661,6 +1707,7 @@ export class Match {
     if (a.stunT > 0) a.stunT = Math.max(0, a.stunT - dt);
     if (a.flashT > 0) a.flashT = Math.max(0, a.flashT - dt);
     if (a.gasT > 0) a.gasT = Math.max(0, a.gasT - dt);
+    if (a.empT > 0) a.empT = Math.max(0, a.empT - dt);
   }
 
   // 4: 투척물 들기 (들고 있으면 다음 종류로) · 5: C4 → 붙였으면 기폭기
@@ -1672,15 +1719,24 @@ export class Match {
       if (!id) return this.emit('gearDenied', { agent: a, which, reason: 'none' });
       a.equip = { kind: 'throw', id };
     } else if (which === 'gadget') {
-      // 5: 가진 것 중 돌아가며 (C4 → 기폭기 → 드론)
-      const opts = [];
-      if ((a.gear.c4 ?? 0) > 0) opts.push('c4');
-      if (this.charges.some((c) => c.ownerId === a.id)) opts.push('det');
-      if ((a.gear.drone ?? 0) > 0 && !a.drone) opts.push('drone');
+      // 5: 가진 것 중 돌아가며 (C4 → 기폭기 → 드론 → RC카 → 경보 센서 → 카메라 → 카메라 보기 → 심박 센서)
+      const opts = this.gadgetOptions(a);
       if (!opts.length) return this.emit('gearDenied', { agent: a, which, reason: 'none' });
       const i = opts.indexOf(a.equip?.kind);
       a.equip = { kind: opts[(i + 1) % opts.length] };
     } else return;
+    this.heldChanged(a, before);
+  }
+
+  // 봇: 원하는 장비를 바로 손에 (5를 여러 번 누르는 것과 같음)
+  equipTo(a, kind) {
+    if (a.equip?.kind === kind || !this.gadgetOptions(a).includes(kind)) return;
+    const before = a.equip;
+    a.equip = { kind };
+    this.heldChanged(a, before);
+  }
+
+  heldChanged(a, before) {
     if (before?.kind === a.equip.kind && before?.id === a.equip.id) return;
     a.reloadT = 0;
     a.ads = false;
@@ -1690,8 +1746,23 @@ export class Match {
     this.emit('equip', { agent: a, equip: { ...a.equip } });
   }
 
-  // 장비를 든 손: 쥐는 중이 아니면 누른 순간 한 번 동작
+  // 5로 손에 들 수 있는 것 (가진 것만, 이 순서로 돌아감)
+  gadgetOptions(a) {
+    const opts = [];
+    if ((a.gear?.c4 ?? 0) > 0) opts.push('c4');
+    if (this.charges.some((c) => c.ownerId === a.id)) opts.push('det');
+    if ((a.gear?.drone ?? 0) > 0 && !a.drone) opts.push('drone');
+    if ((a.gear?.rc ?? 0) > 0 && !a.drone) opts.push('rc');
+    if ((a.gear?.alarm ?? 0) > 0) opts.push('alarm');
+    if ((a.gear?.cam ?? 0) > 0) opts.push('cam');
+    if (this.gadgets.teamCams(a.team).length || (a.equip?.kind === 'camview' && this.throwables.some((t) => t.kind === 'cam' && t.ownerId === a.id))) opts.push('camview');
+    if ((a.gear?.pulse ?? 0) > 0) opts.push('pulse');
+    return opts;
+  }
+
+  // 장비를 든 손: 쥐는 중이 아니면 누른 순간 한 번 동작 (심박 센서는 누르고 있는 동안)
   stepGearHand(a, intent, canAct, dt) {
+    a.pulseOn = a.equip?.kind === 'pulse' && a.swapT <= 0 && canAct && !!intent.fire && !((a.empT ?? 0) > 0);
     if (a.swapT > 0) {
       a.swapT = Math.max(0, a.swapT - dt);
       a.triggerLatch = intent.fire;
@@ -1707,27 +1778,45 @@ export class Match {
     if (!canAct || (!left && !right) || this.client) return;
     const e = a.equip;
     if (e.kind === 'throw') this.throwGear(a, e.id, left ? 'long' : 'short');
+    else if (e.kind === 'cam') this.throwGear(a, 'cam', left ? 'long' : 'short');
     else if (e.kind === 'c4' && left) this.placeCharge(a);
     else if (e.kind === 'det' && left) this.detonate(a);
-    else if (e.kind === 'drone' && left) this.launchDrone(a);
+    else if ((e.kind === 'drone' || e.kind === 'rc') && left) this.launchDrone(a, null, e.kind);
+    else if (e.kind === 'alarm' && left) this.gadgets.placeAlarm(a);
+    else if (e.kind === 'camview' && left) this.gadgets.enterCams(a);
   }
 
-  // ───── 정찰 드론 ─────
-  // 띄우기: 눈앞에서 떠오름. 사람은 드론 카메라로 조종(입력이 드론으로), 봇은 목표까지 자동 비행
-  launchDrone(a, autopilot = null) {
-    if (!((a.gear?.drone ?? 0) > 0) || a.drone || this.client) return false;
-    const bat = a.droneBat ?? GEAR.drone.battery;
-    if (bat < DRONE.minLaunch) {
-      this.emit('gearDenied', { agent: a, which: 'gadget', reason: 'battery', left: bat });
+  // ───── 정찰 드론 · RC카 ─────
+  // 띄우기: 드론은 눈앞에서 떠오르고 RC카는 발 앞 바닥에 내려놓음. 사람은 그 카메라로 조종(입력이 장비로), 봇은 목표까지 자동
+  launchDrone(a, autopilot = null, kind = 'drone') {
+    if (!((a.gear?.[kind] ?? 0) > 0) || a.drone || this.client) return false;
+    const key = BAT_KEY[kind];
+    const bat = a[key] ?? GEAR[kind].battery;
+    if ((a.empT ?? 0) > 0) {
+      this.emit('gearDenied', { agent: a, which: 'gadget', reason: 'emp', kind });
       return false;
     }
-    a.gear.drone--;
-    a.droneBat = 0; // 배터리는 드론과 함께 날아감
+    const min = (kind === 'rc' ? RC : DRONE).minLaunch;
+    if (bat < min) {
+      this.emit('gearDenied', { agent: a, which: 'gadget', reason: 'battery', left: bat, kind });
+      return false;
+    }
+    a.gear[kind]--;
+    a[key] = 0; // 배터리는 장비와 함께 나감
     const f = { x: -Math.sin(a.yaw), z: -Math.cos(a.yaw) };
     const eye = eyePos(a);
-    const pos = { x: eye.x + f.x * 0.5, y: eye.y - 0.2, z: eye.z + f.z * 0.5 };
-    if (!this.map.lineOfSight(eye, pos)) Object.assign(pos, { x: eye.x, y: eye.y - 0.2, z: eye.z });
-    const d = { id: this.nextId++, ownerId: a.id, team: a.team, pos, vel: { x: f.x * 1.5, y: 1.2, z: f.z * 1.5 }, yaw: a.yaw, pitch: -0.1, battery: bat, scanT: 0, buzzT: 0, autopilot, marks: [] };
+    let pos, vel;
+    if (kind === 'rc') {
+      // 발 앞 0.6 m 바닥 (벽에 막히면 발밑)
+      pos = { x: a.pos.x + f.x * 0.6, y: a.pos.y + 0.05, z: a.pos.z + f.z * 0.6 };
+      if (!this.map.lineOfSight({ x: a.pos.x, y: a.pos.y + 0.3, z: a.pos.z }, { x: pos.x, y: pos.y + 0.25, z: pos.z })) Object.assign(pos, { x: a.pos.x, z: a.pos.z });
+      vel = { x: f.x * 1.2, y: 0, z: f.z * 1.2 };
+    } else {
+      pos = { x: eye.x + f.x * 0.5, y: eye.y - 0.2, z: eye.z + f.z * 0.5 };
+      if (!this.map.lineOfSight(eye, pos)) Object.assign(pos, { x: eye.x, y: eye.y - 0.2, z: eye.z });
+      vel = { x: f.x * 1.5, y: 1.2, z: f.z * 1.5 };
+    }
+    const d = { id: this.nextId++, kind, ownerId: a.id, team: a.team, pos, vel, yaw: a.yaw, pitch: kind === 'rc' ? 0 : -0.1, battery: bat, scanT: 0, buzzT: 0, autopilot, marks: [], onGround: kind === 'rc' };
     this.drones.push(d);
     a.drone = d.id;
     a.droneHome = { yaw: a.yaw, pitch: a.pitch };
@@ -1758,18 +1847,20 @@ export class Match {
     return { ...emptyIntent(a), crouch: true, yaw: a.droneHome?.yaw ?? a.yaw, pitch: a.droneHome?.pitch ?? 0 };
   }
 
-  // 드론 화면 가운데(약 6°)에 보이는 적을 표시 → 5초 동안 벽 너머로도 팀에 보임 + 무전
+  // 드론·RC카 화면 가운데(약 6°)에 보이는 적을 표시 → 5초 동안 벽 너머로도 팀에 보임 + 무전
   droneMark(a, d) {
+    const def = GEAR[d.kind ?? 'drone'];
+    const eye = remoteEye(d);
     const fwd = dirFromAngles(d.yaw, d.pitch);
     let best = null, bestCos = Math.cos(0.11);
     for (const e of this.agents) {
       if (!e.alive || e.team === d.team) continue;
       const c = chestPos(e);
-      const vx = c.x - d.pos.x, vy = c.y - d.pos.y, vz = c.z - d.pos.z;
+      const vx = c.x - eye.x, vy = c.y - eye.y, vz = c.z - eye.z;
       const l = Math.hypot(vx, vy, vz);
-      if (l > GEAR.drone.range + 5) continue;
+      if (l > def.range + 5) continue;
       const cs = (vx * fwd.x + vy * fwd.y + vz * fwd.z) / l;
-      if (cs < bestCos || !this.clearLine(d.pos, c)) continue;
+      if (cs < bestCos || !this.clearLine(eye, c)) continue;
       bestCos = cs;
       best = e;
     }
@@ -1777,11 +1868,11 @@ export class Match {
       this.emit('droneMark', { agent: a, drone: d, target: null });
       return null;
     }
-    best.revealedUntil = Math.max(best.revealedUntil, this.time + GEAR.drone.mark);
+    best.revealedUntil = Math.max(best.revealedUntil, this.time + def.mark);
     best.spottedT = this.time;
-    const place = this.map.calloutAt(best.pos.x, best.pos.z, best.pos.y) ?? '드론 앞';
+    const place = this.map.calloutAt(best.pos.x, best.pos.z, best.pos.y) ?? (d.kind === 'rc' ? 'RC카 앞' : '드론 앞');
     this.shareIntel(a, { x: best.pos.x, y: best.pos.y, z: best.pos.z, kind: 'seen' });
-    this.radio(a, `드론: 적 표시 — ${place}`, { kind: 'contact', pos: { ...best.pos }, report: true });
+    this.radio(a, `${d.kind === 'rc' ? 'RC카' : '드론'}: 적 표시 — ${place}`, { kind: 'contact', pos: { ...best.pos }, report: true });
     this.emit('droneMark', { agent: a, drone: d, target: best });
     return best;
   }
@@ -1797,10 +1888,11 @@ export class Match {
         a.pitch = a.droneHome.pitch;
       }
     }
-    // 회수(또는 조종 중 몸이 맞아 급히 거둠): 드론이 바로 손으로 돌아옴 (남은 배터리 그대로 · 바로 다시 띄울 수 있음)
+    // 회수(또는 조종 중 몸이 맞아 급히 거둠): 바로 손으로 돌아옴 (남은 배터리 그대로 · 바로 다시 띄울 수 있음)
+    const kind = d.kind ?? 'drone';
     if ((reason === 'recall' || reason === 'hurt') && a?.alive) {
-      a.gear.drone = Math.min(GEAR.drone.max, (a.gear.drone ?? 0) + 1);
-      a.droneBat = Math.max(0, d.battery);
+      a.gear[kind] = Math.min(GEAR[kind].max, (a.gear[kind] ?? 0) + 1);
+      a[BAT_KEY[kind]] = Math.max(0, d.battery);
     }
     this.emit('droneEnd', { drone: d, agent: a, reason, x: d.pos.x, y: d.pos.y, z: d.pos.z });
   }
@@ -1826,8 +1918,14 @@ export class Match {
         const tgt = ap.path?.[ap.i];
         if (tgt) {
           const yaw = Math.atan2(-(tgt.x - d.pos.x), -(tgt.z - d.pos.z));
-          const want = (tgt.y ?? 0) + 1.8;
-          d.input = { mx: 0, mz: 0.8, up: d.pos.y < want - 0.3, down: d.pos.y > want + 0.3, yaw, pitch: -0.15 };
+          if (d.kind === 'rc') {
+            // RC카: 바닥을 따라 달림 · 0.6초 넘게 제자리면 깡충
+            ap.stuck = Math.hypot(d.vel.x, d.vel.z) < 0.6 ? (ap.stuck ?? 0) + dt : 0;
+            d.input = { mx: 0, mz: 0.85, up: ap.stuck > 0.6, down: false, yaw, pitch: 0.05 };
+          } else {
+            const want = (tgt.y ?? 0) + 1.8;
+            d.input = { mx: 0, mz: 0.8, up: d.pos.y < want - 0.3, down: d.pos.y > want + 0.3, yaw, pitch: -0.15 };
+          }
         } else {
           ap.look = (ap.look ?? 0) + dt;
           d.input = { mx: 0, mz: 0, up: false, down: false, yaw: d.yaw + dt * 1.6, pitch: -0.25 };
@@ -1838,31 +1936,33 @@ export class Match {
         }
       }
       d.prev = { ...d.pos };
-      stepDrone(this.map, d, d.input ?? { yaw: d.yaw, pitch: d.pitch }, dt);
-      // 윙 소리 (가까운 적이 들음)
+      (d.kind === 'rc' ? stepRC : stepDrone)(this.map, d, d.input ?? { yaw: d.yaw, pitch: d.pitch }, dt);
+      // 윙 소리·모터 소리 (가까운 적이 들음 · RC카가 더 조용)
       d.buzzT -= dt;
       if (d.buzzT <= 0) {
         d.buzzT = 0.9;
-        this.makeNoise(a, 'drone', d.pos);
+        if (d.kind !== 'rc' || Math.hypot(d.vel.x, d.vel.z) > 0.5) this.makeNoise(a, d.kind ?? 'drone', d.pos);
       }
       // 드론 카메라에 보이는 적은 팀 미니맵에 (아군이 보고 있는 적과 같음), 봇 드론은 자동으로 표시까지
       d.scanT -= dt;
       if (d.scanT <= 0) {
-        d.scanT = DRONE.scanEvery;
+        const spec = d.kind === 'rc' ? RC : DRONE, def = GEAR[d.kind ?? 'drone'];
+        d.scanT = spec.scanEvery;
+        const eye = remoteEye(d);
         const fwd = dirFromAngles(d.yaw, d.pitch);
         d.seen = [];
         for (const e of this.agents) {
           if (!e.alive || e.team === d.team) continue;
           const c = chestPos(e);
-          const vx = c.x - d.pos.x, vy = c.y - d.pos.y, vz = c.z - d.pos.z;
+          const vx = c.x - eye.x, vy = c.y - eye.y, vz = c.z - eye.z;
           const l = Math.hypot(vx, vy, vz);
-          if (l > GEAR.drone.range || (l > 2 && (vx * fwd.x + vy * fwd.y + vz * fwd.z) / l < DRONE.fov)) continue;
-          if (!this.clearLine(d.pos, c)) continue;
+          if (l > def.range || (l > 2 && (vx * fwd.x + vy * fwd.y + vz * fwd.z) / l < spec.fov)) continue;
+          if (!this.clearLine(eye, c)) continue;
           e.spottedT = this.time;
           d.seen.push(e.id);
           if (d.autopilot && !d.marks.includes(e.id)) {
             d.marks.push(e.id);
-            e.revealedUntil = Math.max(e.revealedUntil, this.time + GEAR.drone.mark);
+            e.revealedUntil = Math.max(e.revealedUntil, this.time + def.mark);
             this.shareIntel(a, { x: e.pos.x, y: e.pos.y, z: e.pos.z, kind: 'seen' });
           }
         }
@@ -1873,7 +1973,7 @@ export class Match {
   // 던지기: 눈 앞에서 조준 방향으로 (달리던 속도도 더해짐 = 관성)
   throwGear(a, id, mode = 'long') {
     const def = GEAR[id];
-    if (!def || def.kind !== 'throw' || !((a.gear?.[id] ?? 0) > 0) || this.client) return false;
+    if (!def || (def.kind !== 'throw' && def.kind !== 'stick') || !((a.gear?.[id] ?? 0) > 0) || this.client) return false;
     a.gear[id]--;
     const dir = dirFromAngles(a.yaw, a.pitch);
     const eye = eyePos(a);
@@ -1887,6 +1987,10 @@ export class Match {
       const next = (a.gear[id] ?? 0) > 0 ? id : nextThrowable(a, id);
       a.equip = next ? { kind: 'throw', id: next } : null;
       a.swapT = next ? 0.45 : Math.min(0.4, WEAPONS[a.weapon]?.draw ?? 0.4);
+    } else if (a.equip?.kind === 'cam') {
+      // 카메라: 남았으면 그대로, 다 던졌으면 '카메라 보기'로 (바로 왼쪽 클릭하면 봄)
+      a.equip = (a.gear.cam ?? 0) > 0 ? { kind: 'cam' } : { kind: 'camview' };
+      a.swapT = 0.35;
     }
     a.stats.gearUses = (a.stats.gearUses ?? 0) + 1;
     this.makeNoise(a, 'throw');
@@ -1942,9 +2046,10 @@ export class Match {
   // 기폭기: 내가 붙인 C4를 모두 터뜨림 (붙인 직후 잠깐은 안 됨)
   detonate(a) {
     const mine = this.charges.filter((c) => c.ownerId === a.id);
-    const ready = mine.filter((c) => this.time >= c.armAt);
+    // EMP를 맞은 C4는 잠깐 신호를 못 받음
+    const ready = mine.filter((c) => this.time >= c.armAt && !((c.offUntil ?? -99) > this.time));
     if (!ready.length) {
-      this.emit('gearDenied', { agent: a, which: 'det', reason: mine.length ? 'arming' : 'none' });
+      this.emit('gearDenied', { agent: a, which: 'det', reason: !mine.length ? 'none' : mine.some((c) => (c.offUntil ?? -99) > this.time) ? 'emp' : 'arming' });
       return false;
     }
     this.charges = this.charges.filter((c) => !ready.includes(c));
@@ -1961,6 +2066,17 @@ export class Match {
       t.prev = { ...t.pos };
       t.age += dt;
       const b = stepThrown(this.map, t, dt);
+      if (t.kind === 'cam' && !this.client) {
+        // 던진 카메라: 처음 닿은 벽·바닥·천장에 붙음 (문짝에는 튕겨 나감)
+        if (t.hit && t.hit.door == null) {
+          this.gadgets.stickCam(t, t.hit);
+          continue;
+        }
+        if (t.rest) {
+          this.gadgets.stickCam(t, { nx: 0, ny: 1, nz: 0 });
+          continue;
+        }
+      }
       if (b) this.emit('gearBounce', { throwable: t, speed: b.speed, x: t.pos.x, y: t.pos.y, z: t.pos.z });
       if (t.age >= t.fuse) {
         this.detonateThrowable(t);
@@ -2008,6 +2124,8 @@ export class Match {
       const zone = { id: this.nextId++, type: t.kind, ownerId: t.ownerId, team: t.team, x: at.x, y: t.pos.y - 0.05, z: at.z, radius: def.radius, t: def.time, duration: def.time, age: 0 };
       this.zones.push(zone);
       payload.zone = zone;
+    } else if (t.kind === 'emp') {
+      this.gadgets.emp(at, def, owner, payload);
     }
     if (owner) this.makeNoise(owner, 'gear', at);
     this.emit('detonate', payload);
@@ -2043,6 +2161,8 @@ export class Match {
     }
     // CQB 작전: 연구원도 다치고 웅크림
     this.op?.onBlast(at, def, owner, (pt) => exposure(this.map, at, pt, def.radius));
+    // 가까운 카메라·경보 센서는 부서짐
+    this.gadgets.blast(at, def.radius);
     if (owner) this.makeNoise(owner, 'blast', at);
     this.emit('detonate', { kind: def.id === 'c4' ? 'c4' : 'frag', x: at.x, y: at.y, z: at.z, nx: at.nx ?? 0, ny: at.ny ?? 1, nz: at.nz ?? 0, ownerId: owner?.id ?? null, team: at.team, id: at.id, hits, doorId: at.doorId ?? null });
   }

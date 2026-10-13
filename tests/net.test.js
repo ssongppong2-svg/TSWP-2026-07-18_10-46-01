@@ -269,3 +269,68 @@ test('온라인 동기화: 참가자가 드론을 띄워 조종하면 방장 경
   assert.equal(host.agentById('defuse-1').drone, null, 'F로 복귀');
   assert.equal(host.drones.length, 0);
 });
+
+test('온라인 동기화: 새 장비 — 참가자 RC카·카메라 보기, 경보 센서·카메라·EMP 상태가 참가자 화면에 전달', () => {
+  const { host, client } = setup({ seed: 43 });
+  const hs = new HostSync(host);
+  const me = client.agentById('defuse-1');
+  client.localAgent = me;
+  const cs = new ClientSync(client, 'defuse-1');
+  const hme = host.agentById('defuse-1');
+  hme.gear.rc = 1;
+  hme.rcBat = 60;
+  let t = 0;
+  const T0 = PRE + 1;
+  const scripted = {
+    getIntent: (m, a) => ({
+      ...emptyIntent(a),
+      equip: Math.abs(t - T0) < DT / 2 ? 'gadget' : null,
+      fire: t > T0 + 0.5 && t < T0 + 0.6,
+      moveZ: t > T0 + 0.8 && t < T0 + 2 ? 1 : 0,
+      yaw: a.yaw,
+      pitch: 0,
+    }),
+  };
+  const rec = new InputRecorder(scripted);
+  client.setController(me.id, rec);
+  const inbox = [];
+  host.setController('defuse-1', new RemoteController(() => inbox[0]?.v, (s) => (hs.acks['defuse-1'] = s)));
+  host.setController('defuse-0', { getIntent: (m, a) => emptyIntent(a) });
+  const toClient = [];
+  let sawRc = false, sawEquip = false;
+  const LAT = 6;
+  const sync = (k) => {
+    if (k % 3 === 0) toClient.push({ snap: JSON.parse(JSON.stringify(hs.snapshot())), at: k + LAT });
+    while (toClient.length && toClient[0].at <= k) cs.apply(toClient.shift().snap, t);
+  };
+  for (let k = 0; k < 60 * (T0 + 2.5); k++) {
+    t = k * DT;
+    client.tick(DT);
+    inbox.push({ v: rec.latest, at: k + LAT });
+    while (inbox.length > 1 && inbox[1].at <= k) inbox.shift();
+    host.tick(DT);
+    sync(k);
+    if (me.equip?.kind === 'rc') sawEquip = true;
+    if (client.drones.some((d) => d.kind === 'rc' && d.ownerId === me.id)) sawRc = true;
+  }
+  assert.ok(sawEquip, '손에 든 RC카가 참가자 화면에');
+  assert.ok(sawRc, '달리는 RC카가 참가자 화면에 (종류 그대로)');
+  // 방장 경기에 경보 센서·카메라를 놓고 EMP를 맞힘 → 참가자 화면에 같은 상태
+  const enemy = host.agents.find((a) => a.team === TEAMS.FORCE);
+  host.gadgets.alarms.push({ id: 7001, kind: 'alarm', ownerId: enemy.id, team: enemy.team, x: 1, y: 0.5, z: 2, nx: 1, nz: 0, ex: 5, ey: 0.5, ez: 2, len: 4, offUntil: host.time + 5, cdUntil: 0, trippedT: host.time - 1 });
+  host.gadgets.cams.push({ id: 7002, kind: 'cam', ownerId: hme.id, team: hme.team, x: 3, y: 1.2, z: 4, nx: 0, ny: 0, nz: 1, yaw0: 0, offUntil: -99 });
+  hme.empT = 4;
+  const k0 = Math.round(t / DT) + 1;
+  for (let k = k0; k < k0 + 30; k++) {
+    t = k * DT;
+    client.tick(DT);
+    host.tick(DT);
+    sync(k);
+  }
+  const al = client.gadgets.alarms.find((x) => x.id === 7001);
+  assert.ok(al && al.team === enemy.team && Math.abs(al.ex - 5) < 0.01, '경보 센서 위치·줄 끝');
+  assert.ok(al.offUntil > client.time, 'EMP로 꺼진 상태');
+  const cam = client.gadgets.cams.find((x) => x.id === 7002);
+  assert.ok(cam && cam.team === hme.team && cam.nz === 1, '카메라');
+  assert.ok(me.empT > 2, '내 장비가 EMP로 먹통인 시간');
+});

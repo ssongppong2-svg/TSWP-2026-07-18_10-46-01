@@ -8,6 +8,12 @@
 //   smoke 연막탄: 15초 동안 시야를 가리는 연기 (봇도 연기 너머를 못 봄)
 //   gas   최루탄: 연기 안에서 기침·조준 흔들림·느려짐 (피해 없음)
 //   c4    C4 폭약: 벽·바닥·문에 붙이고 기폭기로 터뜨림 (문 돌파)
+//   emp   EMP 수류탄: 전자기 펄스로 주변 전자 장비를 먹통으로 (드론·RC카 추락, 카메라·경보 센서·C4·심박 센서 정지)
+// 전술 장비 (5: 돌아가며 손에 듦 · 자세한 규칙은 gadgets.js)
+//   rc    정찰 RC카: 바닥을 달리는 작은 차 (드론보다 조용하고 빠름, 계단도 오름, Space로 깡충)
+//   alarm 경보 센서: 벽에 붙이면 맞은편 벽까지 레이저 줄 → 적이 지나가면 삐삐 + 팀에 위치 표시
+//   cam   던지는 카메라: 던지면 처음 닿은 벽·바닥에 붙음 → 팀 누구나 카메라로 보고 적 표시
+//   pulse 심장 박동 센서: 누르고 있으면 앞쪽 15 m 안 적의 심장 박동이 벽 너머로 보임 (들고 있는 동안 느려짐)
 export const GRAVITY = 9.8; // 중력가속도 (m/s²)
 
 export const GEAR = {
@@ -20,9 +26,18 @@ export const GEAR = {
   // 정찰 드론: 띄우면 드론 카메라로 조종, 보이는 적은 팀에 표시 (작용·반작용: 프로펠러가 공기를 아래로 밀면 공기가 드론을 위로 밂)
   //   배터리 45초 · 회수(F)하면 바로 손으로 돌아와 남은 배터리로 다시 띄움 (들고 있는 동안 천천히 충전) · 격추되거나 공중에서 배터리가 다 되면 잃음
   drone: { id: 'drone', name: '정찰 드론', short: '드론', kind: 'drone', price: 400, mass: 1.2, max: 1, battery: 45, range: 40, mark: 5, noise: 16 },
+  // EMP: 반경 안 전자 장비를 time초 동안 끔 (벽 너머는 6할) · 사람은 다치지 않음 (바디캠·지도도 잠깐 먹통)
+  emp: { id: 'emp', name: 'EMP 수류탄', short: 'EMP', kind: 'throw', price: 300, mass: 0.45, max: 1, fuse: 1.6, radius: 8, time: 8, noise: 45 },
+  // RC카: 배터리 60초 · 드론처럼 회수하면 손으로 (남은 배터리로 다시) · 드론보다 조용(소리 8 m)
+  rc: { id: 'rc', name: '정찰 RC카', short: 'RC카', kind: 'drone', price: 350, mass: 1.6, max: 1, battery: 60, range: 30, mark: 5, noise: 8 },
+  alarm: { id: 'alarm', name: '경보 센서', short: '경보', kind: 'place', price: 200, mass: 0.25, max: 2, reach: 2.6, beam: 9, mark: 3, cooldown: 2.5 },
+  cam: { id: 'cam', name: '던지는 카메라', short: '카메라', kind: 'stick', price: 250, mass: 0.25, max: 2, range: 28, mark: 5 },
+  pulse: { id: 'pulse', name: '심장 박동 센서', short: '심박', kind: 'held', price: 300, mass: 0.6, max: 1, range: 15 },
 };
-export const THROW_ORDER = ['frag', 'stun', 'flash', 'smoke', 'gas'];
-export const GADGET_ORDER = ['c4', 'drone'];
+export const THROW_ORDER = ['frag', 'stun', 'flash', 'smoke', 'gas', 'emp'];
+export const GADGET_ORDER = ['c4', 'drone', 'rc', 'alarm', 'cam', 'pulse'];
+// 원격 조종 장비 (드론·RC카): 손에 있는 배터리를 담는 요원 속성
+export const BAT_KEY = { drone: 'droneBat', rc: 'rcBat' };
 
 // 드론 비행: 원하는 속도로 다가감(관성), 벽에 막힘. 높이는 천장 아래(실외는 하늘 40 m)까지 자유롭게
 //   recharge: 손에 있을 때 초당 충전되는 배터리(초) · minLaunch: 이만큼은 있어야 띄움
@@ -60,6 +75,53 @@ export function stepDrone(map, d, inp, dt) {
 }
 export const GEAR_ORDER = [...THROW_ORDER, ...GADGET_ORDER];
 
+// RC카: 바닥 위를 달림 (중력·계단 오르기·깡충). pos는 바퀴가 닿는 바닥, 카메라는 그 위 camH
+//   hop: 깡충 뛰는 처음 속도 · step: 넘을 수 있는 턱 높이
+export const RC = { radius: 0.17, height: 0.2, speed: 7, accel: 7, air: 1.2, hop: 3.6, hopCd: 0.8, camH: 0.16, step: 0.24, fov: 0.45, scanEvery: 0.15, recharge: 0.5, minLaunch: 3 };
+export function stepRC(map, d, inp, dt) {
+  d.yaw = inp.yaw;
+  d.pitch = Math.max(-0.75, Math.min(0.6, inp.pitch ?? 0));
+  let mx = inp.mx ?? 0, mz = inp.mz ?? 0;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1) {
+    mx /= ml;
+    mz /= ml;
+  }
+  const sin = Math.sin(d.yaw), cos = Math.cos(d.yaw);
+  const tx = (-sin * mz + cos * mx) * RC.speed, tz = (-cos * mz - sin * mx) * RC.speed;
+  // 바퀴가 바닥에 닿아 있을 때만 제대로 가속 (공중에서는 거의 그대로 날아감 = 관성)
+  const k = 1 - Math.exp(-(d.onGround ? RC.accel : RC.air) * dt);
+  d.vel.x += (tx - d.vel.x) * k;
+  d.vel.z += (tz - d.vel.z) * k;
+  d.hopT = Math.max(0, (d.hopT ?? 0) - dt);
+  if (inp.up && d.onGround && d.hopT <= 0) {
+    d.vel.y = RC.hop;
+    d.onGround = false;
+    d.hopT = RC.hopCd;
+  }
+  d.vel.y -= GRAVITY * dt;
+  const y0 = d.pos.y;
+  d.pos.x += d.vel.x * dt;
+  d.pos.z += d.vel.z * dt;
+  map.collideCircle(d.pos, RC.radius, d.pos.y, RC.step, d.vel, RC.height);
+  d.pos.y += d.vel.y * dt;
+  const ground = map.groundHeight(d.pos.x, d.pos.z, RC.radius * 0.9, y0 + RC.step);
+  if (d.pos.y <= ground) {
+    d.pos.y = ground;
+    d.vel.y = Math.max(0, d.vel.y);
+    d.onGround = true;
+  } else d.onGround = d.pos.y - ground < 0.03 && d.vel.y <= 0;
+  const ceil = map.ceilingHeight(d.pos.x, d.pos.z, RC.radius * 0.9, y0 + 0.05);
+  if (d.pos.y + RC.height > ceil) {
+    d.pos.y = Math.max(ground, ceil - RC.height);
+    d.vel.y = Math.min(0, d.vel.y);
+  }
+}
+// 원격 장비의 카메라(눈) 위치: 드론은 몸 가운데, RC카는 바닥에서 camH 위
+export const remoteEye = (d) => (d.kind === 'rc' ? { x: d.pos.x, y: d.pos.y + RC.camH, z: d.pos.z } : d.pos);
+// 총알이 맞는 구 (가운데·반지름)
+export const remoteHitSphere = (d) => (d.kind === 'rc' ? { c: { x: d.pos.x, y: d.pos.y + 0.09, z: d.pos.z }, r: RC.radius + 0.03 } : { c: d.pos, r: DRONE.radius + 0.06 });
+
 // 던지는 힘: 멀리(왼쪽 클릭) · 가까이(오른쪽 클릭, 낮게 굴림)
 export const THROW = {
   long: { speed: 15, up: 0.12 }, // up: 조준보다 살짝 위로 (손을 놓는 각도)
@@ -96,6 +158,7 @@ export function stepThrown(map, t, dt) {
   const next = { x: t.pos.x + t.vel.x * dt, y: t.pos.y + t.vel.y * dt, z: t.pos.z + t.vel.z * dt };
   let bounced = null;
   const hit = map.raycast(t.pos, next);
+  t.hit = hit ? { nx: hit.nx, ny: hit.ny, nz: hit.nz, door: hit.door ?? null } : null; // 이번 틱에 닿은 면 (던지는 카메라가 붙을 곳)
   if (hit) {
     const vn = t.vel.x * hit.nx + t.vel.y * hit.ny + t.vel.z * hit.nz;
     const speed = Math.hypot(t.vel.x, t.vel.y, t.vel.z);
