@@ -61,7 +61,9 @@ export class DeathLog {
     const m = this.match;
     const me = m.agentById(this.agentId);
     const killer = kill.killer ?? null;
-    const recent = this.taken.filter((h) => m.time - h.t < 12);
+    // 마지막으로 맞은 때부터 12초 안 (참가자 화면은 사건을 조금 늦게 받으므로 '지금'이 아니라 마지막 피격 기준)
+    const lastT = this.taken.at(-1)?.t ?? m.time;
+    const recent = this.taken.filter((h) => lastT - h.t < 12);
     const byAttacker = new Map();
     for (const h of recent) {
       const r = byAttacker.get(h.by) ?? { id: h.by, name: m.agentById(h.by)?.name ?? '?', amount: 0, hits: 0, headshots: 0, weapon: h.weapon };

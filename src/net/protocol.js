@@ -41,6 +41,10 @@ const r1 = (v) => Math.round(v * 10) / 10;
 const PREDICTED = new Set(['shot', 'reload', 'swap', 'dryFire', 'footstep', 'land', 'melee', 'jump', 'reloadDone', 'pulse']);
 // 화면에 쓰이지 않는 사건
 const SKIP = new Set(['jump', 'reloadDone', 'scanPing']);
+// 스냅숏이 넘칠 때 먼저 덜어내는 새 사건 (소리·자국: 빠져도 규칙·명중 표시와 무관)
+const LOW_EVENTS = new Set(['f', 'i', 'o', 'l', 'r']);
+// 맞음 사건의 표시들 (한 숫자에 비트로)
+const HIT_FLAGS = ['headshot', 'killed', 'backstab', 'armor', 'blocked', 'armorBroke'];
 
 const bytes = (obj) => {
   const s = JSON.stringify(obj);
@@ -64,6 +68,7 @@ export class HostSync {
     this.maxBytes = maxBytes;
     this.events = [];
     this.seq = 0;
+    this.sentSeq = 0; // 지난 스냅숏까지 실은(또는 덜어낸) 마지막 사건 번호
     this.n = 0;
     this.acks = {}; // 사람 요원별 마지막으로 처리한 입력 번호
     this.off = match.events.on('*', (type, payload) => this.record(type, payload));
@@ -106,6 +111,13 @@ export class HostSync {
       case 'projectileCaught':
         p = ['c', e.projectile?.id ?? 0, r2(e.projectile?.pos?.x ?? 0), r2(e.projectile?.pos?.y ?? 0), r2(e.projectile?.pos?.z ?? 0)];
         break;
+      case 'hit': {
+        // 맞음: 산탄 여러 알·연사로 한꺼번에 많이 나옴 → 짧게 (총은 번호, 그 밖의 무기·장비·폭발은 이름 그대로)
+        const wi = WEAP.indexOf(e.weapon);
+        p = ['h', this.ai(e.target), this.ai(e.attacker), r1(e.amount ?? 0), HIT_FLAGS.reduce((b, k, i) => b | (e[k] ? 1 << i : 0), 0), wi >= 0 ? wi : e.weapon ?? null];
+        if (e.pos) p.push(r2(e.pos.x), r2(e.pos.y), r2(e.pos.z));
+        break;
+      }
       default:
         p = ['g', type, this.enc(e, 0)];
     }
@@ -209,8 +221,25 @@ export class HostSync {
       snap.T = m.agents.map((a) => [a.stats.kills, a.stats.deaths, a.stats.damage, a.stats.defuses, a.stats.patchUses, a.stats.headshots, a.stats.assists ?? 0, a.credits ?? 0]);
       snap.Y = (m.history ?? []).map((h) => [TEAMS_.indexOf(h.squad), TEAMS_.indexOf(h.side), REASONS.indexOf(h.reason)]);
     }
-    // 크기 제한: 넘으면 오래된 사건부터 덜어냄
-    while (snap.E.length && bytes(snap) > this.maxBytes) snap.E.shift();
+    // 크기 제한: 넘으면 ① 이미 보낸 사건(잃어버린 스냅숏 대비로 다시 싣는 것) ② 새 사건 중 소리·자국 ③ 그래도 넘으면 오래된 것부터 덜어냄
+    const size = snap.E.map((e) => bytes(e) + 1);
+    let total = bytes({ ...snap, E: [] }) + size.reduce((x, y) => x + y, 0);
+    if (total > this.maxBytes) {
+      const keep = snap.E.map(() => true);
+      const drop = (test) => {
+        for (let i = 0; i < snap.E.length && total > this.maxBytes; i++) {
+          if (keep[i] && test(snap.E[i])) {
+            keep[i] = false;
+            total -= size[i];
+          }
+        }
+      };
+      drop(([seq]) => seq <= this.sentSeq);
+      drop(([, p]) => LOW_EVENTS.has(p[0]));
+      drop(() => true);
+      snap.E = snap.E.filter((_, i) => keep[i]);
+    }
+    this.sentSeq = this.seq;
     return snap;
   }
 }
@@ -544,6 +573,13 @@ export class ClientSync {
       case 'c':
         m.emit('projectileCaught', { projectile: { id: p[1], pos: { x: p[2], y: p[3], z: p[4] } } });
         return;
+      case 'h': {
+        const [, ti, ai, amount, flags, w, x, y, z] = p;
+        const e = { target: ag(ti), attacker: ag(ai), amount, weapon: typeof w === 'number' ? WEAP[w] ?? null : w, pos: x != null ? { x, y, z } : null };
+        HIT_FLAGS.forEach((k, i) => (e[k] = !!(flags & (1 << i))));
+        if (e.target) m.emit('hit', e);
+        return;
+      }
       case 'g': {
         const type = p[1];
         const e = this.dec(p[2]) ?? {};
