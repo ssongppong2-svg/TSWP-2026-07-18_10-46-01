@@ -3,7 +3,7 @@
 // 5대5 과학관과 같은 건물. 폐관 뒤 불 꺼진 전시관, 남쪽 동(실험실·강당) 입구를 문 하나 너비로 좁혀 문을 달았다.
 //   진압팀은 정문 로비(D)에 투입, 구출한 연구원은 로비까지 호송. 장치는 A 중력관 · B 부력관 두 곳
 // ─────────────────────────────────────────────────────────────
-import { SCIENCE_HALL } from './science-hall.js';
+import { SCIENCE_HALL_BASE as SCIENCE_HALL } from './science-hall.js'; // 작전 맵은 원래 크기 (좁은 실내 CQB)
 
 // 원래 배치에서 고칠 칸: [줄, 칸, 글자]
 const EDITS = [

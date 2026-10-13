@@ -75,7 +75,9 @@ test('맵: 두 팀 진영 사이에 눈높이 직선 시야가 없음 (시작하
       }
       return out;
     };
-    const north = area(1, 4), south = area(32, 38);
+    // 진영 = 시작 위치(F·D)가 있는 마당 (맵 크기와 상관없이 시작 줄 앞뒤)
+    const fRows = m.spawns.force.map((s) => s.r), dRows = m.spawns.defuse.map((s) => s.r);
+    const north = area(1, Math.max(...fRows) + 2), south = area(Math.min(...dRows) - 4, m.rows - 2);
     let lines = 0;
     for (const a of north) for (const b of south) if (m.lineOfSight(a, b)) lines++;
     assert.equal(lines, 0, id);
