@@ -736,6 +736,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow, onKeys 
       <div class="modal-card">
         <header><h2>설정</h2><button class="btn ghost small" data-act="close">닫기</button></header>
         <label class="slider"><span>마우스 감도</span><input type="range" min="0.2" max="3" step="0.05" data-key="sensitivity"><output></output></label>
+        <label class="slider"><span>조준 감도 (확대 중)</span><input type="range" min="0.3" max="2" step="0.05" data-key="adsSensitivity"><output></output></label>
         <label class="slider"><span>시야각 (FOV)</span><input type="range" min="80" max="120" step="1" data-key="fov"><output></output></label>
         <label class="slider"><span>음량</span><input type="range" min="0" max="1" step="0.05" data-key="volume"><output></output></label>
         <label class="slider"><span>화면 흔들림</span><input type="range" min="0" max="1.5" step="0.05" data-key="shake"><output></output></label>
@@ -747,7 +748,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow, onKeys 
         <div class="field"><span>조작 키</span><button class="btn ghost small" data-act="keys">키 바꾸기</button></div>
       </div>
     </section>`);
-  const fmt = { sensitivity: (v) => Number(v).toFixed(2), fov: (v) => `${v}°`, volume: (v) => `${Math.round(v * 100)}%`, shake: (v) => `${Math.round(v * 100)}%` };
+  const fmt = { sensitivity: (v) => Number(v).toFixed(2), adsSensitivity: (v) => `×${Number(v).toFixed(2)}`, fov: (v) => `${v}°`, volume: (v) => `${Math.round(v * 100)}%`, shake: (v) => `${Math.round(v * 100)}%` };
   el.querySelectorAll('input[type=range]').forEach((inp) => {
     const k = inp.dataset.key;
     inp.value = settings[k];

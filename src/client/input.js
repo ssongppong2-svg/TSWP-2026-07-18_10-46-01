@@ -317,8 +317,10 @@ export class PlayerController {
     }
     this.lastDx = dx;
     this.lastDy = dy;
-    const zoom = 1 + ((agent?.adsT ?? 0) * ((this.zoomOf?.(agent) ?? 1) - 1));
-    const sens = (0.0022 * (this.settings.sensitivity ?? 1)) / zoom;
+    // 확대된 만큼 느리게 (화면에서 같은 거리를 움직이는 느낌) × 조준 감도 (설정)
+    const zoom = this.zoomOf?.(agent) ?? 1;
+    const adsSens = 1 + ((this.settings.adsSensitivity ?? 1) - 1) * Math.min(1, agent?.adsT ?? 0);
+    const sens = (0.0022 * (this.settings.sensitivity ?? 1) * adsSens) / zoom;
     this.yaw -= dx * sens;
     this.pitch -= dy * sens * (this.settings.invertY ? -1 : 1);
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));

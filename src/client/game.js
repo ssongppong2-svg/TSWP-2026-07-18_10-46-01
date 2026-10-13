@@ -4,6 +4,13 @@ import { eyePos } from '../sim/agent.js';
 import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { K, isKey } from '../core/keys.js';
 
+// 정조준 확대 배율 (조준 진행도 adsT를 부드럽게 · 손에 장비를 들면 확대 없음)
+export const adsZoomAt = (a) => {
+  const t = Math.max(0, Math.min(1, a?.adsT ?? 0));
+  const e = t * t * (3 - 2 * t);
+  return 1 + e * ((a?.equip ? 1 : WEAPONS[a?.weapon]?.adsZoom ?? 1) - 1);
+};
+
 // 경기 중 막는 브라우저 단축키: 도움말 · 찾기 · 새로고침 · 주소창 · 캐럿 탐색 · (키보드의) 뒤로·앞으로·새로고침 키
 const BROWSER_KEYS = new Set(['F1', 'F3', 'F5', 'F6', 'F7', 'BrowserBack', 'BrowserForward', 'BrowserRefresh']);
 // Ctrl(맥 Cmd)과 같이: 새로고침 · 찾기 · 인쇄 · 저장 · 북마크 · 주소창 · 기록 · 다운로드 (탭 닫기·새 탭·탭 이동은 브라우저가 먼저 가져가 막을 수 없음)
@@ -96,7 +103,7 @@ export class GameClient {
     this.input = new Input(stage.container);
     this.input.enabled = true;
     this.controller = new PlayerController(this.input, settings);
-    this.controller.zoomOf = (a) => WEAPONS[a.weapon].adsZoom ?? 1;
+    this.controller.zoomOf = adsZoomAt;
     // 문 앞에서 F: 길게 누르면 문 행동 휠 (교전 중에만 문을 다룸)
     this.controller.doorTarget = (a) => (a?.alive && this.match.phase === 'live' && !this.ended ? this.match.doors.doorAt(a) : null);
     // 문을 보고 G: 문 진입 지휘 (대기·열고/섬광/폭파/걷어차고 진입·문 밑 확인)
@@ -1024,8 +1031,8 @@ export class GameClient {
     cam.rotation.y = this.camYaw + swayX + this.kickCam.x * shakeScale + (Math.random() - 0.5) * s;
     cam.rotation.x = this.camPitch + swayY + this.kickCam.y * shakeScale + (Math.random() - 0.5) * s;
     cam.rotation.z = this.roll + this.rollKick * shakeScale;
-    // 정조준 확대
-    const zoom = 1 + (a.adsT ?? 0) * ((WEAPONS[a.weapon].adsZoom ?? 1) - 1);
+    // 정조준 확대 (부드럽게 당겨짐: 처음과 끝이 느림)
+    const zoom = adsZoomAt(a);
     this.stage.setZoom(zoom);
     const fwd = { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) };
     this.audio.setListener(cam.position, fwd);

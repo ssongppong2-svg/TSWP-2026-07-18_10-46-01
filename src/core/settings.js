@@ -4,6 +4,7 @@ const KEY = 'forcebound.settings.v1';
 export const DEFAULT_SETTINGS = {
   name: '나',
   sensitivity: 1,
+  adsSensitivity: 1, // 정조준(확대) 중 감도 배율 — 확대만큼 느려진 위에 곱함
   fov: 100,
   volume: 0.8,
   quality: 'auto', // 'auto'(기기에 맞춰 자동) | 'low' | 'medium' | 'high'

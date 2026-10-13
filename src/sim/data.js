@@ -37,7 +37,7 @@ export const WEAPONS = {
     recoilRecover: 0.7,
     adsSpread: 0.6,
     adsRecoil: 0.85,
-    adsZoom: 1.15,
+    adsZoom: 1.3,
     crouchSpread: 0.85,
   },
   sheriff: {
@@ -73,7 +73,7 @@ export const WEAPONS = {
     recoilRecover: 0.55,
     adsSpread: 0.6,
     adsRecoil: 0.85,
-    adsZoom: 1.2,
+    adsZoom: 1.35,
     crouchSpread: 0.85,
   },
   shotgun: {
@@ -112,7 +112,7 @@ export const WEAPONS = {
     recoilRecover: 0.5,
     adsSpread: 0.8,
     adsRecoil: 1,
-    adsZoom: 1.1,
+    adsZoom: 1.2,
     crouchSpread: 0.95,
   },
   smg: {
@@ -148,7 +148,7 @@ export const WEAPONS = {
     recoilRecover: 0.7,
     adsSpread: 0.75,
     adsRecoil: 0.85,
-    adsZoom: 1.15,
+    adsZoom: 1.35,
     crouchSpread: 0.85,
   },
   rifle: {
@@ -184,7 +184,7 @@ export const WEAPONS = {
     recoilRecover: 0.7,
     adsSpread: 0.7,
     adsRecoil: 0.85,
-    adsZoom: 1.25,
+    adsZoom: 1.6,
     crouchSpread: 0.8,
   },
   sniper: {
@@ -224,7 +224,7 @@ export const WEAPONS = {
     recoilRecover: 0.4,
     adsSpread: 0.02,
     adsRecoil: 1,
-    adsZoom: 2.6,
+    adsZoom: 4.0,
     crouchSpread: 0.9,
   },
   // ── 기관권총: 3점사 보조무기 (움직이며 쏴도 덜 빗나감)
@@ -263,7 +263,7 @@ export const WEAPONS = {
     recoilRecover: 0.75,
     adsSpread: 0.7,
     adsRecoil: 0.85,
-    adsZoom: 1.12,
+    adsZoom: 1.3,
     crouchSpread: 0.85,
   },
   // ── 단축 카빈: 짧은 소총 (실내 근접전용 · 움직이며 쏘기 좋음)
@@ -300,7 +300,7 @@ export const WEAPONS = {
     recoilRecover: 0.72,
     adsSpread: 0.72,
     adsRecoil: 0.85,
-    adsZoom: 1.2,
+    adsZoom: 1.45,
     crouchSpread: 0.82,
     moveMult: 0.97,
   },
@@ -339,7 +339,7 @@ export const WEAPONS = {
     recoilRecover: 0.9,
     adsSpread: 0.6,
     adsRecoil: 0.8,
-    adsZoom: 1.3,
+    adsZoom: 1.6,
     crouchSpread: 0.8,
   },
   // ── 지정사수 소총(DMR): 반자동 · 저배율 조준경 · 몸통 4발 · 머리 2발
@@ -376,7 +376,7 @@ export const WEAPONS = {
     scope: 'lpvo', // 정조준 = 저배율 조준경 화면 (저격총보다 넓게 보임)
     adsSpread: 0.2, // 조준경으로 보면 매우 정확
     adsRecoil: 0.85,
-    adsZoom: 1.9,
+    adsZoom: 2.5,
     adsRate: 5,
     crouchSpread: 0.85,
     moveMult: 0.92,
@@ -415,7 +415,7 @@ export const WEAPONS = {
     recoilRecover: 0.6,
     adsSpread: 0.7,
     adsRecoil: 0.8,
-    adsZoom: 1.2,
+    adsZoom: 1.5,
     adsRate: 5,
     crouchSpread: 0.7, // 앉아서 쏘면 훨씬 안정
     moveMult: 0.86,
