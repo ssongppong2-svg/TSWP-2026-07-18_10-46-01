@@ -572,7 +572,7 @@ export class ViewModel {
       poly: std({ color: '#25262a', roughness: 0.74, metalness: 0.0 }),
       furn: std({ color: force ? '#86714f' : '#3f4247', roughness: 0.72, metalness: 0.02 }),
       rubber: std({ color: '#141516', roughness: 0.9 }),
-      glove: std({ color: force ? '#62574a' : '#3a3d43', roughness: 0.86 }),
+      glove: std({ color: force ? '#62574a' : '#3a3d43', roughness: 0.7 }), // 합성 가죽 (천 짜임 무늬가 아니라 잔요철)
       gloveHard: std({ color: force ? '#3c372d' : '#1b1c1f', roughness: 0.5, metalness: 0.08 }),
       sleeve: std({ map: T.camoMap, color: force ? '#c4bba8' : '#848b98', roughness: 0.93 }),
       watch: std({ color: '#18191b', roughness: 0.55, metalness: 0.2 }),

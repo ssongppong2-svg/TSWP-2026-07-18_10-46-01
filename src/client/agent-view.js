@@ -338,7 +338,7 @@ export function teamMaterials(team) {
     hard: std({ color: k.hard, roughness: 0.55, metalness: 0.12 }),
     rubber: std({ color: '#1e1f21', roughness: 0.92 }),
     boot: std({ color: k.boot, roughness: 0.72 }),
-    glove: std({ color: k.glove, roughness: 0.82 }),
+    glove: std({ color: k.glove, roughness: 0.7 }),
     bala: std({ color: k.bala, roughness: 0.96 }),
     helmet: k.helmetCamo
       ? std({ map: camo, color: '#d8d2c4', roughness: 0.9, side: THREE.DoubleSide })
