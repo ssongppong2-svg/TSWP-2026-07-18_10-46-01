@@ -372,12 +372,13 @@ export class AudioEngine {
       p.rolloffFactor = 1.4;
       const g = ctx.createGain();
       g.gain.value = 0;
-      g.gain.setTargetAtTime(kind === 'drone' ? 0.12 : 0.1, ctx.currentTime, 0.2);
+      g.gain.setTargetAtTime(kind === 'drone' ? 0.12 : kind === 'rc' ? 0.07 : 0.1, ctx.currentTime, 0.2);
       g.connect(p);
       p.connect(this.master);
       const nodes = [];
-      // 드론: 프로펠러 윙 (톱니파 두 개가 살짝 어긋나 맥놀이) + 바람 소리
-      for (const [f, gain] of [[172, 0.35], [176.5, 0.3], [344, 0.12]]) {
+      const rc = kind === 'rc';
+      // 드론: 프로펠러 윙 (톱니파 두 개가 살짝 어긋나 맥놀이) + 바람 소리 · RC카: 작은 모터의 높은 윙 + 바퀴 구르는 소리
+      for (const [f, gain] of rc ? [[412, 0.26], [418.5, 0.22], [826, 0.07]] : [[172, 0.35], [176.5, 0.3], [344, 0.12]]) {
         const o = ctx.createOscillator();
         o.type = 'sawtooth';
         o.frequency.value = f;
@@ -385,7 +386,7 @@ export class AudioEngine {
         og.gain.value = gain;
         const bp = ctx.createBiquadFilter();
         bp.type = 'bandpass';
-        bp.frequency.value = 900;
+        bp.frequency.value = rc ? 1500 : 900;
         bp.Q.value = 0.7;
         o.connect(bp);
         bp.connect(og);
@@ -398,10 +399,10 @@ export class AudioEngine {
       n.loop = true;
       const nf = ctx.createBiquadFilter();
       nf.type = 'bandpass';
-      nf.frequency.value = 2400;
+      nf.frequency.value = rc ? 600 : 2400;
       nf.Q.value = 0.6;
       const ng = ctx.createGain();
-      ng.gain.value = 0.25;
+      ng.gain.value = rc ? 0.35 : 0.25;
       n.connect(nf);
       nf.connect(ng);
       ng.connect(g);
@@ -1171,6 +1172,70 @@ const SOUNDS = {
     const o = a.out(null, 0.3 * vol, 0.4, 0);
     a.tone(o, t, 0.06, { type: 'square', freq: 1760, gain: 0.08 });
     a.tone(o, t + 0.07, 0.1, { type: 'square', freq: 2350, gain: 0.08 });
+  },
+  // ───────── 전술 장비 ─────────
+  // RC카 내려놓음: 플라스틱이 바닥에 톡 + 모터가 올라가는 소리
+  rcDrop(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 0.8, 0.08);
+    a.noise(o, t, 0.03, { type: 'bandpass', freq: 1800, q: 2, gain: 0.5, attack: 0.001 });
+    a.tone(o, t + 0.04, 0.5, { type: 'sawtooth', freq: 120, to: 412, gain: 0.05, attack: 0.04 });
+  },
+  // EMP: 낮은 '퉁' + 전기가 튀는 지지직 + 내려가는 윙 (전자 장비가 꺼지는 소리)
+  empBlast(a, t, pos, vol) {
+    const o = a.out(pos, 0.85 * vol, 2.2, 0.35, 0.3);
+    a.tone(o, t, 0.5, { type: 'sine', freq: 90, to: 38, gain: 0.7, attack: 0.002 });
+    a.noise(o, t, 0.6, { type: 'lowpass', freq: 400, gain: 0.5, attack: 0.004, sweepTo: 80, buf: a.brownBuf });
+    a.tone(o, t + 0.02, 1.1, { type: 'sawtooth', freq: 1900, to: 140, gain: 0.07, attack: 0.01 });
+    a.tone(o, t + 0.02, 0.9, { type: 'square', freq: 3100, to: 400, gain: 0.025, attack: 0.01 });
+    for (let i = 0; i < 14; i++) a.noise(o, t + Math.random() * 0.7, 0.012 + Math.random() * 0.02, { type: 'highpass', freq: 3500 + Math.random() * 3000, gain: 0.35 + Math.random() * 0.3, attack: 0.0005 });
+  },
+  // 카메라가 벽에 붙음: 고무 받침이 철썩 + 작은 전자음
+  camStick(a, t, pos, vol) {
+    const o = a.out(pos, 0.45 * vol, 0.6, 0.1);
+    a.noise(o, t, 0.05, { type: 'lowpass', freq: 900, gain: 0.7, attack: 0.001, buf: a.brownBuf });
+    a.click(o, t + 0.01, 2600, 0.35, 4);
+    a.tone(o, t + 0.12, 0.06, { type: 'sine', freq: 2400, gain: 0.05 });
+  },
+  // 카메라 화면 켜기·끄기: 전환 지직 + 짧은 음
+  camOn(a, t) {
+    const o = a.out(null, 0.3, 0.5, 0);
+    a.noise(o, t, 0.09, { type: 'bandpass', freq: 3200, q: 0.8, gain: 0.35, attack: 0.002 });
+    a.tone(o, t + 0.05, 0.07, { type: 'square', freq: 1320, gain: 0.05 });
+  },
+  camOff(a, t) {
+    const o = a.out(null, 0.3, 0.4, 0);
+    a.tone(o, t, 0.08, { type: 'square', freq: 990, to: 600, gain: 0.05 });
+    a.noise(o, t, 0.05, { type: 'bandpass', freq: 2400, q: 1, gain: 0.25 });
+  },
+  // 경보 센서 붙임: 딸깍 + 켜지는 두 음
+  alarmPlace(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 0.6, 0.08);
+    a.click(o, t, 3000, 0.5, 5);
+    a.tone(o, t + 0.08, 0.05, { type: 'sine', freq: 1500, gain: 0.06 });
+    a.tone(o, t + 0.15, 0.07, { type: 'sine', freq: 2000, gain: 0.06 });
+  },
+  // 경보: 날카로운 삐삐삐 (들은 적·아군 모두 위치를 앎)
+  alarmBeep(a, t, pos, vol) {
+    const o = a.out(pos, 0.95 * vol, 1.4, 0.15);
+    for (let i = 0; i < 5; i++) a.tone(o, t + i * 0.22, 0.12, { type: 'square', freq: i % 2 ? 2650 : 3150, gain: 0.12, attack: 0.002 });
+  },
+  // 장비가 부서짐: 플라스틱 깨짐 + 전기 튐
+  gadgetBreak(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 0.8, 0.15);
+    a.noise(o, t, 0.05, { type: 'highpass', freq: 2600, gain: 0.7, attack: 0.001 });
+    for (let i = 0; i < 4; i++) a.click(o, t + 0.02 + Math.random() * 0.2, 2200 + Math.random() * 2600, 0.35, 5);
+    a.tone(o, t, 0.25, { type: 'sawtooth', freq: 600, to: 90, gain: 0.04 });
+  },
+  // 심장 박동 센서: 아무도 없으면 짧은 '틱', 잡히면 낮은 '두근' (가까울수록 크게)
+  pulseTick(a, t) {
+    const o = a.out(null, 0.2, 0.3, 0);
+    a.tone(o, t, 0.04, { type: 'sine', freq: 1450, gain: 0.05 });
+  },
+  pulseHit(a, t, pos, vol) {
+    const o = a.out(null, 0.24 * vol, 0.6, 0);
+    a.tone(o, t, 0.09, { type: 'sine', freq: 70, to: 46, gain: 0.45, attack: 0.004 });
+    a.tone(o, t + 0.16, 0.08, { type: 'sine', freq: 60, to: 42, gain: 0.32, attack: 0.004 });
+    a.tone(o, t, 0.05, { type: 'sine', freq: 1100, gain: 0.04 });
   },
   // ───────── 문 (surface 자리에 재질: 'steel' · 'wood') ─────────
   // 열기: 손잡이 딸깍 + 걸쇠 + 경첩 삐걱 + 문이 공기를 밀어내는 소리 (철문은 낮고 묵직)

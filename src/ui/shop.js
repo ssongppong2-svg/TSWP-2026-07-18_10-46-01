@@ -1,5 +1,5 @@
 import { AMMO, ARMOR, WEAPONS } from '../sim/data.js';
-import { GEAR, THROW_ORDER } from '../sim/gear.js';
+import { GADGET_ORDER, GEAR, GEAR_ORDER, THROW_ORDER } from '../sim/gear.js';
 import { CONCEPT_BY_ID } from '../sim/concepts.js';
 import { ECON, LOAD, STAMINA } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
@@ -22,10 +22,10 @@ const SECTIONS = [
   {
     kind: 'small',
     cols: [
-      { title: '방탄', items: ['light', 'heavy'], w: 1.2 },
-      { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'], w: 1 },
+      { title: '방탄', items: ['light', 'heavy'], w: 1.1 },
+      { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'], w: 1.15 },
       { title: () => `투척 · 경기 중 ${K('throw')} 키`, items: THROW_ORDER, w: 2, grid: 2 },
-      { title: () => `장비 · 경기 중 ${K('gadget')} 키`, items: ['c4', 'drone'], w: 1 },
+      { title: () => `장비 · 경기 중 ${K('gadget')} 키`, items: GADGET_ORDER, w: 2, grid: 2 },
     ],
   },
 ];
@@ -65,7 +65,7 @@ export function itemInfo(id) {
     return {
       type: 'armor',
       name: a.name,
-      card: a.cls >= 4 ? '중량 방탄·헬멧' : '경량 조끼', // 작은 칸에 들어가는 이름
+      card: a.cls >= 4 ? '중량·헬멧' : '경량 조끼', // 작은 칸에 들어가는 이름
       kind: `${a.cls}등급`,
       price: a.price,
       icon: GEAR_ICONS[id],
@@ -83,14 +83,26 @@ export function itemInfo(id) {
       gas: `기침·느려짐 ${g.time}초 · 피해 없음`,
       c4: `붙이고 기폭 · 피해 최대 ${g.damage} · 문 돌파`,
       drone: `정찰 ${g.battery}초 · 보이는 적을 팀에 표시 · 총에 맞으면 추락`,
+      emp: `반경 ${g.radius} m 전자 장비 ${g.time}초 먹통 · 드론·RC카 추락 · 사람은 안 다침`,
+      rc: `바닥 정찰 ${g.battery}초 · 드론보다 조용 · 계단도 오름 · 총에 맞으면 고장`,
+      alarm: `벽에 붙이면 맞은편까지 레이저 줄 · 적이 지나가면 ${g.mark}초 표시`,
+      cam: `던지면 벽·바닥에 붙음 · 팀 누구나 봄 · 보이는 적 표시`,
+      pulse: `누르고 있으면 앞쪽 ${g.range} m 안 적의 심장 박동이 벽 너머로`,
     }[id];
-    const short = { frag: `파편 ${g.damage}`, stun: `이명 ${g.time}초`, flash: `섬광 ${g.time}초`, smoke: `연기 ${g.time}초`, gas: `최루 ${g.time}초`, c4: '붙이고 기폭', drone: `정찰 ${g.battery}초` }[id];
+    const short = { frag: `파편 ${g.damage}`, stun: `이명 ${g.time}초`, flash: `섬광 ${g.time}초`, smoke: `연기 ${g.time}초`, gas: `최루 ${g.time}초`, emp: `먹통 ${g.time}초`, c4: '붙이고 기폭', drone: `정찰 ${g.battery}초`, rc: `바닥 ${g.battery}초`, alarm: '레이저 줄', cam: '붙는 카메라', pulse: `벽 너머 ${g.range} m` }[id];
     const how = {
-      throw: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)',
-      place: '왼쪽 클릭으로 벽·바닥·문에 붙이고, 다시 왼쪽 클릭으로 기폭',
+      frag: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)',
+      emp: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 · 벽 너머는 6할 세기 · 내 장비도 꺼지니 조심',
+      c4: '왼쪽 클릭으로 벽·바닥·문에 붙이고, 다시 왼쪽 클릭으로 기폭',
       drone: '왼쪽 클릭으로 띄움 → WASD·Space·Ctrl 조종, 왼쪽 클릭 적 표시, F 복귀 · 과학: 프로펠러가 공기를 아래로 밀면 공기가 드론을 위로 밂(작용·반작용)',
-    }[g.kind];
-    return { type: 'gear', name: g.name, kind: { throw: '투척', place: '설치', drone: '정찰' }[g.kind], price: g.price, icon: GEAR_ICONS[id], short, stats: [what, `최대 ${g.max}개 · ${g.mass} kg`, how] };
+      rc: '왼쪽 클릭으로 내려놓음 → WASD 운전·마우스 시점·Space 깡충, 왼쪽 클릭 적 표시, F 복귀 · 과학: 바퀴가 바닥을 뒤로 밀면 바닥이 차를 앞으로 밂(마찰력)',
+      alarm: '왼쪽 클릭으로 가까운 벽에 붙임 (줄 높이 = 붙인 높이 · 낮게 붙이면 앉아도 걸림) · 과학: 빛은 곧게 나아감(직진)',
+      cam: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 던짐 → 다 던지면 왼쪽 클릭으로 보기 · 오른쪽 클릭 다음 카메라',
+      pulse: '손에 들고 왼쪽 클릭을 누르고 있으면 탐지 (쓰는 동안 느리게 걸음) · EMP에 꺼짐',
+    }[id] ?? { throw: '왼쪽 클릭 멀리 · 오른쪽 클릭 가까이 (중력 때문에 포물선)' }[g.kind];
+    // 작은 칸 이름: 줄 제목(투척·장비)이 종류를 말해 주므로 짧게
+    const cardName = { frag: '세열', stun: '이명', flash: '섬광', smoke: '연막', gas: '최루', emp: 'EMP', c4: 'C4 폭약', drone: '드론', rc: 'RC카', alarm: '경보 센서', cam: '카메라', pulse: '심박 센서' }[id];
+    return { type: 'gear', name: g.name, card: cardName, kind: { throw: '투척', place: '설치', drone: '정찰', stick: '정찰', held: '탐지' }[g.kind], price: g.price, icon: GEAR_ICONS[id], short, stats: [what, `최대 ${g.max}개 · ${g.mass} kg`, how] };
   }
   const m = AMMO[id];
   return {
@@ -336,14 +348,14 @@ export class Shop {
     this.set('quiz', q ? `${q.id}|${q.done}|${q.ok}|${q.choice}` : '', () => this.renderQuiz(q));
     // 분대원 에너지·주무기 (보급 계획 맞추기)
     const mates = m.agents.filter((a) => a.team === me.team);
-    const gearSig = (a) => THROW_ORDER.concat('c4', 'drone').map((id) => a.gear?.[id] ?? 0).join('');
+    const gearSig = (a) => GEAR_ORDER.map((id) => a.gear?.[id] ?? 0).join('');
     const sig = mates.map((a) => `${a.id}:${a.credits}:${a.primary}:${a.armorKind}:${a.ammo}:${gearSig(a)}`).join('|');
     this.set('team', sig, () => {
       this.teamEl.innerHTML = mates.map((a) => `
         <div class="st-row ${a.id === me.id ? 'me' : ''}">
           <b>${esc(a.name)}</b>
           <span class="st-w">${a.primary ? WEAPON_ICONS[a.primary] : WEAPON_ICONS[a.secondary] ?? ''}</span>
-          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}${THROW_ORDER.concat('c4', 'drone').filter((id) => (a.gear?.[id] ?? 0) > 0).map((id) => GEAR_ICONS[id]).join('')}</span>
+          <span class="st-a">${a.armor > 0 && GEAR_ICONS[a.armorKind] ? GEAR_ICONS[a.armorKind] : ''}${a.ammo && a.ammo !== 'fmj' ? GEAR_ICONS[a.ammo] : ''}${GEAR_ORDER.filter((id) => (a.gear?.[id] ?? 0) > 0).map((id) => GEAR_ICONS[id]).join('')}</span>
           <span class="st-c">${money(a.credits ?? 0)} J</span>
         </div>`).join('');
     });

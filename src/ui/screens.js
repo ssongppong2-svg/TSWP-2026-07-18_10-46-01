@@ -50,7 +50,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         </div>
       </div>
       <footer class="title-foot">
-        <span>교전 지역 ${MAP_ORDER.length}곳 · ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대</span><span>CQB 작전 ${MISSIONS.length}개 · 인질 구출 · 장치 해체</span><span>탄종·방탄 · 무게 · 수류탄·C4·드론 · 문 돌파</span>
+        <span>교전 지역 ${MAP_ORDER.length}곳 · ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대</span><span>CQB 작전 ${MISSIONS.length}개 · 인질 구출 · 장치 해체</span><span>탄종·방탄 · 무게 · 수류탄·C4·EMP · 드론·RC카·카메라·센서 · 문 돌파</span>
       </footer>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -681,10 +681,12 @@ export function controlsModal({ onClose }) {
       [`${K('primary')} / ${K('secondary')} / ${K('knife')} · 휠`, '주무기 / 보조무기 / 칼'],
     ]],
     ['장비', [
-      [K('throw'), '투척물 들기 · 다시 누르면 다음 종류 (세열·이명·섬광·연막·최루)'],
-      [K('gadget'), 'C4 → 붙인 뒤 기폭기 → 정찰 드론 (가진 것만 돌아가며)'],
-      ['좌클릭 / 우클릭', '멀리 던지기 / 가까이 굴리기 · C4 붙이기 · 기폭 · 드론 띄우기'],
-      ['드론', `이동 키·${K('jump')}·${K('crouch')} 비행 · 좌클릭 적 표시 · ${K('interact')} 복귀`],
+      [K('throw'), '투척물 들기 · 다시 누르면 다음 종류 (세열·이명·섬광·연막·최루·EMP)'],
+      [K('gadget'), 'C4 → 기폭기 → 드론 → RC카 → 경보 센서 → 카메라 → 카메라 보기 → 심박 센서 (가진 것만 돌아가며)'],
+      ['좌클릭 / 우클릭', '멀리 / 가까이 던지기 · C4·경보 센서 붙이기 · 기폭 · 드론·RC카 띄우기 · 카메라 보기'],
+      ['드론 · RC카', `이동 키·${K('jump')}·${K('crouch')} 조종 (RC카는 ${K('jump')} 깡충) · 좌클릭 적 표시 · ${K('interact')} 복귀`],
+      ['카메라 보기', `마우스 둘러보기 · 좌클릭 적 표시 · 우클릭 다음 카메라 · ${K('interact')}·이동 거두기`],
+      ['심박 센서', '좌클릭을 누르고 있으면 앞쪽 15 m 안 적의 심장 박동이 벽 너머로 (쓰는 동안 느림)'],
     ]],
     ['포스 패치 (5 대 5)', [
       [`${K('patch0')} / ${K('patch1')}`, '일반 패치'],

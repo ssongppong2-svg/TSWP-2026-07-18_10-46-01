@@ -338,6 +338,50 @@ export class TacticalMap {
       }
     }
 
+    // 아군 장비: 경보 센서 줄(붉은 선 · EMP면 흐림) · 던진 카메라(눈) · 날고 달리는 드론·RC카(작은 마름모)
+    const onFloor = (y) => (y > STORY - 1 ? 1 : 0) === floor;
+    for (const al of m.gadgets?.alarms ?? []) {
+      if (al.team !== myTeam || !onFloor(al.y)) continue;
+      const [x0, y0] = this.toPx(al.x, al.z), [x1, y1] = this.toPx(al.ex, al.ez);
+      const off = (al.offUntil ?? -99) > m.time;
+      const hot = m.time - (al.trippedT ?? -99) < 1.5;
+      g.strokeStyle = off ? 'rgba(229,83,75,0.3)' : hot && Math.sin(this.t * 20) > 0 ? '#ffd2cc' : '#e5534b';
+      g.lineWidth = hot ? 2.2 : 1.3;
+      g.setLineDash(off ? [2, 2] : []);
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = '#e5534b';
+      g.fillRect(x0 - S * 0.3, y0 - S * 0.3, S * 0.6, S * 0.6);
+    }
+    for (const c of m.gadgets?.cams ?? []) {
+      if (c.team !== myTeam || !onFloor(c.y)) continue;
+      const [x, y] = this.toPx(c.x, c.z);
+      const off = (c.offUntil ?? -99) > m.time;
+      const viewing = viewAgent.camView?.id === c.id;
+      g.strokeStyle = off ? 'rgba(143,224,200,0.35)' : viewing ? '#ffffff' : '#8fe0c8';
+      g.lineWidth = 1.3;
+      g.beginPath();
+      g.ellipse(x, y, S * 0.7, S * 0.42, 0, 0, Math.PI * 2);
+      g.stroke();
+      g.fillStyle = g.strokeStyle;
+      g.beginPath();
+      g.arc(x, y, S * 0.22, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (const d of m.drones ?? []) {
+      if (d.team !== myTeam) continue;
+      const [x, y] = this.toPx(d.pos.x, d.pos.z);
+      g.save();
+      g.translate(x, y);
+      g.rotate(Math.PI / 4);
+      g.fillStyle = d.kind === 'rc' ? '#e3b341' : '#8fe0c8';
+      g.fillRect(-S * 0.38, -S * 0.38, S * 0.76, S * 0.76);
+      g.restore();
+    }
+
     // 아군 (서로 무전으로 위치를 앎)
     for (const a of m.agents) {
       if (!a.alive || a.team !== myTeam) continue;

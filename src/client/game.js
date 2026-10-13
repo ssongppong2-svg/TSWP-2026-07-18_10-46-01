@@ -33,7 +33,8 @@ import { DoorsView } from './doors-view.js';
 import { OpView } from './op-view.js';
 import { missionById } from '../sim/operation.js';
 import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
-import { DRONE, GEAR } from '../sim/gear.js';
+import { DRONE, GEAR, RC } from '../sim/gear.js';
+import { camLimits } from '../sim/gadgets.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
@@ -384,7 +385,7 @@ export class GameClient {
       this.gearView.onDetonate(e, this.stage.camera.position);
       const pos = { x: e.x, y: e.y, z: e.z };
       if (e.kind === 'c4' && e.ownerId === this.viewAgent?.id) A.play('detClick');
-      const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss' }[e.kind];
+      const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss', emp: 'empBlast' }[e.kind];
       if (snd) A.play(snd, { pos });
       // 가까운 폭발(세열·C4)은 잠깐 귀가 먹먹해짐 (무겁게 · 거리 12 m 안)
       if (e.kind === 'frag' || e.kind === 'c4') {
@@ -395,29 +396,92 @@ export class GameClient {
       }
       // 내가 이명·섬광에 맞으면 귀가 울림
       const hit = e.hit?.find((h) => h.id === this.viewAgent?.id);
+      if (e.kind === 'emp') {
+        if (hit) this.hud.banner('EMP — 전자 장비 먹통', `${Math.ceil(this.viewAgent.empT ?? GEAR.emp.time)}초 동안 지도·드론·카메라·심박 센서 정지`, 'bad');
+        else if (e.ownerId === this.viewAgent?.id && e.devices) this.hud.banner('EMP 명중', `전자 장비 ${e.devices}개 먹통`, 'good');
+        return;
+      }
       if (hit && (e.kind === 'stun' || hit.k > 0.5)) A.play('ring', { vol: e.kind === 'stun' ? 0.6 + hit.k * 0.6 : hit.k * 0.6 });
     });
-    ev.on('droneLaunch', (e) => A.play('droneUp', { pos: viewing(e.agent) ? null : e.drone.pos }));
-    ev.on('droneMark', (e) => {
+    // ── 전술 장비 (카메라 · 경보 센서 · 심박 센서)
+    ev.on('camStick', (e) => {
+      const v = audible(e.cam, 12);
+      if (v > 0) A.play('camStick', { pos: e.cam, vol: v });
+    });
+    ev.on('camView', (e) => {
+      if (!viewing(e.agent)) return;
+      A.play(e.on ? 'camOn' : 'camOff');
+      if (e.on && e.lost) this.hud.banner('카메라가 부서짐', '남은 카메라로 넘어감', 'bad');
+      else if (!e.on && e.reason === 'lost') this.hud.banner('카메라가 모두 부서짐', '', 'bad');
+    });
+    ev.on('camMark', (e) => {
       if (!viewing(e.agent)) return;
       if (e.target) {
         A.play('droneMark');
-        this.hud.banner('드론: 적 표시', `${GEAR.drone.mark}초 동안 벽 너머로 보임`, 'good');
+        this.hud.banner('카메라: 적 표시', `${GEAR.cam.mark}초 동안 벽 너머로 보임`, 'good');
+      } else {
+        A.play('denied');
+        if (e.reason === 'emp') this.hud.banner('카메라 먹통 (EMP)', '신호가 돌아오면 다시', 'small');
+      }
+    });
+    ev.on('alarmPlaced', (e) => A.play('alarmPlace', { pos: viewing(e.agent) ? null : e.alarm }));
+    ev.on('alarmTrip', (e) => {
+      const al = e.alarm;
+      const v = audible(al, 30);
+      if (v > 0) A.play('alarmBeep', { pos: al, vol: v });
+      if (al.team === this.team) {
+        const place = this.match.map.calloutAt(e.agent.pos.x, e.agent.pos.z, e.agent.pos.y);
+        this.hud.banner('경보: 적 통과', `${place ?? '경보 센서'} · ${GEAR.alarm.mark}초 표시`, 'good');
+      } else if (viewing(e.agent)) this.hud.banner('경보 줄에 걸림', '위치가 상대에게 보임 · 붉은 줄은 넘거나 부숴서 지나가기', 'bad');
+    });
+    ev.on('gadgetBroken', (e) => {
+      this.gearView.onBroken(e);
+      const v = audible(e, 25);
+      if (v > 0) A.play('gadgetBreak', { pos: e, vol: v });
+      const name = e.dev.kind === 'cam' ? '카메라' : '경보 센서';
+      if (e.dev.team === this.team) this.hud.banner(`${name} 부서짐`, e.dev.ownerId === this.player.id ? '내 장비' : '', 'small');
+      else if (e.by?.id === this.player.id) this.hud.banner(`적 ${name} 파괴`, '', 'good');
+    });
+    ev.on('pulse', (e) => {
+      if (viewing(e.agent)) A.play(e.hits ? 'pulseHit' : 'pulseTick', { vol: e.hits ? Math.min(1, 0.6 + 4 / Math.max(2, e.near ?? 15)) : 1 });
+    });
+    ev.on('droneLaunch', (e) => A.play(e.drone.kind === 'rc' ? 'rcDrop' : 'droneUp', { pos: viewing(e.agent) ? null : e.drone.pos }));
+    ev.on('droneMark', (e) => {
+      if (!viewing(e.agent)) return;
+      const name = e.drone?.kind === 'rc' ? 'RC카' : '드론';
+      if (e.target) {
+        A.play('droneMark');
+        this.hud.banner(`${name}: 적 표시`, `${GEAR[e.drone?.kind ?? 'drone'].mark}초 동안 벽 너머로 보임`, 'good');
       } else A.play('denied');
     });
     ev.on('droneEnd', (e) => {
-      if (e.reason === 'shot' || e.reason === 'dead') {
+      const rc = e.drone?.kind === 'rc';
+      const name = rc ? 'RC카' : '드론';
+      if (e.reason === 'shot' || e.reason === 'dead' || e.reason === 'emp') {
         A.play('droneDown', { pos: e });
-        this.effects.sparks.burst(e, '#ffd27a', 24, { speed: 4, up: 1, life: 0.5, gravity: 9 });
+        this.effects.sparks.burst(e, e.reason === 'emp' ? '#9fd2ff' : '#ffd27a', 24, { speed: 4, up: 1, life: 0.5, gravity: 9 });
       }
-      if (viewing(e.agent) && e.reason === 'shot') this.hud.banner('드론 격추됨', '', 'bad');
-      else if (viewing(e.agent) && e.reason === 'battery') this.hud.banner('드론 배터리 소진', '공중에서 멈춰 잃음 · 다음엔 일찍 회수', 'bad');
-      else if (viewing(e.agent) && e.reason === 'recall') this.hud.banner('드론 회수', `남은 배터리 ${Math.ceil(e.agent?.droneBat ?? 0)}초 · 바로 다시 띄울 수 있음`, 'small');
+      if (!viewing(e.agent)) return;
+      if (e.reason === 'shot') this.hud.banner(`${name} ${rc ? '고장' : '격추됨'}`, '', 'bad');
+      else if (e.reason === 'emp') this.hud.banner(`EMP — ${name} ${rc ? '멈춤' : '추락'}`, '잃음', 'bad');
+      else if (e.reason === 'battery') this.hud.banner(`${name} 배터리 소진`, `${rc ? '멈춰서' : '공중에서 멈춰'} 잃음 · 다음엔 일찍 회수`, 'bad');
+      else if (e.reason === 'recall') this.hud.banner(`${name} 회수`, `남은 배터리 ${Math.ceil(e.agent?.[rc ? 'rcBat' : 'droneBat'] ?? 0)}초 · 바로 다시 ${rc ? '내려놓을' : '띄울'} 수 있음`, 'small');
     });
     ev.on('gearDenied', (e) => {
       if (!isMe(e.agent)) return;
       A.play('denied');
-      const msg = { none: e.which === 'throw' ? '투척물이 없음 · 보급 단말기에서 받기' : 'C4가 없음', battery: `드론 충전 중 · ${Math.ceil(e.left ?? 0)}초 (${DRONE.minLaunch}초부터 띄움)`, far: '붙일 곳이 너무 멂 · 벽·바닥에 가까이', arming: 'C4 준비 중 · 잠시 뒤 기폭' }[e.reason];
+      const rc = e.kind === 'rc';
+      const msg = {
+        none: e.which === 'throw' ? '투척물이 없음 · 보급 단말기에서 받기' : e.which === 'det' ? '붙인 C4가 없음' : '장비가 없음 · 보급 단말기에서 받기',
+        battery: `${rc ? 'RC카' : '드론'} 충전 중 · ${Math.ceil(e.left ?? 0)}초 (${(rc ? RC : DRONE).minLaunch}초부터)`,
+        far: '붙일 곳이 너무 멂 · 벽·바닥에 가까이',
+        arming: 'C4 준비 중 · 잠시 뒤 기폭',
+        emp: 'EMP로 먹통 · 잠시 뒤 다시',
+        nocam: '붙은 팀 카메라가 없음 · 먼저 던지기',
+        camFlying: '카메라가 아직 날아가는 중',
+        wall: '경보 센서는 벽(세운 면)에만 · 문짝은 안 됨',
+        short: '맞은편 벽이 너무 가까움 · 길목을 가로지르게',
+      }[e.reason];
       if (msg) this.hud.banner(msg, '', 'bad');
     });
     ev.on('melee', (e) => {
@@ -824,14 +888,18 @@ export class GameClient {
     for (const v of this.views.values()) {
       v.update(dt, alpha, time);
       // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임)
-      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView);
+      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView && !this.camViewing);
     }
     this.effects.update(dt, alpha, this.team);
-    this.gearView.update(dt, alpha, this.droneView?.id ?? null);
+    {
+      // 심장 박동 표시는 내 센서 결과만 (관전 중이면 보고 있는 요원)
+      const va0 = this.viewAgent ?? this.player;
+      this.gearView.update(dt, alpha, this.droneView?.id ?? null, { viewer: va0, pulseHits: va0.alive && va0.pulseOn ? va0.pulseHits : null });
+    }
     this.updateDroneSounds();
     {
       const va0 = this.viewAgent ?? this.player;
-      this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended && !va0.mirror);
+      this.gearView.updateArc(va0, va0 === this.player && this.started && !this.paused && !this.ended && !va0.mirror && !va0.camView);
     }
     this.conceptCards.update(time, this.player.id);
     this.devicesView.update();
@@ -844,7 +912,7 @@ export class GameClient {
     // 손에 든 장비가 있으면 총 대신 그 장비
     const held = va.equip ? `gear:${va.equip.kind === 'throw' ? va.equip.id : va.equip.kind}` : null;
     this.viewmodel.update(dt, {
-      visible: va.alive && !this.ended && !scoped && !this.droneView && !this.mirrorView,
+      visible: va.alive && !this.ended && !scoped && !this.droneView && !this.mirrorView && !this.camViewing,
       weapon: held ?? va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
@@ -884,7 +952,7 @@ export class GameClient {
     // 제압: 화면 가장자리가 어두워지고 흐려짐 (빠르게 들어오고 천천히 빠짐)
     const suppT = va.alive ? va.suppress ?? 0 : 0;
     this.suppVis = (this.suppVis ?? 0) + (suppT - (this.suppVis ?? 0)) * Math.min(1, dt * (suppT > (this.suppVis ?? 0) ? 14 : 3));
-    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis });
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0 });
     this.blastDeaf = Math.max(0, (this.blastDeaf ?? 0) - dt * 0.6);
     this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85, this.blastDeaf));
     if (gassed && this.started && !this.paused) {
@@ -955,6 +1023,35 @@ export class GameClient {
     if (this.wasDrone && !this.player.drone) this.controller.syncFrom(this.player);
     this.wasDrone = !!this.player.drone;
     this.droneView = drone;
+    // 던진 카메라: 들어가거나 다른 카메라로 바뀌면 시점을 카메라 정면으로 맞춤 · 끝나면 몸으로
+    const pcv = this.player.camView;
+    if (pcv && (pcv.id !== this.camViewId || pcv.fresh)) {
+      this.controller.yaw = pcv.yaw;
+      this.controller.pitch = pcv.pitch;
+      pcv.fresh = false;
+    } else if (!pcv && this.camViewId != null) this.controller.syncFrom(this.player);
+    this.camViewId = pcv?.id ?? null;
+    const cview = a.alive && a.camView ? m.gadgets.view(a) : null;
+    this.camViewing = cview;
+    if (cview) {
+      // 내 카메라면 마우스 방향을 한계 안으로 (한계 밖으로 돌린 만큼 되돌아올 때 밀리지 않게)
+      if (a === this.player) {
+        const lim = camLimits(cview.cam, this.controller.yaw, this.controller.pitch);
+        this.controller.yaw = lim.yaw;
+        this.controller.pitch = lim.pitch;
+        a.camView.yaw = lim.yaw;
+        a.camView.pitch = lim.pitch;
+      }
+      const v = a === this.player ? camLimits(cview.cam, this.controller.yaw, this.controller.pitch) : cview;
+      cam.position.set(cview.pos.x, cview.pos.y, cview.pos.z);
+      this.camYaw = v.yaw;
+      this.camPitch = v.pitch;
+      cam.rotation.set(v.pitch, v.yaw, 0);
+      this.stage.setZoom(0.78); // 어안 렌즈 (넓게)
+      this.audio.setListener(eyePos(a), { x: -Math.sin(a.yaw), y: 0, z: -Math.cos(a.yaw) });
+      this.audio.setShelter(this.stage.underCover(eyePos(a)));
+      return;
+    }
     // 문 밑 카메라: 문 건너편 바닥 바로 위에서 광각으로 (끝나면 시점을 몸으로 되돌림)
     if (this.wasMirror && !this.player.mirror) this.controller.syncFrom(this.player);
     this.wasMirror = !!this.player.mirror;
@@ -973,7 +1070,8 @@ export class GameClient {
     }
     if (drone) {
       const pv = drone.prev ?? drone.pos;
-      cam.position.set(pv.x + (drone.pos.x - pv.x) * alpha, pv.y + (drone.pos.y - pv.y) * alpha, pv.z + (drone.pos.z - pv.z) * alpha);
+      const eh = drone.kind === 'rc' ? RC.camH : 0; // RC카: 바닥에서 조금 위 카메라
+      cam.position.set(pv.x + (drone.pos.x - pv.x) * alpha, pv.y + (drone.pos.y - pv.y) * alpha + eh, pv.z + (drone.pos.z - pv.z) * alpha);
       if (a === this.player) {
         this.camYaw = this.controller.yaw;
         this.camPitch = this.controller.pitch;
@@ -982,8 +1080,15 @@ export class GameClient {
         this.camPitch = drone.pitch;
       }
       const lateral = (drone.vel?.x ?? 0) * Math.cos(this.camYaw) - (drone.vel?.z ?? 0) * Math.sin(this.camYaw);
-      cam.rotation.set(this.camPitch, this.camYaw, -lateral * 0.03);
-      this.stage.setZoom(1);
+      if (drone.kind === 'rc') {
+        // RC카: 바닥 진동으로 살짝 떨림 · 넓은 렌즈
+        const sp = Math.min(1, Math.hypot(drone.vel?.x ?? 0, drone.vel?.z ?? 0) / RC.speed);
+        cam.rotation.set(this.camPitch + Math.sin(performance.now() / 23) * 0.004 * sp, this.camYaw, -lateral * 0.012);
+        this.stage.setZoom(0.85);
+      } else {
+        cam.rotation.set(this.camPitch, this.camYaw, -lateral * 0.03);
+        this.stage.setZoom(1);
+      }
       this.audio.setListener(cam.position, { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) });
       this.audio.setShelter(this.stage.underCover(cam.position));
       return;
@@ -1055,7 +1160,7 @@ export class GameClient {
     for (const d of this.match.drones ?? []) {
       const key = `drone${d.id}`;
       live.add(key);
-      this.audio.setLoop(key, 'drone', d.pos);
+      this.audio.setLoop(key, d.kind === 'rc' ? 'rc' : 'drone', d.pos);
     }
     for (const key of [...(this.audio.loops?.keys() ?? [])]) if (key.startsWith('drone') && !live.has(key)) this.audio.stopLoop(key);
   }

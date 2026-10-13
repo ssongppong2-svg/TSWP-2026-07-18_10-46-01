@@ -769,6 +769,43 @@ function buildGearParts(id) {
       P.add('dark', cylG(0.008, 0.008, 0.016, 8), [x * 0.07, 0.03, z * 0.07]);
     }
     P.add('red', sphG(0.005, 6, 4), [0, 0.038, 0.045]);
+  } else if (id === 'rc') {
+    // RC카 (손바닥 위): 낮은 차체 + 바퀴 4개 + 카메라 기둥 + 안테나
+    P.add('canLight', rbox(0.056, 0.02, 0.096, 0.006), [0, 0.02, 0]);
+    P.add('dark', rbox(0.042, 0.014, 0.046, 0.004), [0, 0.036, 0.01]);
+    P.add('can', rbox(0.018, 0.016, 0.018, 0.003), [0, 0.044, -0.028]);
+    P.add('dark', cylG(0.0055, 0.0055, 0.006, 10), [0, 0.045, -0.038], [Math.PI / 2, 0, 0]);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      P.add('rubber', cylG(0.016, 0.016, 0.013, 14), [x * 0.035, 0.014, z * 0.032], [0, 0, Math.PI / 2]);
+      P.add('steel', cylG(0.006, 0.006, 0.0135, 8), [x * 0.035, 0.014, z * 0.032], [0, 0, Math.PI / 2]);
+    }
+    P.add('dark', cylG(0.0008, 0.0008, 0.05, 5), [0.018, 0.062, 0.034]);
+    P.add('screenG', sphG(0.0025, 6, 4), [0, 0.044, 0.04]);
+  } else if (id === 'alarm') {
+    // 경보 센서: 작은 상자 + 붉은 렌즈 + 뒤 접착판
+    P.add('can', rbox(0.05, 0.036, 0.026, 0.004), [0, 0.02, 0]);
+    P.add('red', cylG(0.008, 0.008, 0.004, 12), [0, 0.022, -0.014], [Math.PI / 2, 0, 0]);
+    P.add('rubber', rbox(0.052, 0.038, 0.004, 0.001), [0, 0.02, 0.014]);
+    P.add('screenG', sphG(0.003, 6, 4), [0.017, 0.032, -0.013]);
+  } else if (id === 'cam') {
+    // 던지는 카메라: 고무 받침 + 돔 + 렌즈
+    P.add('rubber', cylG(0.034, 0.038, 0.012, 16), [0, 0.006, 0]);
+    P.add('can', sphG(0.028, 14, 8), [0, 0.014, 0], [0, 0, 0], [1, 0.75, 1]);
+    P.add('dark', cylG(0.009, 0.01, 0.014, 10), [0, 0.022, -0.024], [Math.PI / 2, 0, 0]);
+    P.add('screenG', sphG(0.003, 6, 4), [0.018, 0.03, -0.012]);
+  } else if (id === 'camview' || id === 'pulse') {
+    // 손에 든 화면 장치: 카메라 보기(작은 태블릿) · 심장 박동 센서(붉은 화면 + 안테나 두 개)
+    // 화면은 나를 향함(+z) · 위쪽이 살짝 뒤로 젖혀짐
+    const pulse = id === 'pulse';
+    const tilt = [-0.3, 0, 0];
+    P.add('can', rbox(0.066, 0.096, 0.014, 0.008), [0, 0.04, 0], tilt);
+    P.add('rubber', rbox(0.07, 0.016, 0.017, 0.005), [0, -0.004, 0.0], tilt);
+    P.add(pulse ? 'screenR' : 'screenG', rbox(0.052, 0.062, 0.002, 0.004), [0, 0.046, 0.0075], tilt);
+    P.add('dark', rbox(0.054, 0.004, 0.0025, 0.001), [0, 0.012, 0.0076], tilt);
+    if (pulse) {
+      for (const x of [-0.02, 0.02]) P.add('dark', cylG(0.0035, 0.0028, 0.045, 8), [x, 0.105, -0.014], tilt);
+      P.add('red', sphG(0.003, 6, 4), [0.024, 0.008, 0.009]);
+    }
   } else if (id === 'det') {
     // 기폭기: 손에 쥐는 상자 + 빨간 단추 + 안테나
     P.add('can', rbox(0.036, 0.075, 0.022, 0.006), [0, 0.02, 0]);
@@ -777,13 +814,14 @@ function buildGearParts(id) {
     P.add('steel', cylG(0.0016, 0.0012, 0.08, 6), [0.012, 0.09, 0]);
   } else {
     // 원통형 (이명·섬광·연막·최루): 몸통 색과 띠로 구분
-    const body = { stun: 'can', flash: 'canLight', smoke: 'smokeG', gas: 'gasY' }[id] ?? 'can';
-    const r = id === 'smoke' || id === 'gas' ? 0.03 : 0.024;
+    const body = { stun: 'can', flash: 'canLight', smoke: 'smokeG', gas: 'gasY', emp: 'empB' }[id] ?? 'can';
+    const r = id === 'smoke' || id === 'gas' || id === 'emp' ? 0.03 : 0.024;
     P.add(body, cylG(r, r, 0.1, 18), [0, 0.01, 0]);
     P.add('dark', cylG(r + 0.0006, r + 0.0006, 0.008, 18), [0, 0.045, 0]);
     if (id === 'stun' || id === 'flash') for (let i = 0; i < 3; i++) P.add('dark', cylG(r + 0.0004, r + 0.0004, 0.004, 18), [0, -0.02 + i * 0.018, 0]);
     if (id === 'gas') P.add('red', cylG(r + 0.0006, r + 0.0006, 0.01, 18), [0, -0.01, 0]);
     if (id === 'smoke') P.add('canLight', cylG(r + 0.0006, r + 0.0006, 0.01, 18), [0, -0.015, 0]);
+    if (id === 'emp') for (let i = 0; i < 2; i++) P.add('screenB', cylG(r + 0.0006, r + 0.0006, 0.005, 18), [0, -0.022 + i * 0.03, 0]);
     P.add('canLight', cylG(0.009, 0.011, 0.02, 12), [0, 0.07, 0]);
     lever();
   }
@@ -846,6 +884,11 @@ export class ViewModel {
       c4: std({ color: '#c9b58c', roughness: 0.9 }),
       tape: std({ color: '#2b3a52', roughness: 0.8 }),
       red: std({ color: '#c8281e', roughness: 0.5, emissive: '#c8281e', emissiveIntensity: 0.2 }),
+      // 전술 장비: EMP 몸통 · 빛나는 화면(초록 카메라 · 붉은 심박 · 푸른 EMP 띠)
+      empB: std({ color: '#33495f', roughness: 0.45, metalness: 0.4 }),
+      screenG: new THREE.MeshBasicMaterial({ color: '#2f9a68', toneMapped: false }),
+      screenR: new THREE.MeshBasicMaterial({ color: '#b8372d', toneMapped: false }),
+      screenB: new THREE.MeshBasicMaterial({ color: '#6fb8ff', toneMapped: false }),
     };
     // 조준선: 밝은 배경에서도 빨갛게 보이도록 덧셈 섞기 대신 불투명에 가깝게
     this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff2a18', transparent: true, opacity: 0.92, depthWrite: false, toneMapped: false });
@@ -860,7 +903,7 @@ export class ViewModel {
       ['rifle', () => this.buildRifle()], ['pistol', () => this.buildPistol()], ['knife', () => this.buildKnife()],
       ['smg', () => this.buildSmg()], ['shotgun', () => this.buildShotgun()], ['sniper', () => this.buildSniper()], ['sheriff', () => this.buildSheriff()],
       ['mpistol', () => this.buildMpistol()], ['carbine', () => this.buildCarbine()], ['burst', () => this.buildBurst()], ['dmr', () => this.buildDmr()], ['lmg', () => this.buildLmg()],
-      ...['frag', 'stun', 'flash', 'smoke', 'gas', 'c4', 'det', 'drone'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
+      ...['frag', 'stun', 'flash', 'smoke', 'gas', 'emp', 'c4', 'det', 'drone', 'rc', 'alarm', 'cam', 'camview', 'pulse'].map((id) => [`gear:${id}`, () => this.buildHeld(id)]),
     ];
     for (const [id, build] of GUNS) {
       this.pending = [];
@@ -911,7 +954,7 @@ export class ViewModel {
     const bones = list.map((x) => x.bone);
     const skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
     this.skeletons.push(skeleton);
-    const emissive = { watchFace: 1, tritium: 1.4, lensW: 0.15 };
+    const emissive = { watchFace: 1, tritium: 1.4, lensW: 0.15, screenG: 0.75, screenR: 0.75, screenB: 0.9 };
     const geos = mergeSkinned(list.map((x) => x.geos), (mat) => {
       if (mat === 'sleeve' || mat === 'glass') return { cls: mat };
       const src = this.mats[mat];
@@ -1074,6 +1117,12 @@ export class ViewModel {
 
   // 손에 든 투척·폭발 장비: 오른손으로 쥐고 몸 앞 오른쪽에 (칼과 같은 쥐는 자세)
   buildHeld(id) {
+    // 손에 든 모습: 화면 장치(카메라 보기·심박 센서)는 화면이 나를 향하게 가운데 아래로, RC카는 윗면이 보이게
+    const POSE = {
+      rc: { hip: new V3(0.085, -0.13, -0.29), hipRot: new THREE.Euler(0.55, 0.55, -0.12), scale: 0.85 },
+      camview: { hip: new V3(0.055, -0.118, -0.27), hipRot: new THREE.Euler(0.08, 0.3, -0.05), scale: 1 },
+      pulse: { hip: new V3(0.055, -0.118, -0.27), hipRot: new THREE.Euler(0.08, 0.3, -0.05), scale: 1 },
+    }[id];
     const g = new THREE.Group();
     const item = new THREE.Group();
     this.mount(item, buildGearParts(id));
@@ -1089,8 +1138,8 @@ export class ViewModel {
       group: g, muzzle, port: muzzle, core: null, item,
       kind: 'held',
       spec: { draw: 0.25, reload: 1, melee: true },
-      scale: 1,
-      hip: new V3(0.1, -0.105, -0.3), hipRot: new THREE.Euler(0.2, 0.3, -0.15),
+      scale: POSE?.scale ?? 1,
+      hip: POSE?.hip ?? new V3(0.1, -0.105, -0.3), hipRot: POSE?.hipRot ?? new THREE.Euler(0.2, 0.3, -0.15),
     };
   }
 

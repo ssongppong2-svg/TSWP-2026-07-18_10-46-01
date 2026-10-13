@@ -2,7 +2,7 @@ import { TEAM_INFO, TEAMS, BOMB, LOAD, ULT } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
 import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
-import { DRONE, GEAR, THROW_ORDER } from '../sim/gear.js';
+import { DRONE, GADGET_ORDER, GEAR, RC, THROW_ORDER } from '../sim/gear.js';
 import { COMMANDS } from '../client/input.js';
 import { ENTRY_NAME, ENTRY_PHASE } from '../sim/entry-orders.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
@@ -89,11 +89,18 @@ export class Hud {
         <div class="vw-name"></div>
       </div>
       <div class="drone-hud"><div class="dh-frame"><i></i><i></i><i></i><i></i></div><div class="dh-box"></div>
-        <div class="dh-top"><b>정찰 드론 · 라이브</b><span class="dh-bat"><i></i></span><em class="dh-sec"></em></div>
+        <div class="dh-top"><b class="dh-name">정찰 드론 · 라이브</b><span class="dh-bat"><i></i></span><em class="dh-sec"></em></div>
         <div class="dh-keys"></div></div>
       <div class="mirror-hud"><div class="mh-lens"></div><div class="mh-box"></div>
         <div class="mh-top"><b>문 밑 카메라</b><span>광각 · 건너편</span></div>
         <div class="mh-keys"></div></div>
+      <div class="cam-hud"><div class="ch-lens"></div><div class="ch-static"></div><div class="ch-box"></div>
+        <div class="ch-top"><b>카메라 · 라이브</b><span class="ch-idx"></span></div>
+        <div class="ch-off"><b>신호 없음</b><span>EMP · 잠시 뒤 돌아옴</span></div>
+        <div class="ch-keys"></div></div>
+      <div class="pulse-hud"><div class="ph-screen"><div class="ph-fan"></div><i class="ph-me"></i><div class="ph-dots"></div></div>
+        <div class="ph-text"><b>심장 박동</b><span class="ph-n">탐지 중</span></div></div>
+      <div class="emp-hud"><b>EMP</b><span>전자 장비 먹통 · 지도·장비 정지 <em class="emp-sec"></em></span></div>
       <div class="hint-keys"></div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
@@ -167,6 +174,14 @@ export class Hud {
       mirror: $('.mirror-hud'),
       droneBat: $('.dh-bat i'),
       droneSec: $('.dh-sec'),
+      droneName: $('.dh-name'),
+      camHud: $('.cam-hud'),
+      camIdx: $('.ch-idx'),
+      pulse: $('.pulse-hud'),
+      pulseDots: $('.ph-dots'),
+      pulseN: $('.ph-n'),
+      emp: $('.emp-hud'),
+      empSec: $('.emp-sec'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -327,6 +342,13 @@ export class Hud {
     if (dk) dk.innerHTML = `${kbds('forward', 'left', 'back', 'right')} 이동 ${kbd('jump')} 위 ${kbd('crouch')} 아래 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')} 복귀`;
     const mk = $('.mh-keys');
     if (mk) mk.innerHTML = `<kbd>마우스</kbd> 둘러보기 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')}·이동 거두기`;
+    const ck = $('.ch-keys');
+    if (ck) ck.innerHTML = `<kbd>마우스</kbd> 둘러보기 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>오른쪽 클릭</kbd> 다음 카메라 ${kbd('interact')}·이동 거두기`;
+    this.droneKeys = {
+      drone: `${kbds('forward', 'left', 'back', 'right')} 이동 ${kbd('jump')} 위 ${kbd('crouch')} 아래 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')} 복귀`,
+      rc: `${kbds('forward', 'left', 'back', 'right')} 운전 <kbd>마우스</kbd> 방향 ${kbd('jump')} 깡충 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')} 복귀`,
+    };
+    if (this.cache) delete this.cache.droneKind; // 드론·RC카 안내도 다시
     (this.patchEls ?? []).forEach((p, i) => {
       const key = (p?.slot ?? this.els.patchBar.children[i])?.querySelector('.ps-key');
       if (key) key.textContent = K(`patch${i}`);
@@ -502,21 +524,24 @@ export class Hud {
     // 투척·장비: 가진 것과 개수, 손에 든 것은 밝게 (4 투척물 · 5 C4/기폭기)
     const eq = a.equip;
     const charges = (m.charges ?? []).filter((c) => c.ownerId === a.id).length;
-    const gearItems = [...THROW_ORDER, 'c4', 'drone'].filter((id) => (a.gear?.[id] ?? 0) > 0);
-    // 손에 있는 드론: 남은 배터리(초) — 충전 중이면 흐리게
-    const dBat = (a.gear?.drone ?? 0) > 0 ? Math.floor(a.droneBat ?? GEAR.drone.battery) : -1;
-    const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}|${dBat}`;
+    const gearItems = [...THROW_ORDER, ...GADGET_ORDER].filter((id) => (a.gear?.[id] ?? 0) > 0);
+    // 손에 있는 드론·RC카: 남은 배터리(초) — 충전 중(띄울 수 없음)이면 흐리게
+    const bat = (id) => ((a.gear?.[id] ?? 0) > 0 ? Math.floor(a[id === 'rc' ? 'rcBat' : 'droneBat'] ?? GEAR[id].battery) : -1);
+    const dBat = bat('drone'), rBat = bat('rc');
+    const teamCams = m.gadgets?.teamCams(a.team).length ?? 0;
+    const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}|${dBat}|${rBat}|${teamCams}`;
     this.set('gear', gearSig, () => {
-      const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === eq?.kind && (id === 'c4' || id === 'drone'));
-      const cells = gearItems.map((id) => id === 'drone'
-        ? `<span class="vg ${on(id) ? 'on' : ''} ${dBat < DRONE.minLaunch ? 'low' : ''}" title="${GEAR[id].name} · 배터리 ${dBat}초">${GEAR_ICONS[id]}<i>${dBat}s</i></span>`
+      const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === eq?.kind && GADGET_ORDER.includes(id));
+      const cells = gearItems.map((id) => (id === 'drone' || id === 'rc')
+        ? `<span class="vg ${on(id) ? 'on' : ''} ${(id === 'rc' ? rBat : dBat) < (id === 'rc' ? RC : DRONE).minLaunch ? 'low' : ''}" title="${GEAR[id].name} · 배터리 ${id === 'rc' ? rBat : dBat}초">${GEAR_ICONS[id]}<i>${id === 'rc' ? rBat : dBat}s</i></span>`
         : `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
       if (charges) cells.push(`<span class="vg ${eq?.kind === 'det' ? 'on' : ''}" title="기폭기 · 붙인 C4 ${charges}개">${GEAR_ICONS.det}<i>${charges}</i></span>`);
+      if (teamCams) cells.push(`<span class="vg ${eq?.kind === 'camview' ? 'on' : ''}" title="카메라 보기 · 팀 카메라 ${teamCams}개">${GEAR_ICONS.camview}<i>${teamCams}</i></span>`);
       E.gear.innerHTML = cells.length ? `${kbds('throw', 'gadget')}${cells.join('')}` : '';
       E.gear.classList.toggle('show', cells.length > 0);
     });
     if (eq) {
-      const name = eq.kind === 'throw' ? GEAR[eq.id].name : { c4: 'C4 폭약', det: '기폭기', drone: '정찰 드론' }[eq.kind] ?? '';
+      const name = eq.kind === 'throw' ? GEAR[eq.id].name : { c4: 'C4 폭약', det: '기폭기', camview: '카메라 보기' }[eq.kind] ?? GEAR[eq.kind]?.name ?? '';
       this.set('wsel', `gear:${name}`, () => (E.wname.innerHTML = `${GEAR_ICONS[eq.kind === 'throw' ? eq.id : eq.kind] ?? ''}<span>${name}</span>`));
     }
     // 탄종 (일반탄이 아니면 탄약 앞에 표시)
@@ -574,20 +599,65 @@ export class Hud {
       this.root.classList.toggle('droning', v);
     });
     if (drone) {
+      const kind = drone.kind ?? 'drone';
       const bat = Math.max(0, drone.battery ?? 0);
+      this.set('droneKind', kind, (v) => {
+        E.droneName.textContent = v === 'rc' ? 'RC카 · 라이브' : '정찰 드론 · 라이브';
+        E.drone.querySelector('.dh-keys').innerHTML = this.droneKeys?.[v] ?? '';
+        E.drone.classList.toggle('rc', v === 'rc');
+      });
       this.set('droneBat', Math.ceil(bat), (v) => {
         E.droneSec.textContent = `${v}초`;
-        E.droneBat.style.transform = `scaleX(${bat / GEAR.drone.battery})`;
+        E.droneBat.style.transform = `scaleX(${bat / GEAR[kind].battery})`;
         E.drone.classList.toggle('low', v <= 5);
       });
     }
+    // 던진 카메라 화면: 몇 번째 카메라 · EMP면 신호 없음
+    const cv = a.alive && a.camView ? m.gadgets?.view(a) : null;
+    this.set('camHud', !!cv, (v) => {
+      E.camHud.classList.toggle('show', v);
+      this.root.classList.toggle('camming', v);
+    });
+    if (cv) {
+      const list = m.gadgets.teamCams(a.team);
+      const i = list.findIndex((c) => c.id === cv.cam.id);
+      const owner = m.agentById(cv.cam.ownerId);
+      this.set('camIdx', `${i + 1}/${list.length}|${owner?.name ?? ''}`, () => (E.camIdx.textContent = `${i + 1} / ${list.length}${owner && owner !== a ? ` · ${owner.name}` : ''}`));
+      this.set('camOff', cv.off, (v) => E.camHud.classList.toggle('off', v));
+    }
+    // 심장 박동 센서: 앞쪽 부채꼴 화면에 점 (가까울수록 아래 가운데에 가까움)
+    const pulsing = a.alive && a.equip?.kind === 'pulse';
+    this.set('pulseHud', pulsing, (v) => E.pulse.classList.toggle('show', v));
+    this.set('pulseOn', pulsing && !!a.pulseOn, (v) => E.pulse.classList.toggle('on', v));
+    if (pulsing) {
+      const hits = a.pulseOn ? a.pulseHits ?? [] : [];
+      const sig = hits.map((h) => `${h.id}:${Math.round(h.x * 2)},${Math.round(h.z * 2)}`).join('|') + (a.pulseOn ? '' : 'x') + Math.round(a.yaw * 20);
+      this.set('pulseDots', sig, () => {
+        const R = GEAR.pulse.range;
+        const fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw), rx = Math.cos(a.yaw), rz = -Math.sin(a.yaw);
+        E.pulseDots.innerHTML = hits.map((h) => {
+          const dx = h.x - a.pos.x, dz = h.z - a.pos.z;
+          const f = (dx * fx + dz * fz) / R, r = (dx * rx + dz * rz) / R;
+          const up = h.y - a.pos.y > 1.5 ? 'up' : h.y - a.pos.y < -1.5 ? 'down' : '';
+          return `<i class="${up}" style="left:${(50 + r * 50).toFixed(1)}%;bottom:${Math.max(0, f * 100).toFixed(1)}%"><em>${Math.round(h.d)}</em></i>`;
+        }).join('');
+        E.pulseN.innerHTML = !a.pulseOn ? `<kbd>왼쪽 클릭</kbd> 누르고 있으면 탐지 · 앞쪽 ${GEAR.pulse.range} m · 벽 너머 ${kbd('primary')} 총` : hits.length ? `${hits.length}명 · 가장 가까움 ${Math.round(hits[0].d)} m` : '앞쪽 15 m 안 없음';
+      });
+    }
+    // EMP: 바디캠·장비 먹통 남은 시간
+    const empT = a.alive ? a.empT ?? 0 : 0;
+    this.set('emp', empT > 0, (v) => {
+      E.emp.classList.toggle('show', v);
+      this.root.classList.toggle('emped', v);
+    });
+    if (empT > 0) this.set('empSec', Math.ceil(empT), (v) => (E.empSec.textContent = `${v}초`));
     // 문 밑 카메라 화면
     const mirror = !!a.mirror && a.alive;
     this.set('mirror', mirror, (v) => {
       E.mirror.classList.toggle('show', v);
       this.root.classList.toggle('mirroring', v);
     });
-    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || sighted || wheel !== null || shopOpen || drone || mirror), (v) => E.crosshair.classList.toggle('hide', v));
+    this.set('chHide', !!(chOff || a.lockpick || !a.alive || scoped || sighted || wheel !== null || shopOpen || drone || mirror || cv), (v) => E.crosshair.classList.toggle('hide', v));
     this.hitT -= dt;
     if (this.hitT <= 0) E.hitmarker.classList.remove('show');
 
@@ -627,12 +697,18 @@ export class Hud {
       else if (eq2?.kind === 'c4') prompt = '<kbd>왼쪽 클릭</kbd> 가까운 벽·바닥·문에 C4 붙이기 <small>(2.6 m 안)</small>';
       else if (eq2?.kind === 'det') prompt = `<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 ${kbd('gadget')} 다음 장비 ${kbd('primary')} 총`;
       else if (eq2?.kind === 'drone') prompt = '<kbd>왼쪽 클릭</kbd> 정찰 드론 띄우기 <small>(조종하는 동안 몸은 앉아서 무방비)</small>';
+      else if (eq2?.kind === 'rc') prompt = '<kbd>왼쪽 클릭</kbd> RC카 내려놓기 <small>(바닥으로 조용히 · 조종하는 동안 몸은 앉아서 무방비)</small>';
+      else if (eq2?.kind === 'alarm') prompt = `<kbd>왼쪽 클릭</kbd> 가까운 벽에 경보 센서 <small>(맞은편 벽까지 레이저 줄 · 붙인 높이가 줄 높이)</small> ${kbd('gadget')} 다음`;
+      else if (eq2?.kind === 'cam') prompt = `${GEAR.cam.name} · <kbd>왼쪽 클릭</kbd> 멀리 <kbd>오른쪽 클릭</kbd> 가까이 <small>(처음 닿은 벽·바닥에 붙음)</small> ${kbd('gadget')} 다음`;
+      else if (eq2?.kind === 'camview') prompt = `<kbd>왼쪽 클릭</kbd> 팀 카메라 보기 <small>(보는 동안 몸은 앉아서 무방비)</small> ${kbd('gadget')} 다음 ${kbd('primary')} 총`;
+      else if (eq2?.kind === 'pulse') prompt = ''; // 심박 센서 화면에 사용법이 나옴
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';
       else if (a.slippery) prompt = '마찰력 0 구역 · 제동 불가';
       else if (a.mired) prompt = '마찰 폭풍 · 기동력 저하';
       else if ((a.stunT ?? 0) > 0.3) prompt = '이명 · 귀가 울리고 조준이 흔들림';
       else if ((a.gasT ?? 0) > 0) prompt = '최루 가스 · 빠져나가야 함';
+      if (a.pulseOn || a.camView) prompt = ''; // 화면을 가리지 않게
     }
     if (wheel) prompt = ''; // 휠이 열려 있으면 안내는 숨김 (겹치지 않게)
     this.set('prompt', prompt, (v) => {
@@ -666,8 +742,10 @@ export class Hud {
     this.set('wheelSel', wheel ? wheel.sel : null, (v) => this.wheelItems.forEach((it, i) => it.classList.toggle('on', i === v)));
 
     // 미니맵 (초당 약 12번) · 작전 지도 (M)
+    // EMP를 맞으면 바디캠 지도가 먹통 (마지막 화면이 멈춘 채 지지직)
+    this.set('mapDead', (a.empT ?? 0) > 0 && a.alive, (v) => this.$('.vh-minimap').classList.toggle('dead', v));
     this.miniT -= dt;
-    if (this.miniT <= 0) {
+    if (this.miniT <= 0 && !((a.empT ?? 0) > 0 && a.alive)) {
       this.miniT = 0.08;
       this.miniMap.update(dt, a);
     }

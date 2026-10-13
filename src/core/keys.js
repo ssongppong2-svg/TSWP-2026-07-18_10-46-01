@@ -14,7 +14,7 @@ export const KEY_ACTIONS = [
   { id: 'secondary', group: '무기 · 장비', name: '보조무기', def: 'Digit2' },
   { id: 'knife', group: '무기 · 장비', name: '칼', def: 'Digit3' },
   { id: 'throw', group: '무기 · 장비', name: '투척물 (다시 누르면 다음)', def: 'Digit4' },
-  { id: 'gadget', group: '무기 · 장비', name: 'C4 · 기폭기 · 드론', def: 'Digit5' },
+  { id: 'gadget', group: '무기 · 장비', name: '전술 장비 (C4·드론·RC카·센서·카메라 · 다시 누르면 다음)', def: 'Digit5' },
   { id: 'reload', group: '무기 · 장비', name: '재장전', def: 'KeyR' },
   { id: 'inspect', group: '무기 · 장비', name: '총 살펴보기 (누른 채)', def: 'KeyT' },
   { id: 'patch0', group: '포스 패치', name: '일반 패치 1', def: 'KeyC' },

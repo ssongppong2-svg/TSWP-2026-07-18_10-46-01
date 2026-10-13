@@ -136,6 +136,7 @@ export const BodycamShader = {
     blur: { value: 0 },
     rain: { value: 0 },
     supp: { value: 0 },
+    glitch: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -143,7 +144,7 @@ export const BodycamShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp;
+    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp, glitch;
     varying vec2 vUv;
     float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
     vec2 lens(vec2 uv) {
@@ -182,6 +183,12 @@ export const BodycamShader = {
     }
     void main() {
       vec2 uv = lens(vUv);
+      // EMP: 바디캠 신호가 튐 — 가로 띠가 옆으로 밀리고 지지직
+      if (glitch > 0.001) {
+        float band = floor(vUv.y * 36.0) + floor(time * 13.0) * 7.0;
+        float jump = step(1.0 - glitch * 0.18, rand(vec2(band, floor(time * 9.0))));
+        uv.x += (rand(vec2(band, floor(time * 23.0))) - 0.5) * 0.045 * jump * glitch;
+      }
       float rim = 0.0;
       if (rain > 0.001) uv += raindrops(vUv, rim) * rain;
       vec2 d = uv - 0.5;
@@ -208,7 +215,8 @@ export const BodycamShader = {
       col = mix(col, col * vec3(1.2, 0.55, 0.5) + vec3(0.05, 0.0, 0.0), damage * (1.0 - v) * (0.35 + 0.25 * pulse));
       // 센서 노이즈
       float g = rand(vUv * vec2(1931.0, 1087.0) + fract(time * 17.0)) - 0.5;
-      col += g * grain * (1.0 + damage * 1.5);
+      col += g * grain * (1.0 + damage * 1.5) + g * glitch * 0.055;
+      col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))) * vec3(0.85, 0.93, 1.08), glitch * 0.25);
       // 섬광
       col = mix(col, vec3(1.0, 0.98, 0.94), clamp(flash, 0.0, 1.0));
       gl_FragColor = vec4(col, 1.0);
@@ -535,7 +543,7 @@ export class Stage {
   }
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
-  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0 } = {}) {
+  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0 } = {}) {
     const u = this.bodycam.uniforms;
     const on = !!this.settings.bodycam;
     // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
@@ -548,6 +556,7 @@ export class Stage {
     u.flash.value = flash;
     u.blur.value = blur;
     u.supp.value = supp;
+    u.glitch.value = glitch;
     u.rain.value = on && this.map?.weather === 'rain' ? this.lensWet ?? 1 : 0;
   }
 
