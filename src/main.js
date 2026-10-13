@@ -11,6 +11,7 @@ import * as S from './ui/screens.js';
 import { onlineScreen } from './ui/online.js';
 import { getMapDef } from './sim/maps/index.js';
 import { missionById } from './sim/operation.js';
+import { loadPhotos } from './client/photos.js';
 
 const app = document.getElementById('app');
 const ui = document.getElementById('ui');
@@ -385,7 +386,8 @@ function boot() {
   showTitle();
   if (new URLSearchParams(location.search).has('debug')) exposeDebug();
 }
-waitFonts().then(boot);
+// 글꼴과 사진 텍스처를 기다린 뒤 시작 (사진은 없으면 절차 텍스처)
+Promise.all([waitFonts(), loadPhotos()]).then(boot);
 
 // 자동 테스트용 (주소 끝에 ?debug)
 function exposeDebug() {
