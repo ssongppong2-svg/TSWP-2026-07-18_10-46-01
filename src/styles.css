@@ -1751,6 +1751,23 @@ button {
   animation: hitIn 0.5s ease-out forwards;
 }
 
+/* 내 탄이 적을 스침(제압): 작고 옅게 */
+.hitmarker[data-kind='supp'] i {
+  width: 5px;
+  height: 1.5px;
+  background: rgba(214, 220, 226, 0.6);
+  box-shadow: none;
+}
+
+.hitmarker[data-kind='supp'].show {
+  animation: suppIn 0.2s ease-out forwards;
+}
+
+@keyframes suppIn {
+  0% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
 @keyframes hitIn {
   0% { opacity: 1; transform: scale(1.35); }
   40% { opacity: 1; transform: scale(1); }

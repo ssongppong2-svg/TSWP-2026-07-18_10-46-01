@@ -405,19 +405,30 @@ export class GameClient {
       A.play('ricochet', { pos: e });
     });
     ev.on('hit', (e) => {
-      this.views.get(e.target.id)?.hit();
+      this.views.get(e.target.id)?.hit(e.headshot ? 1.6 : e.blocked ? 0.6 : 1);
       // 내가 맞힘: 조준점 명중 표시 + 명중음 (산탄은 한 번만)
       if (e.attacker && viewing(e.attacker) && e.attacker.team !== e.target.team && (this.hitSoundT <= 0 || e.killed)) {
         this.hitSoundT = 0.03;
         // 방탄이 막은 탄은 회색 표시 + 쇳소리, 뚫은 탄은 보통 명중
         this.hud.hitmark(e.killed ? 'kill' : e.blocked ? 'block' : e.headshot ? 'head' : 'hit');
-        if (!e.killed) A.play(e.blocked ? 'armorHit' : e.headshot ? 'headshot' : 'hit');
+        // 머리: 헬멧이면 '차랑'(뚫었으면 '딱'도), 맨머리면 '딱' · 몸통: 방탄에 막히면 쇳소리
+        if (!e.killed) {
+          if (e.headshot && e.armor) A.play('helmetPing');
+          if (e.headshot && !e.blocked) A.play('headshot');
+          else if (!e.headshot) A.play(e.blocked ? 'armorHit' : 'hit');
+        }
         // 방탄이 이번 탄으로 부서짐
         if (e.armorBroke && !e.killed) A.play('armorBreak');
       }
       // 내가 맞음: 맞은 방향 표시 + 짧은 충격
       if (viewing(e.target)) {
         if (isMe(e.target)) A.play('hurt');
+        // 헬멧이 머리를 지켜 줌: '차랑' + 잠깐 귀가 울리고 흐려짐
+        if (e.headshot && e.armor && !e.killed) {
+          A.play('helmetPing', { vol: 0.85 });
+          A.play('ring', { vol: 0.45 });
+          this.blur = Math.min(1, this.blur + 0.35);
+        }
         this.shake = Math.min(1, this.shake + (e.headshot ? 0.3 : 0.15));
         this.blur = Math.min(1, this.blur + e.amount / 90);
         if (e.attacker) {
@@ -625,6 +636,11 @@ export class GameClient {
     ev.on('dryFire', (e) => isMe(e.agent) && A.play('dry'));
     // 총알이 내 머리 옆을 스침: 휙·딱 소리 + 고개가 살짝 움찔 (화면 가장자리 어둠은 제압 수치로)
     ev.on('nearMiss', (e) => {
+      // 내 탄이 적을 스침: 조준점에 아주 옅은 표시 (명중 표시가 떠 있으면 생략)
+      if (e.owner === this.player.id && e.agent.team !== this.player.team && this.hud.hitT <= 0 && performance.now() - (this.suppMarkAt ?? 0) > 180) {
+        this.suppMarkAt = performance.now();
+        this.hud.hitmark('supp');
+      }
       if (!viewing(e.agent) || !e.agent.alive) return;
       const near = 1 - e.d / SUPPRESS.radius;
       A.play('whiz', { pos: { x: e.x, y: e.y, z: e.z }, vol: 0.55 + near * 0.45 });
@@ -847,17 +863,43 @@ export class GameClient {
         this.audio.play('heartbeat', { vol: 0.4 + damage * 0.6 });
       }
     }
-    // 지구력이 바닥나면 숨이 가쁨 (지칠수록 크게, 빠르게)
+    // 지구력이 바닥나거나 크게 다치면 숨이 가쁨 (지칠수록·다칠수록 크게, 빠르게)
     const stam = va === this.player && va.alive ? va.stamina ?? 100 : 100;
-    if (this.started && !this.paused && (stam < 30 || va.tired)) {
+    const gasp = va === this.player && va.alive && damage > 0.45 ? damage : 0;
+    if (this.started && !this.paused && (stam < 30 || va.tired || gasp)) {
       this.breathT = (this.breathT ?? 0) - dt;
       if (this.breathT <= 0) {
-        const k = va.tired ? 1 : 1 - stam / 30;
+        const k = Math.max(va.tired ? 1 : stam < 30 ? 1 - stam / 30 : 0, gasp);
         this.breathT = 1.25 - k * 0.35;
         this.audio.play('breath', { vol: 0.45 + k * 0.55 });
       }
     }
+    this.updateTension(dt);
     this.stage.render(dt);
+  }
+
+  // 위기 연출: 분대에서 혼자 남으면 '최후의 1인' 알림 + 낮은 긴장음이 몇 초마다 (라운드마다 한 번 알림)
+  updateTension(dt) {
+    const m = this.match;
+    const me = this.player;
+    if (!this.started || this.paused || m.phase !== 'live' || !me.alive) return;
+    const mates = m.agents.filter((a) => a.team === me.team && a !== me && a.alive).length;
+    const foes = m.agents.filter((a) => a.team !== me.team && a.alive).length;
+    const alone = mates === 0 && foes > 0 && m.agents.some((a) => a.team === me.team && a !== me);
+    const key = `${m.round ?? 0}:${m.liveAt ?? 0}`;
+    if (alone && this.lastStandKey !== key) {
+      this.lastStandKey = key;
+      this.tensionT = 4;
+      this.audio.play('lastStand');
+      this.hud.banner('최후의 1인', `1 대 ${foes} · 소리를 듣고 움직일 것`, 'warn');
+    }
+    if (alone && this.lastStandKey === key) {
+      this.tensionT -= dt;
+      if (this.tensionT <= 0) {
+        this.tensionT = 3.2 + Math.random() * 1.5;
+        this.audio.play('tension', { vol: 0.7 + Math.min(0.3, foes * 0.08) });
+      }
+    }
   }
 
   updateCamera(dt, alpha) {

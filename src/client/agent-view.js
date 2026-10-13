@@ -2101,11 +2101,12 @@ export class AgentView {
   }
 
   // 피격: 붉은 번쩍임 대신 몸이 움찔함 (상체·머리가 짧게 튕김)
-  hit() {
+  // 맞으면 몸이 움찔 (k: 머리는 크게, 방탄에 막히면 작게)
+  hit(k = 1) {
     const f = this.flinch.v;
-    f.x += 2.6 + Math.random() * 1.6;
-    f.y += (Math.random() - 0.5) * 4.5;
-    f.z += (Math.random() - 0.5) * 3.2;
+    f.x += (2.6 + Math.random() * 1.6) * k;
+    f.y += (Math.random() - 0.5) * 4.5 * k;
+    f.z += (Math.random() - 0.5) * 3.2 * k;
   }
 
   muzzleWorld(target) {

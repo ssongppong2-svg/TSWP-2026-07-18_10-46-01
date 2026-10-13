@@ -773,9 +773,16 @@ const SOUNDS = {
     a.tone(o, t, 0.3, { type: 'triangle', freq: 1300, to: 420, gain: 0.25 });
     a.tone(o, t + 0.05, 0.2, { type: 'sine', freq: 2600, to: 900, gain: 0.12 });
   },
+  // 머리 명중 (헬멧 없음): 짧고 날카로운 '딱' + 묵직한 울림
   headshot(a, t) {
-    // 헬멧을 때리는 맑은 금속음
-    const o = a.out(null, 0.42, 0.4, 0.06);
+    const o = a.out(null, 0.42, 0.3, 0.04);
+    a.noise(o, t, 0.018, { type: 'highpass', freq: 3200, gain: 0.9, attack: 0.0004 });
+    a.tone(o, t, 0.09, { type: 'sine', freq: 260, to: 95, gain: 0.6 });
+    a.tone(o, t + 0.005, 0.05, { type: 'triangle', freq: 1500, to: 1100, gain: 0.14 });
+  },
+  // 헬멧을 때리는 맑은 금속음 ('차랑')
+  helmetPing(a, t, pos, vol = 1) {
+    const o = a.out(null, 0.42 * vol, 0.4, 0.06);
     a.noise(o, t, 0.02, { type: 'highpass', freq: 4500, gain: 0.7, attack: 0.0004 });
     a.tone(o, t, 0.22, { type: 'sine', freq: 3150, gain: 0.32 });
     a.tone(o, t, 0.14, { type: 'sine', freq: 4720, gain: 0.16 });
@@ -828,6 +835,19 @@ const SOUNDS = {
   ring(a, t, pos, vol = 1) {
     const o = a.out(null, 0.12 * vol, 2.6, 0);
     a.tone(o, t, 2.5, { type: 'sine', freq: 4200, gain: 0.18, attack: 0.02 });
+  },
+  // 최후의 1인: 낮게 깔리며 부풀었다 가라앉는 소리 · 긴장: 그 뒤로 몇 초마다 아주 낮은 맥박
+  lastStand(a, t) {
+    const o = a.out(null, 0.5, 3, 0.25);
+    a.tone(o, t, 2.6, { type: 'sine', freq: 55, to: 49, gain: 0.5, attack: 0.5 });
+    a.tone(o, t + 0.1, 2.2, { type: 'triangle', freq: 110, to: 98, gain: 0.08, attack: 0.7 });
+    a.noise(o, t, 2.4, { type: 'lowpass', freq: 380, gain: 0.35, attack: 0.9, sweepTo: 120, buf: a.brownBuf });
+  },
+  tension(a, t, pos, vol = 1) {
+    const o = a.out(null, 0.35 * vol, 2.2, 0.2);
+    a.tone(o, t, 0.5, { type: 'sine', freq: 46, gain: 0.55, attack: 0.08 });
+    a.tone(o, t + 0.55, 0.45, { type: 'sine', freq: 44, gain: 0.35, attack: 0.08 });
+    a.noise(o, t, 1.8, { type: 'lowpass', freq: 260, gain: 0.18, attack: 0.7, sweepTo: 90, buf: a.brownBuf });
   },
   heartbeat(a, t, pos, vol) {
     const o = a.out(null, 0.7 * vol, 0.5, 0);

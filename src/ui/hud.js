@@ -321,7 +321,7 @@ export class Hud {
     h.classList.remove('show');
     void h.offsetWidth;
     h.classList.add('show');
-    this.hitT = kind === 'kill' ? 0.45 : 0.22;
+    this.hitT = kind === 'kill' ? 0.45 : kind === 'supp' ? 0.12 : 0.22;
   }
 
   // 내가 제압했을 때 아래 가운데 표시 (이번 라운드 제압 수만큼 눈금)
