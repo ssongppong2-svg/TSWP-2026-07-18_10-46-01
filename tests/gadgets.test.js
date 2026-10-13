@@ -6,6 +6,7 @@ import { DT, TEAMS } from '../src/sim/constants.js';
 import { GEAR, RC, placeTarget } from '../src/sim/gear.js';
 import { CAM, beamCrosses, camLimits, pulseScan } from '../src/sim/gadgets.js';
 import { dirFromAngles } from '../src/core/vec.js';
+import { attachBots } from '../src/ai/bot.js';
 
 const live = (seed = 3) => {
   const m = new Match({ seed, playerTeam: TEAMS.DEFUSE });
@@ -304,4 +305,36 @@ test('EMP: 드론 추락 · C4 기폭 불가 · 카메라·경보 정지 · 사�
   step(m, GEAR.emp.time + 0.5);
   assert.equal(me.empT, 0);
   assert.ok(m.launchDrone(me, null, 'rc'));
+});
+
+test('봇 경보 센서: 넓힌 두 맵 모두 공격팀이 올 길목(폭탄에서 5~24 m)에 줄을 걸고, 부서지면 설치한 팀이 쏜 적 근처를 앎', () => {
+  for (const mapId of ['force-bound', 'science-hall']) {
+    const m = new Match({ seed: 5, playerTeam: TEAMS.DEFUSE, rules: 'rounds', mapId });
+    m.player.human = false;
+    m.player.isPlayer = false;
+    attachBots(m, 'normal');
+    const holders = m.agents.filter((a) => a.team === TEAMS.FORCE);
+    for (const site of ['A', 'B']) {
+      const a = holders.find((x) => m.controllers.get(x.id)?.homeSite === site) ?? holders[0];
+      const brain = m.controllers.get(a.id);
+      brain.homeSite = site;
+      a.gear.alarm = 1;
+      const before = m.gadgets.alarms.length;
+      assert.ok(brain.placeAlarmAhead(m, a, m.map.holds[site][0]), `${mapId} ${site}: 경보 자리를 찾음`);
+      const al = m.gadgets.alarms.at(-1);
+      assert.equal(m.gadgets.alarms.length, before + 1);
+      const bomb = m.bombs.find((b) => b.id === site);
+      const d = Math.hypot(al.x - bomb.x, al.z - bomb.z);
+      assert.ok(d > 2 && d < 26, `${mapId} ${site}: 폭탄에서 ${d.toFixed(1)} m`);
+      assert.ok(al.len >= 0.8 && al.len <= 7, `${mapId} ${site}: 줄 길이 ${al.len.toFixed(1)} m (문간·복도 폭)`);
+    }
+    // 적이 쏴서 부숨 → 설치한 팀 정보에 쏜 적 근처
+    const al = m.gadgets.alarms[0];
+    const foe = m.agents.find((x) => x.team === TEAMS.DEFUSE);
+    let ev = null;
+    m.events.on('gadgetBroken', (e) => (ev = e));
+    m.gadgets.destroy(al, 'shot', foe);
+    assert.ok(ev && ev.by === foe);
+    assert.ok(m.intel[TEAMS.FORCE].some((i) => Math.hypot(i.x - foe.pos.x, i.z - foe.pos.z) < 0.1), `${mapId}: 설치한 팀이 쏜 적 위치를 앎`);
+  }
 });

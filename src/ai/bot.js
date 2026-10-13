@@ -961,12 +961,15 @@ export class BotBrain {
   //   지나가는 방향과 거의 나란한 축은 뺌 (대각선으로 방을 가로질러 문간을 지나가도 찾음)
   placeAlarmAhead(match, a, hold) {
     this.alarmDone = true;
-    // 공격팀이 모이는 곳(이 구역 담당) → 지키는 폭탄
+    // 공격팀이 모이는 곳(이 구역 담당, 내 번호 것부터) → 지키는 폭탄 · 그 길에 마땅한 길목이 없으면 다른 모이는 곳의 길도 봄
     const site = this.homeSite === 'mid' ? (this.index % 2 ? 'B' : 'A') : this.homeSite;
     const stage = match.map.staging?.[site] ?? [];
-    const from = stage[this.index % Math.max(1, stage.length)] ?? match.map.spawns[TEAMS.DEFUSE]?.[0];
     const bomb = match.bombs.find((b) => b.id === site) ?? hold;
-    if (!from) return false;
+    const froms = stage.length ? stage.map((_, k) => stage[(this.index + k) % stage.length]) : [match.map.spawns[TEAMS.DEFUSE]?.[0]];
+    return froms.some((from) => from && this.alarmOnPath(match, a, from, bomb));
+  }
+
+  alarmOnPath(match, a, from, bomb) {
     const path = match.nav.findPath({ x: from.x, y: from.y ?? 0, z: from.z }, { x: bomb.x, y: bomb.y ?? 0, z: bomb.z });
     if (!path?.length) return false;
     const PROBE = 6.6;
