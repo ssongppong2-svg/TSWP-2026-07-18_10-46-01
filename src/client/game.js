@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
-import { eyePos } from '../sim/agent.js';
+import { carriedMass, eyePos } from '../sim/agent.js';
 import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { K, isKey } from '../core/keys.js';
 
@@ -386,6 +386,13 @@ export class GameClient {
       if (e.kind === 'c4' && e.ownerId === this.viewAgent?.id) A.play('detClick');
       const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss' }[e.kind];
       if (snd) A.play(snd, { pos });
+      // 가까운 폭발(세열·C4)은 잠깐 귀가 먹먹해짐 (무겁게 · 거리 12 m 안)
+      if (e.kind === 'frag' || e.kind === 'c4') {
+        const cam = this.stage.camera.position;
+        const d = Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
+        this.blastDeaf = Math.max(this.blastDeaf ?? 0, Math.max(0, 1 - d / 12) * 0.85);
+        this.shake = Math.min(1, this.shake + Math.max(0, 1 - d / 16) * 0.6);
+      }
       // 내가 이명·섬광에 맞으면 귀가 울림
       const hit = e.hit?.find((h) => h.id === this.viewAgent?.id);
       if (hit && (e.kind === 'stun' || hit.k > 0.5)) A.play('ring', { vol: e.kind === 'stun' ? 0.6 + hit.k * 0.6 : hit.k * 0.6 });
@@ -486,11 +493,12 @@ export class GameClient {
     const surfaceOf = (a) => footSurface(this.match.map, a.pos.x, a.pos.y, a.pos.z);
     ev.on('footstep', (e) => {
       const name = e.loud ? 'step' : 'quietStep';
-      if (viewing(e.agent)) A.play(name, { vol: e.loud ? 0.45 : 1, surface: surfaceOf(e.agent) });
+      const kg = carriedMass(e.agent); // 무거울수록 묵직한 발소리
+      if (viewing(e.agent)) A.play(name, { vol: e.loud ? 0.45 : 1, surface: surfaceOf(e.agent), extra: kg });
       else {
         // 달리는 발소리는 NOISE.step 거리까지, 걷거나 앉아 움직이는 소리는 아주 가까이(4m)에서만
         const v = audible(e.agent.pos, e.loud ? NOISE.step : 4 / rain);
-        if (v > 0) A.play(name, { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v, surface: surfaceOf(e.agent) });
+        if (v > 0) A.play(name, { pos: e.agent.pos, vol: e.loud ? v : 0.8 * v, surface: surfaceOf(e.agent), extra: kg });
       }
     });
     ev.on('conceptPicked', (e) => {
@@ -877,7 +885,8 @@ export class GameClient {
     const suppT = va.alive ? va.suppress ?? 0 : 0;
     this.suppVis = (this.suppVis ?? 0) + (suppT - (this.suppVis ?? 0)) * Math.min(1, dt * (suppT > (this.suppVis ?? 0) ? 14 : 3));
     this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis });
-    this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85));
+    this.blastDeaf = Math.max(0, (this.blastDeaf ?? 0) - dt * 0.6);
+    this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85, this.blastDeaf));
     if (gassed && this.started && !this.paused) {
       this.coughT = (this.coughT ?? 0.5) - dt;
       if (this.coughT <= 0) {

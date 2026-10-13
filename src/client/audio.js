@@ -1,7 +1,8 @@
 import { isCovered } from './sound-surfaces.js';
 
 // 효과음은 전부 Web Audio로 즉석 합성 (소리 파일 없음 → 한 파일로 실행 가능).
-// 경로: 소리 → (거리 필터) → (3D 패너) → 마스터 → 먹먹함 필터 → 압축기 → 스피커
+// 경로: 소리 → (거리 필터) → (3D 패너) → 마스터 → 먹먹함 필터 → 저음 강화 · 고음 살짝 깎기 → 압축기 → 스피커
+//   (무겁게: 전체 크기는 그대로 두고 저음 비율·꼬리·울림을 늘림)
 //        ├→ 울림(컨볼루션 잔향: 실내는 짧고 촘촘, 실외는 성기게) → 마스터
 //        └→ 메아리(지연 + 되먹임: 실외에서 건물 벽에 튕겨 오는 총성) → 마스터
 // 공간감: 맵(과학관 = 실내)과 듣는 사람 머리 위(지붕·2층 바닥)로 실내/실외를 정하고 울림·메아리 비율을 바꿈.
@@ -27,18 +28,37 @@ export class AudioEngine {
       const ctx = new AC();
       this.ctx = ctx;
       this.comp = ctx.createDynamicsCompressor();
+      // 압축기 문턱·비율은 그대로 (바꾸면 자동 보정 이득 때문에 모든 소리가 같이 커짐) · 풀림만 조금 길게 → 큰 소리 뒤 묵직하게 가라앉음
       this.comp.threshold.value = -14;
       this.comp.ratio.value = 5;
       this.comp.attack.value = 0.003;
-      this.comp.release.value = 0.18;
+      this.comp.release.value = 0.22;
       this.muffle = ctx.createBiquadFilter();
       this.muffle.type = 'lowpass';
       this.muffle.frequency.value = 20000;
+      // 저음 강화 (가슴을 치는 대역) · 아주 높은 고음은 살짝 깎아 귀가 덜 따갑게
+      this.lowShelf = ctx.createBiquadFilter();
+      this.lowShelf.type = 'lowshelf';
+      this.lowShelf.frequency.value = 110;
+      this.lowShelf.gain.value = 4;
+      this.highShelf = ctx.createBiquadFilter();
+      this.highShelf.type = 'highshelf';
+      this.highShelf.frequency.value = 9000;
+      this.highShelf.gain.value = -2;
       this.master = ctx.createGain();
       this.master.gain.value = this.volume;
       this.master.connect(this.muffle);
-      this.muffle.connect(this.comp);
-      this.comp.connect(ctx.destination);
+      this.muffle.connect(this.lowShelf);
+      this.lowShelf.connect(this.highShelf);
+      this.highShelf.connect(this.comp);
+      // 마지막 안전 장치: -3 dB까지는 그대로, 그 위 순간 최고치만 부드럽게 눌러 찢어지는 소리(클리핑) 방지
+      this.limitIn = ctx.createGain();
+      this.limitIn.gain.value = 0.5; // 곡선이 -2..2 범위를 받도록 절반으로 넣음
+      this.limiter = ctx.createWaveShaper();
+      this.limiter.curve = softClipCurve();
+      this.comp.connect(this.limitIn);
+      this.limitIn.connect(this.limiter);
+      this.limiter.connect(ctx.destination);
       // 잔향
       this.reverb = ctx.createConvolver();
       this.reverbOut = ctx.createGain();
@@ -47,9 +67,9 @@ export class AudioEngine {
       this.reverbOut.connect(this.master);
       // 메아리: 건물 사이 메아리 (두 번 정도 되돌아오고 고음이 깎임)
       this.echo = ctx.createDelay(1);
-      this.echo.delayTime.value = 0.23;
+      this.echo.delayTime.value = 0.29;
       const fb = ctx.createGain();
-      fb.gain.value = 0.32;
+      fb.gain.value = 0.42;
       const echoLp = ctx.createBiquadFilter();
       echoLp.type = 'lowpass';
       echoLp.frequency.value = 1900;
@@ -108,7 +128,8 @@ export class AudioEngine {
   applyAcoustics() {
     if (!this.ctx) return;
     const indoor = this.indoorMap;
-    this.reverb.buffer = this.makeImpulse(this.lowPower ? 1.1 : indoor ? 1.7 : 2.2, indoor);
+    // 울림 길이: 실내 2.3초 · 실외 3초 (저사양은 짧게)
+    this.reverb.buffer = this.makeImpulse(this.lowPower ? 1.1 : indoor ? 2.3 : 3.0, indoor);
     this.updateSpace(true);
   }
 
@@ -118,15 +139,16 @@ export class AudioEngine {
     const k = this.indoorMap ? 1 : this.cover;
     const t = this.ctx.currentTime;
     const tc = now ? 0.01 : 0.35;
-    this.reverbOut.gain.setTargetAtTime(0.42 + k * 0.25, t, tc);
-    this.echoOut.gain.setTargetAtTime(this.indoorMap ? 0 : 0.3 * (1 - k * 0.8), t, tc);
+    // 울림·메아리는 크기보다 길이로 무겁게 (임펄스·되먹임이 길어진 만큼 크기는 거의 그대로)
+    this.reverbOut.gain.setTargetAtTime(0.44 + k * 0.25, t, tc);
+    this.echoOut.gain.setTargetAtTime(this.indoorMap ? 0 : 0.34 * (1 - k * 0.8), t, tc);
   }
 
   makeImpulse(seconds, indoor = false) {
     const ctx = this.ctx;
     const len = Math.floor(ctx.sampleRate * seconds);
     const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-    const decay = indoor ? 3.4 : 2.6;
+    const decay = indoor ? 2.6 : 1.9; // 작을수록 길게 남음
     for (let ch = 0; ch < 2; ch++) {
       const d = buf.getChannelData(ch);
       for (let i = 0; i < len; i++) {
@@ -556,19 +578,30 @@ export class AudioEngine {
     this.noise(dest, t, 0.025, { type: 'bandpass', freq, q, gain, attack: 0.0006 });
   }
 
-  play(name, { pos = null, vol = 1, surface = null } = {}) {
+  play(name, { pos = null, vol = 1, surface = null, extra = null } = {}) {
     if (!this.ctx || this.ctx.state !== 'running') return;
     if (pos && Math.hypot(pos.x - this.listener.x, pos.z - this.listener.z) > 110) return;
     if (this.voices > (this.lowPower ? 40 : 60) && pos) return;
     const fn = SOUNDS[name];
     if (!fn) return;
-    fn(this, this.ctx.currentTime + 0.005, pos, vol, surface);
+    fn(this, this.ctx.currentTime + 0.005, pos, vol, surface, extra);
   }
 }
 
 // ───────── 총성 ─────────
 // 가까이: 날카로운 균열음(crack) + 몸통 폭음(body) + 낮은 충격(thump) + 작동음(mech: 슬라이드·노리쇠·펌프)
 // 멀리: 균열음이 사라지고 둔탁한 '퍽' + 메아리 (거리에 따라 섞음)
+// 부드러운 최고치 제한 곡선: 입력은 실제 값의 절반(-2..2 → -1..1). |u| ≤ 0.7(-3 dB)까지 그대로, 그 위는 1에 천천히 다가감
+function softClipCurve(n = 4096) {
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const u = ((i / (n - 1)) * 2 - 1) * 2;
+    const m = Math.abs(u);
+    c[i] = Math.sign(u) * (m <= 0.7 ? m : 0.7 + 0.3 * Math.tanh((m - 0.7) / 0.3));
+  }
+  return c;
+}
+
 const GUN = {
   pistol: { vol: 0.62, crack: 3200, body: [2300, 900, 0.07], thump: [100, 46, 0.14, 0.75], mech: [[0.035, 3400, 0.45], [0.06, 2600, 0.35]], rev: 0.32, echo: 0.35 },
   sheriff: { vol: 0.8, crack: 2400, body: [1500, 520, 0.11], thump: [66, 30, 0.28, 1.15], mech: [[0.09, 4200, 0.3]], rev: 0.45, echo: 0.55 },
@@ -587,7 +620,8 @@ const GUN = {
 function gunshot(a, t, pos, vol, spec) {
   const d = a.dist(pos);
   const near = pos ? clamp01(1 - (d - 8) / 38) : 1;
-  const o = a.out(pos, spec.vol * vol, 2.2, spec.rev, spec.echo);
+  // 몸통 크기는 예전과 비슷하게(약 +3 dB) 두고 저음·꼬리·울림을 늘려 무게를 냄
+  const o = a.out(pos, spec.vol * vol * 0.88, 3, spec.rev * 1.15, spec.echo * 1.2);
   // 균열음: 공기를 찢는 짧은 고음 (가까울수록)
   a.noise(o, t, 0.011, { type: 'highpass', freq: spec.crack, gain: 1.25 * near, attack: 0.0006 });
   // 몸통 폭음: 내려가는 대역 잡음
@@ -595,8 +629,12 @@ function gunshot(a, t, pos, vol, spec) {
   a.noise(o, t, bd, { type: 'bandpass', freq: b0, q: 0.7, gain: 1.05 * (0.45 + 0.55 * near), attack: 0.0008, sweepTo: b1 });
   // 낮은 충격: 가슴을 치는 저음 (멀어도 남음)
   const [f0, f1, td, tg] = spec.thump;
-  a.tone(o, t, td, { type: 'sine', freq: f0, to: f1, gain: tg, attack: 0.0015 });
-  a.noise(o, t, td * 1.4, { type: 'lowpass', freq: 520, q: 0.6, gain: 0.8, sweepTo: 120, buf: a.brownBuf });
+  a.tone(o, t, td * 1.25, { type: 'sine', freq: f0, to: f1, gain: tg * 1.05, attack: 0.0015 });
+  a.noise(o, t, td * 1.7, { type: 'lowpass', freq: 520, q: 0.6, gain: 0.85, sweepTo: 110, buf: a.brownBuf });
+  // 서브 저음: 큰 총일수록 길고 깊게 (가까울수록 가슴에 울림 · 노트북 스피커에서도 들리게 38 Hz 아래로는 안 내려감)
+  a.tone(o, t + 0.002, 0.16 + tg * 0.2, { type: 'sine', freq: Math.max(44, f1 * 1.15), to: Math.max(38, f1 * 0.8), gain: (0.1 + tg * 0.16) * (0.4 + 0.6 * near), attack: 0.003 });
+  // 꼬리: 총성이 주변을 흔들며 낮게 우르릉 사라짐
+  a.noise(o, t + 0.03, 0.4 + spec.echo * 0.5, { type: 'lowpass', freq: 360, gain: 0.2 * (0.5 + 0.5 * near), attack: 0.012, sweepTo: 80, buf: a.brownBuf });
   // 멀리서: 둔탁한 퍽 소리
   if (near < 0.9) a.noise(o, t, 0.16, { type: 'lowpass', freq: 900, gain: 0.9 * (1 - near), attack: 0.003, sweepTo: 240 });
   // 작동음은 가까울 때만 (내 총이면 확실히)
@@ -694,11 +732,16 @@ const SOUNDS = {
     a.tone(o, t, 0.08, { type: 'sine', freq: 140, to: 70, gain: 0.6 });
   },
   // ───────── 발소리 (바닥 재질별) ─────────
-  step(a, t, pos, vol, surface) {
-    const o = a.out(pos, 0.6 * vol, 0.3, surface === 'tile' ? 0.16 : 0.08);
+  // extra = 들고 있는 장비 질량(kg): 무거울수록 발뒤꿈치가 묵직하게 쿵, 장비가 더 덜그럭
+  step(a, t, pos, vol, surface, kg = 8) {
+    const w = clamp01(((kg ?? 8) - 5) / 12);
+    const o = a.out(pos, 0.6 * vol, 0.35, surface === 'tile' ? 0.16 : 0.08);
     stepLayers(a, o, t, surface, 1);
-    // 달릴 때 장비가 덜그럭
-    if (Math.random() < 0.45) a.noise(o, t + 0.03 + Math.random() * 0.04, 0.03, { type: 'bandpass', freq: 3600 + Math.random() * 1500, q: 7, gain: 0.12 });
+    // 군화 뒤꿈치의 둔한 저음 (무게)
+    a.tone(o, t, 0.07 + w * 0.05, { type: 'sine', freq: 100 - w * 25, to: 60 - w * 12, gain: 0.025 + w * 0.05, attack: 0.002 });
+    // 달릴 때 장비가 덜그럭 (탄창·버클 · 무거울수록 자주·크게)
+    if (Math.random() < 0.45 + w * 0.4) a.noise(o, t + 0.03 + Math.random() * 0.04, 0.03, { type: 'bandpass', freq: 3600 + Math.random() * 1500, q: 7, gain: 0.1 + w * 0.06 });
+    if (Math.random() < 0.2 + w * 0.5) a.noise(o, t + 0.05 + Math.random() * 0.05, 0.04, { type: 'bandpass', freq: 1700 + Math.random() * 700, q: 5, gain: 0.05 + w * 0.08 });
     if (a.wet && surface !== 'tile' && surface !== 'metal') a.noise(o, t + 0.015, 0.09, { type: 'bandpass', freq: 3200 + Math.random() * 900, q: 2.2, gain: 0.35, sweepTo: 1800 });
   },
   quietStep(a, t, pos, vol, surface) {
@@ -749,7 +792,7 @@ const SOUNDS = {
   land(a, t, pos, vol, surface) {
     const o = a.out(pos, 0.5 * vol, 0.4, 0.12);
     a.noise(o, t, 0.16, { type: 'lowpass', freq: 280, gain: 0.35, buf: a.brownBuf });
-    a.tone(o, t, 0.12, { type: 'sine', freq: 75, to: 45, gain: 0.3 });
+    a.tone(o, t, 0.16, { type: 'sine', freq: 75, to: 42, gain: 0.36 });
     stepLayers(a, o, t + 0.01, surface, 0.8);
     a.noise(o, t + 0.04, 0.05, { type: 'bandpass', freq: 3800, q: 6, gain: 0.25 }); // 장비 흔들림
     if (a.wet && surface !== 'tile') a.noise(o, t + 0.02, 0.18, { type: 'bandpass', freq: 2600, q: 1.4, gain: 0.45, sweepTo: 1200 });
@@ -827,9 +870,10 @@ const SOUNDS = {
   },
   hurt(a, t) {
     // 맞은 충격: 둔탁한 저음 + 짧은 숨 (너무 크게 울려 화면·소리를 가리지 않게)
-    const o = a.out(null, 0.5, 0.35, 0);
-    a.noise(o, t, 0.16, { type: 'lowpass', freq: 380, gain: 1, buf: a.brownBuf });
-    a.tone(o, t, 0.14, { type: 'sine', freq: 85, to: 52, gain: 0.65 });
+    const o = a.out(null, 0.42, 0.45, 0);
+    a.noise(o, t, 0.2, { type: 'lowpass', freq: 380, gain: 1, buf: a.brownBuf });
+    a.tone(o, t, 0.18, { type: 'sine', freq: 85, to: 48, gain: 0.65 });
+    a.tone(o, t, 0.24, { type: 'sine', freq: 50, to: 38, gain: 0.22, attack: 0.004 });
     a.noise(o, t + 0.04, 0.12, { type: 'bandpass', freq: 1200, q: 0.8, gain: 0.12 });
   },
   ring(a, t, pos, vol = 1) {
@@ -1022,7 +1066,9 @@ const SOUNDS = {
     for (let i = 0; i < 4; i++) a.tone(o, t + 0.08 + i * 0.16, 0.12, { type: 'square', freq: i % 2 ? 700 : 920, gain: 0.15 });
   },
   explosion(a, t, pos, vol) {
-    const o = a.out(null, 1.0 * vol, 4, 0.6);
+    const o = a.out(null, 1.0 * vol, 5, 0.7);
+    a.tone(o, t, 2.2, { type: 'sine', freq: 48, to: 24, gain: 0.32, attack: 0.004 }); // 땅이 울리는 깊은 저음
+    a.noise(o, t + 0.2, 3.6, { type: 'lowpass', freq: 140, gain: 0.4, attack: 0.3, sweepTo: 45, buf: a.brownBuf });
     a.noise(o, t, 0.08, { type: 'highpass', freq: 1500, gain: 0.8, attack: 0.002 });
     a.noise(o, t, 3.0, { type: 'lowpass', freq: 3000, sweepTo: 60, gain: 1, attack: 0.005 });
     a.noise(o, t, 2.5, { type: 'lowpass', freq: 160, gain: 0.9, attack: 0.01, buf: a.brownBuf });
@@ -1055,7 +1101,9 @@ const SOUNDS = {
     a.noise(o, t, 0.05, { type: 'highpass', freq: 1800, gain: 0.9, attack: 0.001 });
     a.noise(o, t, 0.9, { type: 'lowpass', freq: 2400, sweepTo: 90, gain: 1, attack: 0.003 });
     a.noise(o, t, 1.2, { type: 'lowpass', freq: 180, gain: 0.8, attack: 0.008, buf: a.brownBuf });
-    a.tone(o, t, 0.6, { type: 'sine', freq: 70, to: 28, gain: 0.9 });
+    a.tone(o, t, 0.8, { type: 'sine', freq: 70, to: 26, gain: 0.9 });
+    a.tone(o, t, 1.2, { type: 'sine', freq: 46, to: 26, gain: 0.35, attack: 0.004 });
+    a.noise(o, t + 0.15, 2, { type: 'lowpass', freq: 150, gain: 0.32, attack: 0.25, sweepTo: 50, buf: a.brownBuf });
     for (let i = 0; i < 8; i++) a.noise(o, t + 0.05 + Math.random() * 0.6, 0.03, { type: 'bandpass', freq: 2000 + Math.random() * 2500, q: 4, gain: 0.18 });
   },
   // C4: 더 크고 길게 (건물이 울림)
