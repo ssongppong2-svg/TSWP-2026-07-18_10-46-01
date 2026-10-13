@@ -10,7 +10,7 @@ import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper'];
 const ITEMS = [...WEAP, 'light', 'heavy', ...AMMO_ORDER, ...GEAR_ORDER]; // 상점에서 사는 것 (뒤에만 덧붙여 번호 유지)
@@ -115,6 +115,8 @@ export class HostSync {
     if ('progress' in v && 'picker' in v) return { $b: v.id };
     if (v.st && v.type && this.match.devices?.list.includes(v)) return { $d: v.id };
     if (v.st && v.leaves && this.match.doors?.list.includes(v)) return { $o: v.id };
+    if (this.match.op?.hostages.includes(v)) return { $h: v.id };
+    if (this.match.op?.intel.includes(v)) return { $n: v.id };
     const o = {};
     for (const k in v) {
       if (k === 'prev' || k === 'projectile') continue;
@@ -163,6 +165,7 @@ export class HostSync {
         q: a.quiz ? [a.quiz.id, a.quiz.done ? 1 : 0, a.quiz.ok == null ? -1 : a.quiz.ok ? 1 : 0, a.quiz.choice ?? -1] : 0,
         ak: this.acks[a.id] ?? 0,
         rc: [r3(a.recoil), r3(a.recoilYaw), r3(a.punch)],
+        ot: a.opTask ? [a.opTask.kind === 'free' ? 0 : 1, a.opTask.id, r2(a.opTask.t), a.opTask.need] : 0, // CQB: 결박 풀기·자료 확보 진행
       };
     });
     const snap = {
@@ -185,6 +188,7 @@ export class HostSync {
       G: (m.throwables ?? []).map((t) => [t.id, THROW_ORDER.indexOf(t.kind), r2(t.pos.x), r2(t.pos.y), r2(t.pos.z), t.rest ? 1 : 0]), // 투척물
       K: (m.charges ?? []).map((c) => [c.id, this.ai(m.agentById(c.ownerId)), r2(c.x), r2(c.y), r2(c.z), r2(c.nx), r2(c.ny), r2(c.nz)]), // C4
       Q: (m.drones ?? []).map((d) => [d.id, this.ai(m.agentById(d.ownerId)), r2(d.pos.x), r2(d.pos.y), r2(d.pos.z), r3(d.yaw), r3(d.pitch), r1(d.battery)]), // 드론
+      P: m.op ? m.op.pack((id) => this.idx.get(id) ?? -1) : 0, // CQB 작전 (연구원·자료·발견·장치 해체)
       E: this.events.map((e) => [e.s, e.p]),
     };
     if (m.phase === 'ended') snap.R = m.reason;
@@ -339,6 +343,7 @@ export class ClientSync {
       } else if (a.lockpick) a.lockpick = null;
       if (h.q) a.quiz = { id: h.q[0], done: !!h.q[1], ok: h.q[2] < 0 ? null : h.q[2] === 1, choice: h.q[3] };
       else a.quiz = null;
+      a.opTask = h.ot ? { kind: h.ot[0] ? 'intel' : 'free', id: h.ot[1], t: h.ot[2], need: h.ot[3], at: { x: a.pos.x, z: a.pos.z } } : null;
     }
 
     snap.B.forEach(([st, pk, pr, bx, bz, by], i) => {
@@ -353,6 +358,11 @@ export class ClientSync {
       b.picker = pk >= 0 ? m.agents[pk]?.id ?? null : null;
       b.progress = pr;
     });
+    if (snap.P && m.op) {
+      m.op.unpack(snap.P, (k) => m.agents[k] ?? null);
+      // 작전 결과는 받은 상태로 이 화면에서 계산 (목표·감점·등급이 방장과 같음)
+      if (m.phase === 'ended' && !m.op.result) m.op.result = m.op.score(m.winner === 'defuse', m.reason);
+    }
     if (snap.D) m.devices.unpack(snap.D);
     if (snap.X) m.doors.unpack(snap.X);
     // 투척물·C4: 같은 번호는 이어서 (화면에서 부드럽게 움직이게 이전 위치를 남김)
@@ -452,6 +462,8 @@ export class ClientSync {
     if ('$b' in v) return this.match.bombById(v.$b);
     if ('$d' in v) return this.match.devices?.list[v.$d] ?? null;
     if ('$o' in v) return this.match.doors?.list[v.$o] ?? null;
+    if ('$h' in v) return this.match.op?.hostages[v.$h] ?? null;
+    if ('$n' in v) return this.match.op?.intel[v.$n] ?? null;
     const o = {};
     for (const k in v) o[k] = this.dec(v[k]);
     return o;
@@ -744,6 +756,18 @@ export function planMatch(players, { teamSize = 5, botNames, draft, rng } = {}) 
   return { roster, loadouts };
 }
 
+// CQB 작전 명단: 사람은 모두 진압팀(들어온 순서, 5명까지), 빈자리는 봇 · 용의자 suspects명은 봇
+export function planOp(players, { botNames, suspects }) {
+  const humans = players.slice(0, 5);
+  const roster = [];
+  for (let i = 0; i < 5; i++) {
+    const h = humans[i];
+    roster.push({ id: `defuse-${i}`, team: 'defuse', name: h ? String(h.name || '요원').slice(0, 8) : botNames.defuse[i], key: h?.key ?? null, mas: h ? (h.mastery ?? []).filter((x) => typeof x === 'string').slice(0, 20) : [] });
+  }
+  for (let i = 0; i < suspects; i++) roster.push({ id: `force-${i}`, team: 'force', name: `용의자 ${i + 1}`, key: null, mas: [] });
+  return { roster, loadouts: [], op: true };
+}
+
 // 이 화면 기준 명단 (내 요원 = isPlayer, 다른 사람 = human)
 export function rosterFor(plan, myKey) {
   return plan.roster.map((r) => ({ id: r.id, team: r.team, name: r.name, isPlayer: !!r.key && r.key === myKey, human: !!r.key && r.key !== myKey, mastery: r.mas ?? [] }));
@@ -754,19 +778,23 @@ export function packPlan(plan, patchOrder) {
   return {
     h: plan.roster.filter((r) => r.key).map((r) => [r.id, r.key, r.name, (r.mas ?? []).map((c) => CONCEPT_IDS.indexOf(c)).filter((k) => k >= 0)]),
     l: plan.roster.map((r) => (new Map(plan.loadouts).get(r.id) ?? []).map((id) => (id ? patchOrder.indexOf(id) : -1))),
+    n: TEAMS_.map((t) => plan.roster.filter((r) => r.team === t).length),
+    op: plan.op ? 1 : 0,
   };
 }
 
 export function unpackPlan(packed, patchOrder, botNames) {
   const humans = new Map(packed.h.map(([id, key, name, mas]) => [id, { key, name, mas: (mas ?? []).map((k) => CONCEPT_IDS[k]).filter(Boolean) }]));
   const roster = [];
-  for (const team of TEAMS_) {
-    for (let i = 0; i < 5; i++) {
+  TEAMS_.forEach((team, k) => {
+    const n = packed.n?.[k] ?? 5;
+    for (let i = 0; i < n; i++) {
       const id = `${team}-${i}`;
       const h = humans.get(id);
-      roster.push({ id, team, name: h ? h.name : botNames[team][i], key: h?.key ?? null, mas: h?.mas ?? [] });
+      const bot = packed.op && team === 'force' ? `용의자 ${i + 1}` : botNames[team][i];
+      roster.push({ id, team, name: h ? h.name : bot, key: h?.key ?? null, mas: h?.mas ?? [] });
     }
-  }
+  });
   const loadouts = roster.map((r, i) => [r.id, (packed.l[i] ?? []).map((k) => (k >= 0 ? patchOrder[k] : null))]);
   return { roster, loadouts };
 }

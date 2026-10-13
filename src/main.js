@@ -105,10 +105,12 @@ function showOnline() {
 }
 
 function startNetGame({ start, myKey, role }) {
+  endGame();
   saveSettings(settings);
   setScreen(null);
   closeModal();
-  audio.setRain(getMapDef(start.map).weather === 'rain' ? 1 : 0);
+  const mission = start.mode === 'cqb' ? missionById(start.mission) : null;
+  audio.setRain(getMapDef(mission ? mission.map : start.map).weather === 'rain' ? 1 : 0);
   game = new GameClient({
     stage,
     audio,
@@ -136,6 +138,14 @@ function startNetGame({ start, myKey, role }) {
       onAbort: () => showOnline(),
       onEnd: (result) => {
         endGame();
+        const leave = async () => {
+          await net.session?.leave();
+          showTitle();
+        };
+        if (result.op) {
+          setScreen(S.opResultScreen({ result, online: true, onAgain: backToLobby, onMenu: leave }));
+          return;
+        }
         setScreen(
           S.resultScreen({
             result,
@@ -151,7 +161,8 @@ function startNetGame({ start, myKey, role }) {
       },
     },
   });
-  setOverlay(S.clickToStart({ team: game.team, loadout: game.player.patches.map((p) => p?.id ?? null), mapId: start.map, online: true, onClick: () => game.requestStart() }));
+  if (mission) setOverlay(S.opStartOverlay({ mission, difficulty: start.opDiff ?? 'normal', online: true, onClick: () => game.requestStart() }));
+  else setOverlay(S.clickToStart({ team: game.team, loadout: game.player.patches.map((p) => p?.id ?? null), mapId: start.map, online: true, onClick: () => game.requestStart() }));
 }
 
 // 경기 중 나가기: 방장이면 경기가 끝나고, 참가자면 봇이 대신함

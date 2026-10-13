@@ -49,13 +49,15 @@ export class GameClient {
     const have = loadProgress().concepts;
     const fresh = CONCEPTS.map((c) => c.id).filter((id) => !have.includes(id)).sort(() => Math.random() - 0.5);
     if (net) {
-      // 온라인: 방장이 정한 명단·패치·시드로 모두 같은 경기를 만듦
-      stage.setMap(net.start.map);
+      // 온라인: 방장이 정한 명단·패치·시드로 모두 같은 경기를 만듦 (CQB 작전이면 사람은 모두 진압팀)
+      const mission = net.start.mode === 'cqb' ? missionById(net.start.mission) : null;
+      stage.setMap(mission ? mission.map : net.start.map);
       const plan = unpackPlan(net.start.p, PATCH_ORDER, BOT_NAMES);
       const roster = rosterFor(plan, net.myKey);
       this.keys = new Map(plan.roster.filter((r) => r.key).map((r) => [r.id, r.key]));
       // 개념 카드는 모두에게 같은 것이 놓이도록 시드로만 정함
-      this.match = new Match({ map: stage.map, roster, loadouts: new Map(plan.loadouts), seed: net.start.seed, client: net.role === 'client', rules: 'rounds' });
+      const rules = mission ? { rules: 'cqb', mission: mission.id, opDifficulty: net.start.opDiff ?? 'normal', conceptIds: [], conceptCount: 0 } : { rules: 'rounds' };
+      this.match = new Match({ map: stage.map, roster, loadouts: new Map(plan.loadouts), seed: net.start.seed, client: net.role === 'client', ...rules });
       this.player = this.match.player;
       if (net.role === 'host') {
         attachBots(this.match, net.start.diff);
@@ -116,7 +118,7 @@ export class GameClient {
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.doorsView = new DoorsView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
-    this.opView = this.match.op ? new OpView(stage.scene, this.match) : null;
+    this.opView = this.match.op ? new OpView(stage.scene, this.match, { smooth: !!this.clientSync }) : null;
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
     this.newConcepts = [];
     // 이번 경기 공부 기록 (결과 화면): 보급 점검·해체 문제·힘 장치 사용·새로 숙달한 개념
@@ -636,6 +638,8 @@ export class GameClient {
     });
     ev.on('matchEnd', (e) => {
       this.ended = true;
+      // 방장: 끝난 상태(결과·통계)를 바로 올려 둠 — 참가자가 마지막 스냅숏을 놓쳐도 결과를 받도록 경기를 닫은 뒤에도 남김
+      if (this.hostSync) this.net.session.set({ g: this.hostSync.snapshot({ withStats: true }) });
       this.shop.close();
       A.play(e.winner === this.player.squad ? 'win' : 'lose');
       this.lockpickUI.update(null);
@@ -1084,7 +1088,7 @@ export class GameClient {
   dispose() {
     this.disposed = true;
     this.hostSync?.dispose();
-    if (this.net) this.net.session.set({ in: null, ...(this.hostSync ? { g: null } : {}) });
+    if (this.net) this.net.session.set({ in: null, ...(this.hostSync && this.match.phase !== 'ended' ? { g: null } : {}) });
     cancelAnimationFrame(this.raf);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);

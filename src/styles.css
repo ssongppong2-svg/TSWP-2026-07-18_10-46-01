@@ -5355,3 +5355,45 @@ button {
 .hud.op .hud-bottom {
   display: none;
 }
+
+/* 온라인 대기실: 경기 방식 (5대5 · CQB 협동) */
+.lobby-mode {
+  margin: 4px 0 14px;
+}
+
+.lobby-mode .brief-label {
+  margin: 0 0 8px;
+}
+
+.mode-seg button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 180px;
+  padding: 9px 18px;
+  text-align: left;
+}
+
+.mode-seg button small {
+  font: 500 11px var(--mono);
+  opacity: 0.75;
+}
+
+.lobby-teams.one {
+  grid-template-columns: 1fr;
+}
+
+.lobby-teams.one .online-note {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .mode-seg {
+    display: flex;
+  }
+  .mode-seg button {
+    flex: 1;
+    min-width: 0;
+  }
+}

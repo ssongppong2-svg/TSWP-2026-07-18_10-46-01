@@ -6,7 +6,8 @@ import { DIFFICULTY } from '../ai/bot.js';
 import { createRng } from '../core/rng.js';
 import { openTransport } from '../net/transport.js';
 import { NetSession, normCode } from '../net/session.js';
-import { packPlan, planMatch } from '../net/protocol.js';
+import { packPlan, planMatch, planOp } from '../net/protocol.js';
+import { MISSIONS, missionById } from '../sim/operation.js';
 import { PATCH_ICONS, UI_ICONS } from './icons.js';
 
 const h = (html) => {
@@ -27,6 +28,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
   let disposed = false;
   let off = null;
   let lastStart = net.lastStart ?? null;
+  let lastMode = null;
   let raf = 0;
 
   // 한 프레임에 한 번만 다시 그림 (창이 가려져 있으면 프레임 콜백이 멈추므로 타이머로)
@@ -94,12 +96,18 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     const host = s.host();
     const isHost = !!me && host?.key === me.key;
     const lobby = host?.lobby ?? { map: settings.mapId, diff: settings.difficulty ?? 'normal' };
+    const cqb = lobby.mode === 'cqb';
+    // 방장이 경기 방식을 바꾸면 준비를 풀어 다시 확인하게
+    if (me && !isHost && lastMode != null && lastMode !== (lobby.mode ?? 'rounds') && me.ready) s.set({ ready: false });
+    lastMode = lobby.mode ?? 'rounds';
+    // CQB 작전: 사람은 모두 진압팀 (각자 자기 소속을 진압팀으로 맞춤)
+    if (cqb && me && me.team !== TEAMS.DEFUSE) s.set({ team: TEAMS.DEFUSE, ready: false });
     const team = me?.team ?? null;
     const counts = { defuse: peers.filter((p) => p.team === 'defuse').length, force: peers.filter((p) => p.team === 'force').length };
     const myLoad = me?.load ?? [];
     // 팀원이 이미 고른 패치 수 (나 제외)
     const taken = (id) => peers.filter((p) => !p.me && p.team && p.team === team && (p.load ?? []).includes(id)).length;
-    const everyoneReady = peers.length > 0 && peers.every((p) => p.team && (p.ready || p.key === host?.key));
+    const everyoneReady = peers.length > 0 && peers.every((p) => (cqb || p.team) && (p.ready || p.key === host?.key));
     const roster = (t) => {
       const list = peers.filter((p) => p.team === t);
       return `<div class="lobby-team t-${t}"><div class="lt-head"><b>${TEAM_INFO[t].name}</b><span>${list.length} / ${TEAM_MAX} · 빈자리 봇</span></div>
@@ -116,10 +124,52 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
         return `<button class="lo-patch ${mine ? 'on' : ''}" data-patch="${id}" ${full || !team ? 'disabled' : ''} title="${esc(PATCHES[id].short ?? '')}" style="--c:${PATCH_TIERS[tier].color}">${PATCH_ICONS[id]}<span>${esc(PATCHES[id].name)}</span><small>팀 ${taken(id) + (mine ? 1 : 0)}/${COPIES_PER_TEAM}</small></button>`;
       }).join('')}</div></div>`;
     const noHost = !host ? '<p class="lobby-warn">방장이 방을 나갔습니다. 방을 나가 새로 만들거나 다른 코드로 참가하세요.</p>' : '';
+    const dis = isHost ? '' : 'disabled';
+    const modeSeg = `<div class="lobby-mode"><h3 class="brief-label">경기 방식 ${isHost ? '' : '<small>방장이 정함</small>'}</h3>
+      <div class="seg mode-seg"><button data-mode="rounds" class="${cqb ? '' : 'on'}" ${dis}>5 대 5 교전 <small>팀 대항 · 7라운드</small></button><button data-mode="cqb" class="${cqb ? 'on' : ''}" ${dis}>CQB 작전 <small>협동 · 진압팀 최대 5명</small></button></div></div>`;
+    if (cqb) {
+      const mission = missionById(lobby.mission);
+      const opDiff = lobby.opDiff ?? 'normal';
+      const squad = peers.slice(0, 5);
+      const extra = peers.slice(5);
+      const DIFF = { easy: '쉬움', normal: '보통', hard: '어려움' };
+      body.innerHTML = `
+        <div class="lobby">
+          ${noHost}
+          <div class="lobby-code"><small>방 코드</small><b>${esc(s.code)}</b><span>친구에게 이 코드를 알려 주세요 · 같은 아티팩트 링크에서 <b>코드로 참가</b></span><button class="btn ghost small" data-act="copy">복사</button></div>
+          ${modeSeg}
+          <div class="lobby-grid">
+            <div class="lobby-teams one">
+              <div class="lobby-team t-defuse"><div class="lt-head"><b>진압팀</b><span>${squad.length} / 5 · 빈자리 봇 대원</span></div>
+                <ul>${squad.map((p) => `<li class="${p.me ? 'me' : ''}"><span class="lt-name">${esc(p.name)}${p.key === host?.key ? ' <i>방장 · 대장</i>' : ''}</span><span class="lt-load"></span><span class="lt-ready ${p.ready || p.key === host?.key ? 'on' : ''}">${p.key === host?.key ? '방장' : p.ready ? '준비' : '대기'}</span></li>`).join('')}
+                ${Array.from({ length: Math.max(0, 5 - squad.length) }, () => `<li class="bot"><span class="lt-name">봇 대원</span></li>`).join('')}</ul></div>
+              ${extra.length ? `<p class="lobby-unassigned">자리 없음 (다음 판): ${extra.map((p) => esc(p.name)).join(', ')}</p>` : ''}
+              <p class="online-note">봇 대원은 방장(대장)을 따라오고 <kbd>G</kbd> 지휘를 따릅니다. 누구나 문 진입 지휘 가능.</p>
+            </div>
+            <div class="lobby-side">
+              <h3 class="brief-label">작전 ${isHost ? '' : '<small>방장이 정함</small>'}</h3>
+              <div class="lobby-maps">${MISSIONS.map((m) => `<button class="lobby-map ${mission.id === m.id ? 'on' : ''}" data-mission="${m.id}" ${dis}><b>${esc(m.name)}</b><small>${m.code} · ${esc(getMapDef(m.map).name)} · 용의자 ${m.suspects[opDiff]}명</small></button>`).join('')}</div>
+              <h3 class="brief-label">작전 난이도 <small>용의자 수·무장</small></h3>
+              <div class="seg">${Object.entries(DIFF).map(([k, n]) => `<button data-opdiff="${k}" class="${opDiff === k ? 'on' : ''}" ${dis}>${n}</button>`).join('')}</div>
+              <h3 class="brief-label">봇 숙련도 <small>용의자·봇 대원</small></h3>
+              <div class="seg">${Object.entries(DIFFICULTY).map(([k, d]) => `<button data-diff="${k}" class="${lobby.diff === k ? 'on' : ''}" ${dis}>${d.name}</button>`).join('')}</div>
+            </div>
+          </div>
+          <footer class="screen-foot">
+            <button class="btn ghost" data-act="leave">방 나가기</button>
+            ${isHost
+              ? `<button class="btn primary big" data-act="start" ${everyoneReady ? '' : 'disabled'}>작전 개시</button>`
+              : `<button class="btn ${me?.ready ? 'ghost' : 'primary'} big" data-act="ready">${me?.ready ? '준비 취소' : '준비 완료'}</button>`}
+          </footer>
+          ${isHost && !everyoneReady ? '<p class="online-note right">모두 준비하면 시작할 수 있습니다. 빈자리는 봇 대원.</p>' : ''}
+        </div>`;
+      return;
+    }
     body.innerHTML = `
       <div class="lobby">
         ${noHost}
         <div class="lobby-code"><small>방 코드</small><b>${esc(s.code)}</b><span>친구에게 이 코드를 알려 주세요 · 같은 아티팩트 링크에서 <b>코드로 참가</b></span><button class="btn ghost small" data-act="copy">복사</button></div>
+        ${modeSeg}
         <div class="lobby-grid">
           <div class="lobby-teams">${roster(TEAMS.DEFUSE)}${roster(TEAMS.FORCE)}
             ${unassigned.length ? `<p class="lobby-unassigned">소속 미정: ${unassigned.map((p) => esc(p.name)).join(', ')}</p>` : ''}
@@ -163,8 +213,17 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     const s = net.session;
     const host = s.host();
     const lobby = host?.lobby ?? { map: settings.mapId, diff: settings.difficulty ?? 'normal' };
-    const players = s.peers().filter((p) => p.team).map((p) => ({ key: p.key, name: p.name, team: p.team, load: p.load ?? [], mastery: Array.isArray(p.mas) ? p.mas : [] }));
     const seed = Math.floor(Math.random() * 1e9);
+    if (lobby.mode === 'cqb') {
+      // CQB 작전: 들어온 순서대로 진압팀 5자리 · 용의자 수는 작전·난이도대로
+      const mission = missionById(lobby.mission);
+      const opDiff = lobby.opDiff ?? 'normal';
+      const players = s.peers().map((p) => ({ key: p.key, name: p.name, mastery: Array.isArray(p.mas) ? p.mas : [] }));
+      const plan = planOp(players, { botNames: BOT_NAMES, suspects: mission.suspects[opDiff] ?? mission.suspects.normal });
+      s.set({ start: { id: `${seed}`, seed, mode: 'cqb', mission: mission.id, opDiff, map: mission.map, diff: lobby.diff ?? 'normal', p: packPlan(plan, PATCH_ORDER) }, g: null });
+      return;
+    }
+    const players = s.peers().filter((p) => p.team).map((p) => ({ key: p.key, name: p.name, team: p.team, load: p.load ?? [], mastery: Array.isArray(p.mas) ? p.mas : [] }));
     const plan = planMatch(players, { botNames: BOT_NAMES, draft: TeamDraft, rng: createRng(seed) });
     const st = { id: `${seed}`, seed, map: MAP_ORDER.includes(lobby.map) ? lobby.map : MAP_ORDER[0], diff: lobby.diff ?? 'normal', p: packPlan(plan, PATCH_ORDER) };
     s.set({ start: st, g: null });
@@ -202,10 +261,17 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     if (t && !t.disabled) s.set({ team: t.dataset.team, load: s.me.team === t.dataset.team ? s.me.load : [], ready: false });
     const p = e.target.closest('[data-patch]');
     if (p && !p.disabled) togglePatch(p.dataset.patch);
+    const lob = { map: settings.mapId, diff: 'normal', ...(s.me.lobby ?? {}) };
     const mp = e.target.closest('[data-map]');
-    if (mp && !mp.disabled && s.isHost) s.set({ lobby: { ...(s.me.lobby ?? {}), map: mp.dataset.map, diff: s.me.lobby?.diff ?? 'normal' } });
+    if (mp && !mp.disabled && s.isHost) s.set({ lobby: { ...lob, map: mp.dataset.map } });
     const d = e.target.closest('[data-diff]');
-    if (d && !d.disabled && s.isHost) s.set({ lobby: { ...(s.me.lobby ?? {}), diff: d.dataset.diff, map: s.me.lobby?.map ?? settings.mapId } });
+    if (d && !d.disabled && s.isHost) s.set({ lobby: { ...lob, diff: d.dataset.diff } });
+    const md = e.target.closest('[data-mode]');
+    if (md && !md.disabled && s.isHost) s.set({ lobby: { ...lob, mode: md.dataset.mode, mission: lob.mission ?? settings.opMission ?? MISSIONS[0].id, opDiff: lob.opDiff ?? settings.opDifficulty ?? 'normal' }, ready: false });
+    const ms = e.target.closest('[data-mission]');
+    if (ms && !ms.disabled && s.isHost) s.set({ lobby: { ...lob, mission: ms.dataset.mission } });
+    const od = e.target.closest('[data-opdiff]');
+    if (od && !od.disabled && s.isHost) s.set({ lobby: { ...lob, opDiff: od.dataset.opdiff } });
     if (act === 'ready') s.set({ ready: !s.me.ready });
     if (act === 'start' && s.isHost) start();
     if (act === 'copy') navigator.clipboard?.writeText(s.code).then(() => toast?.('방 코드를 복사했습니다.'), () => {});

@@ -410,7 +410,7 @@ export class Hud {
     const clock = m.op?.devicesDone && !buying ? '해체 완료' : fmtTime(buying ? m.phaseT : m.timeLeft);
     this.set('clock', clock, (v) => (E.clock.textContent = v));
     let sub;
-    if (buying && m.op) sub = '준비 · B 보급 · Enter 작전 개시';
+    if (buying && m.op) sub = m.client ? '준비 · B 보급 · 방장이 개시' : '준비 · B 보급 · Enter 작전 개시';
     else if (m.op && m.phase === 'live') sub = m.op.devicesDone ? `${m.op.mission.code} · 시간 제한 없음` : `${m.op.mission.code} · 장치 폭발까지`;
     else if (buying) sub = m.rounds ? `보급 · 라운드 ${m.round}` : '작전 개시 대기';
     else if (m.phase === 'roundEnd') sub = `라운드 ${m.round} 종료`;
@@ -576,10 +576,11 @@ export class Hud {
       const lever = !near && m.devices?.leverAt(a);
       if (lever) prompt = `<kbd>F</kbd> ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
       // CQB 작전: 연구원 결박 풀기 · 연구 자료 확보
-      const opT = !near && !lever && m.op?.targetFor(a);
+      // (결박을 푸는 중이면 진행 막대만 — 안내는 숨김)
+      const opT = !near && !lever && !a.opTask && m.op?.targetFor(a);
       if (opT) prompt = opT.kind === 'free' ? `<kbd>F</kbd> 결박 풀기 · ${esc(opT.item.name)} <small>(풀면 스스로 투입 지점으로 이동)</small>` : `<kbd>F</kbd> 연구 자료 확보 · ${esc(opT.item.name)}`;
       // 문: 열기·닫기 · 길게 누르면 문 행동 (잠긴 문은 발차기·폭약·산탄총)
-      const door = !near && !lever && !opT && !a.mirror && m.doors?.doorAt(a);
+      const door = !near && !lever && !opT && !a.opTask && !a.mirror && m.doors?.doorAt(a);
       if (door) {
         const o = m.doors.options(a, door);
         const what = door.mat === 'steel' ? '철문' : '문';

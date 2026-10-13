@@ -104,8 +104,11 @@ const POSES = {
 };
 
 class HostageView {
-  constructor(h, scene) {
+  // smooth: 온라인 참가자 화면 — 방장 상태가 띄엄띄엄 오므로 받은 위치를 부드럽게 따라가고, 움직임으로 뛰는 자세를 고름
+  constructor(h, scene, { smooth = false } = {}) {
     this.h = h;
+    this.smooth = smooth;
+    this.speed = 0;
     this.body = buildResearcher(h.id);
     scene.add(this.body.root);
     this.p = { ...POSES.captive, sh: [...POSES.captive.sh], el: [...POSES.captive.el] };
@@ -117,8 +120,19 @@ class HostageView {
   update(dt, alpha) {
     const h = this.h;
     const b = this.body;
-    const px = h.prev ? h.prev.x + (h.x - h.prev.x) * alpha : h.x;
-    const pz = h.prev ? h.prev.z + (h.z - h.prev.z) * alpha : h.z;
+    let px, pz;
+    if (this.smooth) {
+      const k = 1 - Math.exp(-dt * 12);
+      const ox = this.sx ?? h.x, oz = this.sz ?? h.z;
+      this.sx = ox + (h.x - ox) * k;
+      this.sz = oz + (h.z - oz) * k;
+      if (dt > 0) this.speed = damp(this.speed, Math.hypot(this.sx - ox, this.sz - oz) / dt, 6, dt);
+      px = this.sx;
+      pz = this.sz;
+    } else {
+      px = h.prev ? h.prev.x + (h.x - h.prev.x) * alpha : h.x;
+      pz = h.prev ? h.prev.z + (h.z - h.prev.z) * alpha : h.z;
+    }
     b.root.position.set(px, 0, pz);
     // 호송 중에는 가는 방향을, 아니면 처음 방향
     let yaw = b.root.rotation.y;
@@ -127,7 +141,7 @@ class HostageView {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     yaw += d * Math.min(1, dt * 8);
     b.root.rotation.y = yaw;
-    const moving = h.state === 'free' && Math.hypot(h.vel?.x ?? 0, h.vel?.z ?? 0) > 0.3;
+    const moving = h.state === 'free' && (this.smooth ? this.speed > 0.5 : Math.hypot(h.vel?.x ?? 0, h.vel?.z ?? 0) > 0.3);
     let pose = h.state === 'rescued' ? POSES.rescued : h.state === 'free' ? (moving ? POSES.run : POSES.cower) : POSES.captive;
     if (h.cower > 0.3 && h.state !== 'dead') pose = POSES.cower;
     const p = this.p;
@@ -264,13 +278,13 @@ function buildExtract(op) {
 }
 
 export class OpView {
-  constructor(scene, match) {
+  constructor(scene, match, { smooth = false } = {}) {
     this.match = match;
     this.op = match.op;
     this.group = new THREE.Group();
     this.group.name = 'operation';
     scene.add(this.group);
-    this.hostages = this.op.hostages.map((h) => new HostageView(h, this.group));
+    this.hostages = this.op.hostages.map((h) => new HostageView(h, this.group, { smooth }));
     this.intel = this.op.intel.map((it) => ({ it, ...buildIntel(it, match.map) }));
     for (const v of this.intel) this.group.add(v.root);
     this.extract = buildExtract(this.op);

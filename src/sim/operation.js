@@ -123,7 +123,7 @@ export class Operation {
       a.secondary = 'pistol';
       a.weapon = 'pistol';
       a.gear = emptyGear();
-      if (a.isPlayer || a.human) m.dealQuiz(a);
+      if ((a.isPlayer || a.human) && !m.client) m.dealQuiz(a);
     }
     const order = this.posts.map((_, i) => i).sort(() => m.rng.next() - 0.5);
     this.suspects.forEach((a, i) => {
@@ -200,7 +200,10 @@ export class Operation {
     const t = this.targetFor(a);
     if (!t) return false;
     a.opTask = { kind: t.kind, id: t.item.id, t: 0, need: t.kind === 'free' ? OP.freeTime : OP.intelTime, at: { x: a.pos.x, z: a.pos.z } };
-    t.item.found = true;
+    if (!t.item.found) {
+      t.item.found = true;
+      this.match.emit('opFound', { kind: t.kind === 'free' ? 'hostage' : 'intel', item: t.item, agent: a });
+    }
     a.vel.x = a.vel.z = 0;
     this.match.emit('opTask', { agent: a, kind: t.kind, item: t.item, state: 'start' });
     return true;
@@ -468,6 +471,7 @@ export class Operation {
       i: this.intel.map((it) => (it.taken ? idx(it.taken) : -1)),
       d: this.devicesDone ? 1 : 0,
       f: [...this.hostages, ...this.intel].reduce((bits, t, k) => bits | (t.found ? 1 << k : 0), 0),
+      k: this.stats.hostageKilledBySwat,
     };
   }
 
@@ -486,5 +490,6 @@ export class Operation {
     });
     this.devicesDone = !!s.d;
     [...this.hostages, ...this.intel].forEach((t, k) => (t.found = !!((s.f ?? 0) & (1 << k))));
+    this.stats.hostageKilledBySwat = s.k ?? 0;
   }
 }

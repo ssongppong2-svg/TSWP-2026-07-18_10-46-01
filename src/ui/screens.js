@@ -211,10 +211,10 @@ export function opStartOverlay({ mission, difficulty, onClick, online = false })
         <div class="sc-team"><small>${mission.code}</small>진압팀 · ${esc(getMapDef(mission.map).name)} · ${DIFF[difficulty] ?? ''}</div>
         <h2>${esc(mission.name)}</h2>
         <ul class="sc-rules">
-          <li><b>준비</b> — 투입 지점에서 <kbd>B</kbd> 보급 단말기 (예산 ${OP.budget.toLocaleString('en-US')} J) · 다 샀으면 <kbd>Enter</kbd> 작전 개시</li>
+          <li><b>준비</b> — 투입 지점에서 <kbd>B</kbd> 보급 단말기 (예산 ${OP.budget.toLocaleString('en-US')} J) · ${online ? '방장이 <kbd>Enter</kbd>로 개시하거나 준비 시간이 끝나면 투입' : '다 샀으면 <kbd>Enter</kbd> 작전 개시'}</li>
           <li><b>목표</b> — 용의자 전원 제압 · 장치 해체 · 연구원 구출(<kbd>F</kbd> 결박 풀기) · 연구 자료 확보(<kbd>F</kbd>)</li>
           <li><b>문</b> — <kbd>F</kbd> 열기·닫기 · <kbd>F</kbd> 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 잠긴 문은 발차기·C4·산탄총</li>
-          <li><b>분대</b> — 봇 대원은 나를 따라옴 · 문을 보고 <kbd>G</kbd> 진입 지휘 · 아니면 <kbd>G</kbd> 집결·사수·자율 교전</li>
+          <li><b>분대</b> — 봇 대원은 ${online ? '대장(방장)을' : '나를'} 따라옴 · 문을 보고 <kbd>G</kbd> 진입 지휘 · 아니면 <kbd>G</kbd> 집결·사수·자율 교전</li>
           <li><b>주의</b> — 연구원도 총에 맞음 (아군 사격으로 숨지면 감점) · 섬광·이명은 비살상 제압에</li>
         </ul>
         <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 투입'}</button>
