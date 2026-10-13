@@ -4,6 +4,7 @@ import { CONCEPT_BY_ID } from '../sim/concepts.js';
 import { ECON, LOAD, STAMINA } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
 import { GEAR_ICONS, WEAPON_ICONS } from './icons.js';
+import { K, isKey } from '../core/keys.js';
 
 // 보급 단말기 (구매 시간에 B): 에너지(J)로 장비를 받고, 보급 점검 문제를 맞히면 에너지를 더 받음.
 // 마우스 잠금을 풀지 않고 화면 안의 커서로 고름. 숫자 키 1~0 · − · = 로도 받음 (총·방탄).
@@ -23,12 +24,13 @@ const SECTIONS = [
     cols: [
       { title: '방탄', items: ['light', 'heavy'], w: 1.2 },
       { title: '탄종 · 이번 라운드', items: ['fmj', 'ap', 'hp'], w: 1 },
-      { title: '투척 · 4번 키', items: THROW_ORDER, w: 2, grid: 2 },
-      { title: '장비 · 5번 키', items: ['c4', 'drone'], w: 1 },
+      { title: () => `투척 · 경기 중 ${K('throw')} 키`, items: THROW_ORDER, w: 2, grid: 2 },
+      { title: () => `장비 · 경기 중 ${K('gadget')} 키`, items: ['c4', 'drone'], w: 1 },
     ],
   },
 ];
 const MARK = ['①', '②', '③', '④'];
+const colTitle = (col) => (typeof col.title === 'function' ? col.title() : col.title);
 // 기본 권총은 공짜라 키 없이 클릭으로만 (다시 들 때)
 export const SHOP_KEYS = { mpistol: '1', sheriff: '2', shotgun: '3', smg: '4', carbine: '5', burst: '6', rifle: '7', dmr: '8', lmg: '9', sniper: '0', light: '−', heavy: '=' };
 const BY_KEY = Object.fromEntries(Object.entries(SHOP_KEYS).map(([k, v]) => [v, k]));
@@ -144,9 +146,9 @@ export class Shop {
           <div class="sh-stat energy"><small>에너지</small><b class="shop-credits">0</b><span>J</span></div>
         </header>
         <div class="shop-body">
-          <div class="shop-main">${SECTIONS.map((sec) => `
-            <div class="shop-cols ${sec.kind}" style="--n:${sec.cols.length};${sec.cols.some((c) => c.w) ? `grid-template-columns:${sec.cols.map((c) => `${c.w ?? 1}fr`).join(' ')}` : ''}">${sec.cols.map((col) => `
-              <div class="shop-col" style="--g:${col.grid ?? 1}"><h4>${col.title}</h4><div class="sc-items">${col.items.map((id) => card(id, sec.kind !== 'big')).join('')}</div></div>`).join('')}
+          <div class="shop-main">${SECTIONS.map((sec, si) => `
+            <div class="shop-cols ${sec.kind}" style="--n:${sec.cols.length};${sec.cols.some((c) => c.w) ? `grid-template-columns:${sec.cols.map((c) => `${c.w ?? 1}fr`).join(' ')}` : ''}">${sec.cols.map((col, ci) => `
+              <div class="shop-col" style="--g:${col.grid ?? 1}"><h4 data-col="${si}-${ci}">${colTitle(col)}</h4><div class="sc-items">${col.items.map((id) => card(id, sec.kind !== 'big')).join('')}</div></div>`).join('')}
             </div>`).join('')}
           </div>
           <aside class="shop-side">
@@ -155,7 +157,7 @@ export class Shop {
           </aside>
         </div>
         <div class="shop-info"><b class="sf-name">보급할 장비에 커서를 올리면 설명이 나옴</b><span class="sf-desc">클릭 또는 키(1~0 · − · =)로 보급 · 이번 보급 시간에 받은 것을 다시 누르면 반납</span></div>
-        <footer class="shop-foot"><span><kbd>B</kbd> 닫기</span><span class="sf-load"></span></footer>
+        <footer class="shop-foot"><span><kbd>${K('shop')}</kbd> 닫기</span><span class="sf-load"></span></footer>
       </div>
       <div class="shop-cursor"></div>`;
     root.appendChild(this.el);
@@ -183,6 +185,16 @@ export class Shop {
       const q = e.target.closest('.quiz-choice');
       if (q) this.onQuiz?.(Number(q.dataset.choice));
     });
+  }
+
+  // 키 바꾸기 뒤 닫기 키 · 투척/장비 키 표시
+  refreshKeys() {
+    const k = this.el.querySelector('.shop-foot kbd');
+    if (k) k.textContent = K('shop');
+    for (const h of this.el.querySelectorAll('h4[data-col]')) {
+      const [si, ci] = h.dataset.col.split('-').map(Number);
+      h.textContent = colTitle(SECTIONS[si].cols[ci]);
+    }
   }
 
   open() {
@@ -242,6 +254,7 @@ export class Shop {
   }
 
   key(code) {
+    if (isKey(code, 'shop')) return false; // 보급 단말기 키는 열고 닫기만
     const k = KEY_OF_CODE[code] ?? (code.startsWith('Digit') ? code.slice(5) : code.startsWith('Numpad') ? code.slice(6) : '');
     const item = BY_KEY[k];
     if (this.isOpen && item) {

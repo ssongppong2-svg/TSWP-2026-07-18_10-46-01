@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
 import { eyePos } from '../sim/agent.js';
 import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { K, isKey } from '../core/keys.js';
+
+// 경기 중 막는 브라우저 단축키: 도움말 · 찾기 · 새로고침 · 주소창 · 캐럿 탐색 · (키보드의) 뒤로·앞으로·새로고침 키
+const BROWSER_KEYS = new Set(['F1', 'F3', 'F5', 'F6', 'F7', 'BrowserBack', 'BrowserForward', 'BrowserRefresh']);
+// Ctrl(맥 Cmd)과 같이: 새로고침 · 찾기 · 인쇄 · 저장 · 북마크 · 주소창 · 기록 · 다운로드 (탭 닫기·새 탭·탭 이동은 브라우저가 먼저 가져가 막을 수 없음)
+const CTRL_BROWSER_KEYS = new Set(['KeyR', 'KeyF', 'KeyG', 'KeyP', 'KeyS', 'KeyD', 'KeyL', 'KeyH', 'KeyJ', 'KeyU', 'KeyO', 'KeyE', 'KeyK']);
 import { PATCHES, PATCH_ORDER, WEAPONS } from '../sim/data.js';
 import { ClientSync, HostSync, InputRecorder, RemoteController, rosterFor, unpackPlan } from '../net/protocol.js';
 import { Match } from '../sim/match.js';
@@ -172,14 +178,23 @@ export class GameClient {
     };
 
     this.onKeyDown = (e) => {
+      // 경기 중에는 새로고침(F5 · Ctrl+R) · 도움말 · 찾기 같은 브라우저 단축키가 경기를 끊지 않게 막음
+      if (this.started && !this.ended && (BROWSER_KEYS.has(e.code) || ((e.ctrlKey || e.metaKey) && CTRL_BROWSER_KEYS.has(e.code)))) {
+        e.preventDefault();
+        const reload = e.code === 'F5' || e.code === 'KeyR' || e.code === 'BrowserRefresh';
+        if (reload && performance.now() - (this.reloadNoteAt ?? -1e9) > 4000) {
+          this.reloadNoteAt = performance.now();
+          this.hud.banner('새로고침 막힘', '경기 중에는 F5 · Ctrl+R을 꺼 둠 · 나가려면 Esc → 메뉴', 'small');
+        }
+      }
       if (e.code === 'Escape' && this.input.fallback && this.started && !this.paused && !this.ended) this.pause();
-      if (e.code === 'Tab') {
+      if (isKey(e.code, 'score')) {
         e.preventDefault();
         if (this.started) this.hooks.onScoreboard?.(true, this.match);
       }
     };
     this.onKeyUp = (e) => {
-      if (e.code === 'Tab') this.hooks.onScoreboard?.(false, this.match);
+      if (isKey(e.code, 'score')) this.hooks.onScoreboard?.(false, this.match);
     };
     // 경기 중 실수로 탭을 닫지 않게 (예: Ctrl을 누른 채 W)
     this.onBeforeUnload = (e) => {
@@ -188,9 +203,15 @@ export class GameClient {
         e.returnValue = '';
       }
     };
+    // 마우스 옆 버튼(뒤로·앞으로)으로 페이지를 벗어나지 않게 (경기 중)
+    this.onMouseNav = (e) => {
+      if ((e.button === 3 || e.button === 4) && this.started && !this.ended) e.preventDefault();
+    };
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('beforeunload', this.onBeforeUnload);
+    window.addEventListener('mousedown', this.onMouseNav);
+    window.addEventListener('mouseup', this.onMouseNav);
 
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
@@ -297,7 +318,7 @@ export class GameClient {
       const v = viewing(e.agent) ? 1 : audible(pos, loud ? NOISE.kick : quiet ? NOISE.doorQuiet * 2 : NOISE.door * 1.4);
       if (DOOR_SND[e.act] && v > 0) A.play(DOOR_SND[e.act], { pos, vol: v, surface: d.mat });
       if (!viewing(e.agent)) return;
-      if (e.act === 'locked') this.hud.banner('잠긴 문', 'F 길게: 발차기 · 폭약 / 산탄총으로 손잡이 쪽 사격', 'small');
+      if (e.act === 'locked') this.hud.banner('잠긴 문', `${K('interact')} 길게: 발차기 · 폭약 / 산탄총으로 손잡이 쪽 사격`, 'small');
       else if (e.act === 'kickFail') this.hud.banner('문이 버팀', '다시 차면 더 잘 부서짐 · C4 · 산탄총', 'small');
       else if (e.act === 'lockBreak') this.hud.banner('자물쇠 파손', e.how === 'shotgun' ? '산탄으로 자물쇠를 부숨' : '걷어차 문을 부숨', 'good');
     });
@@ -740,13 +761,13 @@ export class GameClient {
     // 상점: 구매 시간에 B로 열고 닫음 (구매 시간이 끝나거나 쓰러지면 닫힘)
     const canShop = m.canBuy && m.phase === 'buy' && this.player.alive && this.started && !this.paused && !this.ended;
     // CQB 작전 준비: Enter = 준비 완료 (3초 뒤 개시). 온라인은 방장만
-    if (pressed.includes('Enter') && m.op && m.phase === 'buy' && m.phaseT > 3 && this.started && !this.paused && !this.clientSync) {
+    if (pressed.some((c) => isKey(c, 'start')) && m.op && m.phase === 'buy' && m.phaseT > 3 && this.started && !this.paused && !this.clientSync) {
       m.phaseT = 3;
       this.shop.close();
       this.audio.play('radioOut');
       this.hud.banner('작전 개시 3초 전', '진압팀 진입 준비', 'warn');
     }
-    if (pressed.includes('KeyB') && canShop && this.input.active) {
+    if (pressed.some((c) => isKey(c, 'shop')) && canShop && this.input.active) {
       this.shop.toggle();
       this.audio.play('ui');
     }
@@ -828,7 +849,7 @@ export class GameClient {
     this.hud.update(dt, {
       viewAgent: va,
       spectating: va !== this.player,
-      showMap: this.started && !this.paused && this.input.isDown('KeyM'),
+      showMap: this.started && !this.paused && this.input.held('map'),
       wheel: this.wheelDef(),
       shopOpen: this.shop.isOpen,
     });
@@ -1025,7 +1046,7 @@ export class GameClient {
   // 탄창 확인 (T를 누르고 있는 동안): 총을 기울여 탄창을 보고, 화면에 대략적인 양만 표시
   updateInspect(dt) {
     const p = this.player;
-    const want = this.input.isDown('KeyT') && p.alive && !p.lockpick && p.reloadT <= 0 && p.swapT <= 0 && p.adsT < 0.3 && !this.controller.wheelOpen;
+    const want = this.input.held('inspect') && p.alive && !p.lockpick && p.reloadT <= 0 && p.swapT <= 0 && p.adsT < 0.3 && !this.controller.wheelOpen;
     if (want && !this.wasInspecting) this.audio.play('inspect');
     this.wasInspecting = want;
     this.inspectT = Math.max(0, Math.min(1, this.inspectT + (want ? 1 : -1) * dt * 3.2));
@@ -1147,6 +1168,12 @@ export class GameClient {
     this.hud.banner(`개념 숙달 · ${CONCEPT_BY_ID[conceptId]?.name ?? ''}`, gain, 'good');
   }
 
+  // 키 바꾸기 뒤 화면 안내를 새 키로
+  refreshKeys() {
+    this.hud.refreshKeys();
+    this.shop.refreshKeys?.();
+  }
+
   dispose() {
     this.disposed = true;
     this.hostSync?.dispose();
@@ -1155,6 +1182,8 @@ export class GameClient {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('beforeunload', this.onBeforeUnload);
+    window.removeEventListener('mousedown', this.onMouseNav);
+    window.removeEventListener('mouseup', this.onMouseNav);
     navigator.keyboard?.unlock?.();
     this.input.exitLock();
     this.input.dispose();

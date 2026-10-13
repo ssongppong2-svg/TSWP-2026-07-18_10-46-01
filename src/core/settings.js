@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = {
   shake: 1, // 화면 흔들림 세기
   crosshair: 'cross', // 조준점: 'cross' 점+선 / 'dot' 점만 / 'off' 없음
   mapId: 'force-bound',
+  keys: {}, // 키 바꾸기: 기본과 다른 동작만 { 동작: KeyboardEvent.code } (src/core/keys.js)
 };
 
 export function loadSettings() {

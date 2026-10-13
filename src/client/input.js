@@ -1,4 +1,5 @@
 import { emptyIntent } from '../sim/agent.js';
+import { actionOfCode, codesOf, isKey } from '../core/keys.js';
 
 // 지휘 명령 휠: G를 누른 채 마우스로 방향을 고르고 떼면 명령 (또는 숫자 키)
 // 각도는 화면 기준(오른쪽 0°, 아래 90°). key = 휠이 열려 있을 때의 숫자 키
@@ -42,7 +43,8 @@ export class Input {
     this.handlers = {
       keydown: (e) => {
         if (!this.enabled) return;
-        if (['Tab', 'Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+        // 게임에 쓰는 키는 브라우저 기본 동작(스크롤·빠른 찾기 등)을 막음
+        if (['Tab', 'Space', 'ArrowUp', 'ArrowDown'].includes(e.code) || actionOfCode(e.code)) e.preventDefault();
         // 앉기(Ctrl)를 누른 채 다른 키를 눌러도 브라우저 단축키(저장·북마크 등)가 실행되지 않게
         if (e.ctrlKey && (this.locked || this.fallback)) e.preventDefault();
         if (!this.down.has(e.code)) this.pressed.push(e.code);
@@ -133,6 +135,11 @@ export class Input {
 
   isDown(code) {
     return this.down.has(code);
+  }
+
+  // 동작(키 바꾸기에서 정한 키)을 누르고 있는지
+  held(action) {
+    return codesOf(action).some((c) => this.down.has(c));
   }
 
   takeMouse() {
@@ -231,7 +238,7 @@ export class PlayerController {
       this.doorWheel = null;
     }
     if (this.fHold) {
-      const down = this.input.isDown('KeyF');
+      const down = this.input.held('interact');
       if (!down) {
         if (!this.doorWheel) this.queue.interact = true;
         else if (!this.doorWheel.used) {
@@ -271,7 +278,7 @@ export class PlayerController {
     }
     // 지휘 휠: G를 누르고 있는 동안 시점은 고정, 마우스는 명령 선택에 사용
     const canCommand = agent?.alive && !agent.lockpick && this.input.active;
-    const gDown = canCommand && this.input.isDown('KeyG');
+    const gDown = canCommand && this.input.held('command');
     if (gDown && !this.wheelOpen) {
       this.wheelOpen = true;
       this.cmdItems = this.entryTarget?.(agent) ? ENTRY_COMMANDS : COMMANDS;
@@ -322,21 +329,21 @@ export class PlayerController {
         this.queue.cards.push(digit - 1);
         continue;
       }
-      const slot = { KeyC: 0, KeyQ: 1, KeyE: 2, KeyX: 3 }[code];
+      const slot = [0, 1, 2, 3].find((n) => isKey(code, `patch${n}`));
       if (slot !== undefined) this.queue.patch[slot] = true;
-      else if (code === 'KeyF') {
+      else if (isKey(code, 'interact')) {
         // 문을 보고 있으면 길게 누르는지 기다림 (문 밑 카메라 중에는 바로 거둠)
         if (!agent?.mirror && !agent?.lockpick && this.doorTarget?.(agent)) this.fHold = { t: performance.now() };
         else this.queue.interact = true;
       }
-      else if (code === 'KeyR') this.queue.reload = true;
-      else if (code === 'Mouse1' || code === 'KeyH') this.queue.report = true;
-      else if (digit === 1 && agent?.primary) this.queue.switchTo = agent.primary;
-      else if (digit === 2 && agent?.secondary) this.queue.switchTo = agent.secondary;
-      else if (digit === 3) this.queue.switchTo = 'knife';
-      // 4: 투척물 들기 (다시 누르면 다음 종류) · 5: C4 → 붙였으면 기폭기
-      else if (digit === 4) this.queue.equip = 'throw';
-      else if (digit === 5) this.queue.equip = 'gadget';
+      else if (isKey(code, 'reload')) this.queue.reload = true;
+      else if (code === 'Mouse1' || isKey(code, 'report')) this.queue.report = true;
+      else if (isKey(code, 'primary') && agent?.primary) this.queue.switchTo = agent.primary;
+      else if (isKey(code, 'secondary') && agent?.secondary) this.queue.switchTo = agent.secondary;
+      else if (isKey(code, 'knife')) this.queue.switchTo = 'knife';
+      // 투척물 들기 (다시 누르면 다음 종류) · C4 → 붙였으면 기폭기 → 드론
+      else if (isKey(code, 'throw')) this.queue.equip = 'throw';
+      else if (isKey(code, 'gadget')) this.queue.equip = 'gadget';
     }
     const w = this.input.takeWheel();
     if (w && agent && !agent.lockpick) {
@@ -364,12 +371,12 @@ export class PlayerController {
     i.yaw = this.yaw;
     i.pitch = this.pitch;
     if (on) {
-      i.moveZ = (inp.isDown('KeyW') ? 1 : 0) - (inp.isDown('KeyS') ? 1 : 0);
-      i.moveX = (inp.isDown('KeyD') ? 1 : 0) - (inp.isDown('KeyA') ? 1 : 0);
-      i.walk = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
-      i.jump = inp.isDown('Space');
-      i.crouch = inp.isDown('ControlLeft') || inp.isDown('ControlRight');
-      i.lean = (inp.isDown('KeyV') ? 1 : 0) - (inp.isDown('KeyZ') ? 1 : 0);
+      i.moveZ = (inp.held('forward') ? 1 : 0) - (inp.held('back') ? 1 : 0);
+      i.moveX = (inp.held('right') ? 1 : 0) - (inp.held('left') ? 1 : 0);
+      i.walk = inp.held('walk');
+      i.jump = inp.held('jump');
+      i.crouch = inp.held('crouch');
+      i.lean = (inp.held('leanR') ? 1 : 0) - (inp.held('leanL') ? 1 : 0);
       i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen && !this.doorWheel && !this.shop?.isOpen;
       i.ads = (inp.buttons & 4) !== 0 && !this.doorWheel && !this.shop?.isOpen;
     }

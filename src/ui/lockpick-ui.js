@@ -1,4 +1,5 @@
 import { PUZZLE_INFO, describeForce, formula, isSolved, netForce, signed } from '../sim/lockpick.js';
+import { kbd } from '../core/keys.js';
 
 const W = 640, X0 = 320, UNIT = 14; // 수직선: -20 N ~ +20 N
 const xOf = (n) => X0 + n * UNIT;
@@ -59,7 +60,7 @@ export class LockpickUI {
       <div class="lp-panel">
         <header>
           <div class="lp-title"><span class="lp-bomb">폭탄 ${bomb.id}</span> 기폭 장치 · ${info.title}${p.mastered ? '<span class="lp-mastered">★ 숙달 · 계산 결과 표시 · 빠른 해체</span>' : ''}</div>
-          <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 힘 카드 · <kbd>F</kbd> 중단 · 피격 시 초기화</div>
+          <div class="lp-keys"><kbd>1</kbd>~<kbd>6</kbd> 힘 카드 · ${kbd('interact')} 중단 · 피격 시 초기화</div>
         </header>
         <div class="lp-prompt">${p.prompt ?? ''}</div>
         <div class="lp-target ${p.hidden ? 'hidden' : ''}"><small>요구</small><b>${goal}</b></div>

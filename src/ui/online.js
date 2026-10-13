@@ -1,4 +1,5 @@
 import { BOT_NAMES, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { kbd } from '../core/keys.js';
 import { LOADOUT_SLOTS, PATCHES, PATCH_ORDER, PATCH_TIERS, patchesOfTier } from '../sim/data.js';
 import { COPIES_PER_TEAM, TeamDraft } from '../sim/draft.js';
 import { MAP_ORDER, getMapDef } from '../sim/maps/index.js';
@@ -144,7 +145,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
                 <ul>${squad.map((p) => `<li class="${p.me ? 'me' : ''}"><span class="lt-name">${esc(p.name)}${p.key === host?.key ? ' <i>방장 · 대장</i>' : ''}</span><span class="lt-load"></span><span class="lt-ready ${p.ready || p.key === host?.key ? 'on' : ''}">${p.key === host?.key ? '방장' : p.ready ? '준비' : '대기'}</span></li>`).join('')}
                 ${Array.from({ length: Math.max(0, 5 - squad.length) }, () => `<li class="bot"><span class="lt-name">봇 대원</span></li>`).join('')}</ul></div>
               ${extra.length ? `<p class="lobby-unassigned">자리 없음 (다음 판): ${extra.map((p) => esc(p.name)).join(', ')}</p>` : ''}
-              <p class="online-note">봇 대원은 방장(대장)을 따라오고 <kbd>G</kbd> 지휘를 따릅니다. 누구나 문 진입 지휘 가능.</p>
+              <p class="online-note">봇 대원은 방장(대장)을 따라오고 ${kbd('command')} 지휘를 따릅니다. 누구나 문 진입 지휘 가능.</p>
             </div>
             <div class="lobby-side">
               <h3 class="brief-label">작전 ${isHost ? '' : '<small>방장이 정함</small>'}</h3>

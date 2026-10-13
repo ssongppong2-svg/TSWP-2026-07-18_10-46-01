@@ -3,6 +3,7 @@ import { AudioEngine } from './client/audio.js';
 import { GameClient } from './client/game.js';
 import { Stage } from './client/stage.js';
 import { loadSettings, saveSettings } from './core/settings.js';
+import { changedKeys, setKeymap } from './core/keys.js';
 import { createRng } from './core/rng.js';
 import { TEAMS } from './sim/constants.js';
 import { TeamDraft } from './sim/draft.js';
@@ -16,6 +17,7 @@ import { loadPhotos } from './client/photos.js';
 const app = document.getElementById('app');
 const ui = document.getElementById('ui');
 const settings = loadSettings();
+setKeymap(settings.keys); // 키 바꾸기에서 바꾼 키
 const audio = new AudioEngine();
 audio.setVolume(settings.volume);
 
@@ -60,11 +62,24 @@ function closeModal() {
 }
 
 const openControls = () => openModal(S.controlsModal({ onClose: closeModal }));
+// 키 바꾸기 (설정 안에서 열고, 닫으면 설정으로 돌아감)
+const openKeys = () =>
+  openModal(
+    S.keysModal({
+      onChange: () => {
+        settings.keys = changedKeys();
+        saveSettings(settings);
+        game?.refreshKeys?.();
+      },
+      onClose: () => openSettings(),
+    }),
+  );
 const openSettings = () =>
   openModal(
     S.settingsModal({
       settings,
       qualityNow: () => stage.qualityKey,
+      onKeys: openKeys,
       onClose: closeModal,
       onChange: (k) => {
         saveSettings(settings);

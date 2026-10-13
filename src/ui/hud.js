@@ -8,6 +8,7 @@ import { ENTRY_NAME, ENTRY_PHASE } from '../sim/entry-orders.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
 import { money } from './shop.js';
+import { K, kbd, kbds } from '../core/keys.js';
 
 const el = (tag, cls, html = '') => {
   const e = document.createElement(tag);
@@ -71,7 +72,7 @@ export class Hud {
         <div class="radio-log"></div>
       </div>
       <div class="vh-killbanner"><b class="kb-text"></b><div class="kb-icons"></div></div>
-      <div class="vh-buyhint"><kbd>B</kbd> 보급 단말기 <span class="bh-e">에너지 <b class="bh-money"></b> J</span><span class="bh-quiz">점검 문제 +200 J</span></div>
+      <div class="vh-buyhint"><kbd class="bh-key"></kbd> 보급 단말기 <span class="bh-e">에너지 <b class="bh-money"></b> J</span><span class="bh-quiz">점검 문제 +200 J</span></div>
       <div class="vh-vitals">
         <div class="vt-row hp"><small>생체</small><b class="vt-num">100</b><div class="vt-bar"><i></i></div></div>
         <div class="vt-row ar"><small class="va-lbl">방탄</small><b class="vt-num">0</b><div class="vt-bar"><i></i></div><span class="va-icon"></span></div>
@@ -89,11 +90,11 @@ export class Hud {
       </div>
       <div class="drone-hud"><div class="dh-frame"><i></i><i></i><i></i><i></i></div><div class="dh-box"></div>
         <div class="dh-top"><b>정찰 드론 · 라이브</b><span class="dh-bat"><i></i></span><em class="dh-sec"></em></div>
-        <div class="dh-keys"><kbd>WASD</kbd> 이동 <kbd>Space</kbd> 위 <kbd>Ctrl</kbd> 아래 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>F</kbd> 복귀</div></div>
+        <div class="dh-keys"></div></div>
       <div class="mirror-hud"><div class="mh-lens"></div><div class="mh-box"></div>
         <div class="mh-top"><b>문 밑 카메라</b><span>광각 · 건너편</span></div>
-        <div class="mh-keys"><kbd>마우스</kbd> 둘러보기 <kbd>왼쪽 클릭</kbd> 적 표시 <kbd>F</kbd>·이동 거두기</div></div>
-      <div class="hint-keys"><kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>C·Q·E·X</kbd> 포스 패치 <kbd>F</kbd> 해체·장치·문 <kbd>F</kbd> 길게 문 행동 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황</div>
+        <div class="mh-keys"></div></div>
+      <div class="hint-keys"></div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
       <div class="status-vignette"></div>
@@ -183,7 +184,6 @@ export class Hud {
       this.els.opName.textContent = match.op.mission.name;
       this.els.orderText.textContent = '대장 따라감';
       for (const chip of this.root.querySelectorAll('.bomb-chip')) if (!match.bombs.some((b) => b.id === chip.dataset.bomb)) chip.remove();
-      this.els.hint.innerHTML = '<kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>F</kbd> 결박·자료·해체·문 <kbd>F</kbd> 길게 문 행동 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황';
     }
     // 분대 생존 표시: 요원마다 점 하나 (내 분대 왼쪽, 상대 분대 오른쪽)
     this.rosterEls = new Map();
@@ -202,7 +202,7 @@ export class Hud {
       slot.style.setProperty('--tier', PATCH_TIERS[slotDef.tier].color);
       if (!p) {
         slot.classList.add('empty');
-        slot.innerHTML = `<div class="ps-icon"><span class="ps-none">—</span></div><div class="ps-key">${slotDef.key}</div>`;
+        slot.innerHTML = `<div class="ps-icon"><span class="ps-none">—</span></div><div class="ps-key">${K(`patch${i}`)}</div>`;
         this.els.patchBar.appendChild(slot);
         return null;
       }
@@ -212,13 +212,14 @@ export class Hud {
       if (mastered) slot.classList.add('mastered');
       slot.innerHTML = `
         <div class="ps-icon">${PATCH_ICONS[p.id]}<div class="ps-cd"></div><div class="ps-num"></div>${mastered ? '<span class="ps-star" title="개념 숙달">★</span>' : ''}</div>
-        <div class="ps-key">${slotDef.key}</div>`;
+        <div class="ps-key">${K(`patch${i}`)}</div>`;
       this.els.patchBar.appendChild(slot);
       return { slot, cd: slot.querySelector('.ps-cd'), num: slot.querySelector('.ps-num') };
     });
 
     // 지휘 휠 (G) · 문 행동 휠 (문 앞에서 F 길게)
     this.renderWheel({ title: '지휘', items: COMMANDS });
+    this.refreshKeys();
 
     this.miniMap = new TacticalMap(this.$('.vh-minimap canvas'), match, localId, { scale: 5, mini: true });
     this.tacMap = new TacticalMap(this.els.tacMap.querySelector('canvas'), match, localId, { scale: Math.max(7, Math.min(12, Math.floor((window.innerHeight - 180) / match.map.rows))) });
@@ -315,6 +316,24 @@ export class Hud {
   }
 
   // 명중 표시: kind = hit / head / kill / block (방탄이 막음)
+  // 키 안내 (키 바꾸기에서 바꾸면 다시 그림)
+  refreshKeys() {
+    const op = this.root.classList.contains('op');
+    const $ = (s) => this.root.querySelector(s);
+    this.els.hint.innerHTML = `${kbd('shop')} 보급 ${kbds('primary', 'secondary', 'knife')} 무기 ${kbds('throw', 'gadget')} 장비 ${op ? '' : `${kbds('patch0', 'patch1', 'patch2', 'patch3')} 포스 패치 `}${kbd('interact')} ${op ? '결박·자료·해체·문' : '해체·장치·문'} ${kbd('interact')} 길게 문 행동 ${kbd('command')} 지휘 ${kbd('map')} 지도 ${kbd('score')} 전황`;
+    const bh = $('.bh-key');
+    if (bh) bh.textContent = K('shop');
+    const dk = $('.dh-keys');
+    if (dk) dk.innerHTML = `${kbds('forward', 'left', 'back', 'right')} 이동 ${kbd('jump')} 위 ${kbd('crouch')} 아래 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')} 복귀`;
+    const mk = $('.mh-keys');
+    if (mk) mk.innerHTML = `<kbd>마우스</kbd> 둘러보기 <kbd>왼쪽 클릭</kbd> 적 표시 ${kbd('interact')}·이동 거두기`;
+    (this.patchEls ?? []).forEach((p, i) => {
+      const key = (p?.slot ?? this.els.patchBar.children[i])?.querySelector('.ps-key');
+      if (key) key.textContent = K(`patch${i}`);
+    });
+    if (this.cache) delete this.cache.gear; // 장비 칸의 키 표시도 다시
+  }
+
   hitmark(kind) {
     const h = this.els.hitmarker;
     h.dataset.kind = kind;
@@ -410,7 +429,7 @@ export class Hud {
     const clock = m.op?.devicesDone && !buying ? '해체 완료' : fmtTime(buying ? m.phaseT : m.timeLeft);
     this.set('clock', clock, (v) => (E.clock.textContent = v));
     let sub;
-    if (buying && m.op) sub = m.client ? '준비 · B 보급 · 방장이 개시' : '준비 · B 보급 · Enter 작전 개시';
+    if (buying && m.op) sub = m.client ? `준비 · ${K('shop')} 보급 · 방장이 개시` : `준비 · ${K('shop')} 보급 · ${K('start')} 작전 개시`;
     else if (m.op && m.phase === 'live') sub = m.op.devicesDone ? `${m.op.mission.code} · 시간 제한 없음` : `${m.op.mission.code} · 장치 폭발까지`;
     else if (buying) sub = m.rounds ? `보급 · 라운드 ${m.round}` : '작전 개시 대기';
     else if (m.phase === 'roundEnd') sub = `라운드 ${m.round} 종료`;
@@ -489,7 +508,7 @@ export class Hud {
       const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === eq?.kind && (id === 'c4' || id === 'drone'));
       const cells = gearItems.map((id) => `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
       if (charges) cells.push(`<span class="vg ${eq?.kind === 'det' ? 'on' : ''}" title="기폭기 · 붙인 C4 ${charges}개">${GEAR_ICONS.det}<i>${charges}</i></span>`);
-      E.gear.innerHTML = cells.length ? `<kbd>4·5</kbd>${cells.join('')}` : '';
+      E.gear.innerHTML = cells.length ? `${kbds('throw', 'gadget')}${cells.join('')}` : '';
       E.gear.classList.toggle('show', cells.length > 0);
     });
     if (eq) {
@@ -573,25 +592,25 @@ export class Hud {
     if (m.phase === 'live' && a.alive && !spectating && !a.lockpick) {
       const near = m.bombs.find((b) => b.state === 'armed' && Math.hypot(a.pos.x - b.x, a.pos.z - b.z) <= BOMB.interactRange);
       if (near) {
-        if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `폭탄 ${near.id} · 아군 해체 진행 중. 엄호.` : `<kbd>F</kbd> 폭탄 ${near.id} 해체 개시`;
+        if (a.team === TEAMS.DEFUSE) prompt = near.picker ? `폭탄 ${near.id} · 아군 해체 진행 중. 엄호.` : `${kbd('interact')} 폭탄 ${near.id} 해체 개시`;
         else prompt = `폭탄 ${near.id} · 방어 유지`;
       }
       // 지렛대 (지레 셔터)
       const lever = !near && m.devices?.leverAt(a);
-      if (lever) prompt = `<kbd>F</kbd> ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
+      if (lever) prompt = `${kbd('interact')} ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
       // CQB 작전: 연구원 결박 풀기 · 연구 자료 확보
       // (결박을 푸는 중이면 진행 막대만 — 안내는 숨김)
       const opT = !near && !lever && !a.opTask && m.op?.targetFor(a);
-      if (opT) prompt = opT.kind === 'free' ? `<kbd>F</kbd> 결박 풀기 · ${esc(opT.item.name)} <small>(풀면 스스로 투입 지점으로 이동)</small>` : `<kbd>F</kbd> 연구 자료 확보 · ${esc(opT.item.name)}`;
+      if (opT) prompt = opT.kind === 'free' ? `${kbd('interact')} 결박 풀기 · ${esc(opT.item.name)} <small>(풀면 스스로 투입 지점으로 이동)</small>` : `${kbd('interact')} 연구 자료 확보 · ${esc(opT.item.name)}`;
       // 문: 열기·닫기 · 길게 누르면 문 행동 (잠긴 문은 발차기·폭약·산탄총)
       const door = !near && !lever && !opT && !a.opTask && !a.mirror && m.doors?.doorAt(a);
       if (door) {
         const o = m.doors.options(a, door);
         const what = door.mat === 'steel' ? '철문' : '문';
-        if (o.locked && o.closed) prompt = `잠긴 ${what} · <kbd>F</kbd> 길게: 발차기 · 폭약 · 문 밑 카메라 <small>(산탄총으로 손잡이 쪽을 쏘면 자물쇠가 부서짐)</small>`;
-        else if (o.open) prompt = `<kbd>F</kbd> ${what} 닫기 · <kbd>F</kbd> 길게: 살짝 닫기`;
-        else if (o.cracked) prompt = `<kbd>F</kbd> 활짝 열기 · <kbd>F</kbd> 길게: 살짝 닫기 · 발차기`;
-        else prompt = `<kbd>F</kbd> ${what} 열기 · <kbd>F</kbd> 길게: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약`;
+        if (o.locked && o.closed) prompt = `잠긴 ${what} · ${kbd('interact')} 길게: 발차기 · 폭약 · 문 밑 카메라 <small>(산탄총으로 손잡이 쪽을 쏘면 자물쇠가 부서짐)</small>`;
+        else if (o.open) prompt = `${kbd('interact')} ${what} 닫기 · ${kbd('interact')} 길게: 살짝 닫기`;
+        else if (o.cracked) prompt = `${kbd('interact')} 활짝 열기 · ${kbd('interact')} 길게: 살짝 닫기 · 발차기`;
+        else prompt = `${kbd('interact')} ${what} 열기 · ${kbd('interact')} 길게: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약`;
       }
       // 미는 상자: 붙어서 밀고 있으면 합력 표시
       if (!near && !lever && !door) {
@@ -600,9 +619,9 @@ export class Hud {
       }
       // 손에 든 장비 사용법
       const eq2 = a.equip;
-      if (eq2?.kind === 'throw') prompt = `${GEAR[eq2.id].name} · <kbd>왼쪽 클릭</kbd> 멀리 <kbd>오른쪽 클릭</kbd> 가까이 <kbd>4</kbd> 다음 <kbd>1</kbd> 총 <small>(선 = 중력 때문에 휘는 길)</small>`;
+      if (eq2?.kind === 'throw') prompt = `${GEAR[eq2.id].name} · <kbd>왼쪽 클릭</kbd> 멀리 <kbd>오른쪽 클릭</kbd> 가까이 ${kbd('throw')} 다음 ${kbd('primary')} 총 <small>(선 = 중력 때문에 휘는 길)</small>`;
       else if (eq2?.kind === 'c4') prompt = '<kbd>왼쪽 클릭</kbd> 가까운 벽·바닥·문에 C4 붙이기 <small>(2.6 m 안)</small>';
-      else if (eq2?.kind === 'det') prompt = '<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 <kbd>5</kbd> 다음 장비 <kbd>1</kbd> 총';
+      else if (eq2?.kind === 'det') prompt = `<kbd>왼쪽 클릭</kbd> 기폭 · 폭발 반경 5 m 밖으로 ${kbd('gadget')} 다음 장비 ${kbd('primary')} 총`;
       else if (eq2?.kind === 'drone') prompt = '<kbd>왼쪽 클릭</kbd> 정찰 드론 띄우기 <small>(조종하는 동안 몸은 앉아서 무방비)</small>';
       const heldZone = a.held ? m.zones.find((z) => z.id === a.held.zoneId) : null;
       if (heldZone) prompt = heldZone.type === 'net' ? '탄성 그물에 구속됨' : '중력 붕괴에 구속됨';

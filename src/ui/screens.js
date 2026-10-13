@@ -12,6 +12,7 @@ import { loadProgress, masteredIds, recordQuiz } from '../core/progress.js';
 import { PUZZLE_INFO } from '../sim/lockpick.js';
 import { MISSIONS, OP } from '../sim/operation.js';
 import { GameMap, STORY, TILES } from '../sim/map.js';
+import { KEY_ACTIONS, KEY_RESERVED, K, assignKey, kbd, kbds, keyName, keyOf, resetKeys } from '../core/keys.js';
 
 const h = (html) => {
   const t = document.createElement('template');
@@ -149,16 +150,16 @@ export function opScreen({ settings, onBack, onStart, best = {} }) {
           <ul class="ob-obj">
             <li><b>용의자 전원 제압</b><span>건물을 점거한 무장 용의자</span></li>
             <li><b>장치 해체</b><span>힘 잠금 문제를 풀어 해체 · 제한 시간이 지나면 폭발</span></li>
-            <li><b>연구원 구출</b><span>위치 미상 · <kbd>F</kbd>로 결박을 풀면 스스로 투입 지점까지 이동</span></li>
-            <li><b>연구 자료 확보</b><span><kbd>F</kbd>로 확보</span></li>
+            <li><b>연구원 구출</b><span>위치 미상 · ${kbd('interact')}로 결박을 풀면 스스로 투입 지점까지 이동</span></li>
+            <li><b>연구 자료 확보</b><span>${kbd('interact')}로 확보</span></li>
           </ul>
         </div>
         <div class="ob-col">
           <h3>진압팀 운용</h3>
           <ul class="ob-obj">
-            <li><b>준비 ${OP.prep}초</b><span>투입 지점에서 <kbd>B</kbd> 보급 (예산 ${OP.budget.toLocaleString('en-US')} J) · <kbd>Enter</kbd> 바로 개시</span></li>
-            <li><b>문</b><span><kbd>F</kbd> 열기 · <kbd>F</kbd> 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 붉은 선 = 잠긴 문</span></li>
-            <li><b>분대 지휘</b><span>평소엔 대장(나)을 따라옴 · 문을 보고 <kbd>G</kbd> → 대기·열고/섬광/폭파/걷어차고 진입</span></li>
+            <li><b>준비 ${OP.prep}초</b><span>투입 지점에서 ${kbd('shop')} 보급 (예산 ${OP.budget.toLocaleString('en-US')} J) · ${kbd('start')} 바로 개시</span></li>
+            <li><b>문</b><span>${kbd('interact')} 열기 · ${kbd('interact')} 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 붉은 선 = 잠긴 문</span></li>
+            <li><b>분대 지휘</b><span>평소엔 대장(나)을 따라옴 · 문을 보고 ${kbd('command')} → 대기·열고/섬광/폭파/걷어차고 진입</span></li>
             <li><b>평가</b><span>목표마다 25점 · 아군 사격으로 숨진 연구원 −15 · 쓰러진 대원 −4 → S·A·B·C·D</span></li>
           </ul>
         </div>
@@ -211,10 +212,10 @@ export function opStartOverlay({ mission, difficulty, onClick, online = false })
         <div class="sc-team"><small>${mission.code}</small>진압팀 · ${esc(getMapDef(mission.map).name)} · ${DIFF[difficulty] ?? ''}</div>
         <h2>${esc(mission.name)}</h2>
         <ul class="sc-rules">
-          <li><b>준비</b> — 투입 지점에서 <kbd>B</kbd> 보급 단말기 (예산 ${OP.budget.toLocaleString('en-US')} J) · ${online ? '방장이 <kbd>Enter</kbd>로 개시하거나 준비 시간이 끝나면 투입' : '다 샀으면 <kbd>Enter</kbd> 작전 개시'}</li>
-          <li><b>목표</b> — 용의자 전원 제압 · 장치 해체 · 연구원 구출(<kbd>F</kbd> 결박 풀기) · 연구 자료 확보(<kbd>F</kbd>)</li>
-          <li><b>문</b> — <kbd>F</kbd> 열기·닫기 · <kbd>F</kbd> 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 잠긴 문은 발차기·C4·산탄총</li>
-          <li><b>분대</b> — 봇 대원은 ${online ? '대장(방장)을' : '나를'} 따라옴 · 문을 보고 <kbd>G</kbd> 진입 지휘 · 아니면 <kbd>G</kbd> 집결·사수·자율 교전</li>
+          <li><b>준비</b> — 투입 지점에서 ${kbd('shop')} 보급 단말기 (예산 ${OP.budget.toLocaleString('en-US')} J) · ${online ? `방장이 ${kbd('start')}로 개시하거나 준비 시간이 끝나면 투입` : `다 샀으면 ${kbd('start')} 작전 개시`}</li>
+          <li><b>목표</b> — 용의자 전원 제압 · 장치 해체 · 연구원 구출(${kbd('interact')} 결박 풀기) · 연구 자료 확보(${kbd('interact')})</li>
+          <li><b>문</b> — ${kbd('interact')} 열기·닫기 · ${kbd('interact')} 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 잠긴 문은 발차기·C4·산탄총</li>
+          <li><b>분대</b> — 봇 대원은 ${online ? '대장(방장)을' : '나를'} 따라옴 · 문을 보고 ${kbd('command')} 진입 지휘 · 아니면 ${kbd('command')} 집결·사수·자율 교전</li>
           <li><b>주의</b> — 연구원도 총에 맞음 (아군 사격으로 숨지면 감점) · 섬광·이명은 비살상 제압에</li>
         </ul>
         <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 투입'}</button>
@@ -312,7 +313,7 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
       <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
       <h3 class="brief-label">첫 진영 <small>6라운드가 끝나면 서로 바꿈</small></h3>
       <div class="team-cards">
-        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', '폭탄 앞 <kbd>F</kbd> → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)', '포스팀을 <b>전원 제압</b>해도 라운드 승리'])}
+        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', `폭탄 앞 ${kbd('interact')} → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)`, '포스팀을 <b>전원 제압</b>해도 라운드 승리'])}
         ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 라운드 승리', '지레 셔터·승강기로 길을 끊고 위층에서 내려다보기'])}
       </div>
       <footer class="screen-foot sticky team-foot">
@@ -414,14 +415,14 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
           <div class="tier-row">${section('special')}${section('ultimate')}</div>
           <div class="patch-detail"></div>
           <div class="side-block weapons">
-            <h3>보급 화기 <small>구매 시간에 <kbd>B</kbd> 보급 단말기</small></h3>
+            <h3>보급 화기 <small>구매 시간에 ${kbd('shop')} 보급 단말기</small></h3>
             ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `${w.price.toLocaleString('en-US')} J` : '기본 지급'}</em></b><small><span>${w.kind}${w.burst && !w.kind.includes('점사') ? ` · ${w.burst}점사` : ''}</span><span>몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${w.headKill ? '한 방' : Math.round(w.damage * w.headMult)}</span></small></div></div>`; }).join('')}
           </div>
         </div>
         <aside class="draft-side">
           <div class="side-block">
             <h3>개인 장착</h3>
-            <div class="my-slots">${LOADOUT_SLOTS.map((s, i) => `<button class="my-slot tier-${s.tier}" data-slot="${i}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${s.key}</kbd><span></span></button>`).join('')}</div>
+            <div class="my-slots">${LOADOUT_SLOTS.map((s, i) => `<button class="my-slot tier-${s.tier}" data-slot="${i}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${K(`patch${i}`)}</kbd><span></span></button>`).join('')}</div>
           </div>
           <div class="side-block">
             <h3>${TEAM_INFO[team].name} 분대</h3>
@@ -621,18 +622,18 @@ export function clickToStart({ team, loadout, mapId, onClick, online = false }) 
         <h2>${TEAM_INFO[team].goal}</h2>
         <ul class="sc-rules">
           <li><b>라운드제</b> — ${ROUNDS.winTo}라운드 먼저 이기면 승리 · ${ROUNDS.half}라운드 뒤 공수 교대 · 한쪽 전멸 시 라운드 종료</li>
-          <li><b>보급</b> — 구매 시간(시작 구역)에 <kbd>B</kbd> 보급 단말기 · 에너지(J)는 처치·해체·라운드 결과로 · <b>보급 점검</b> 정답 +${ECON.quiz} J</li>
-          <li><b>힘 장치</b> — 탄성 발판(올라서면 2층으로) · 승강기 · 지레 셔터(<kbd>F</kbd>) · 마찰 미끄럼틀 · 여럿이 밀면 빨라지는 상자(합력)</li>
+          <li><b>보급</b> — 구매 시간(시작 구역)에 ${kbd('shop')} 보급 단말기 · 에너지(J)는 처치·해체·라운드 결과로 · <b>보급 점검</b> 정답 +${ECON.quiz} J</li>
+          <li><b>힘 장치</b> — 탄성 발판(올라서면 2층으로) · 승강기 · 지레 셔터(${kbd('interact')}) · 마찰 미끄럼틀 · 여럿이 밀면 빨라지는 상자(합력)</li>
           <li><b>사격</b> — 멈춰 서서 쏘면 정확, 달리며 쏘면 빗나감 · 소총 몸통 10발·머리 7발 (방탄을 입으면 더 버팀 · 관통탄은 방탄을 잘 뚫음)</li>
-          <li><kbd>1·2·3</kbd> 무기 · <kbd>G</kbd> 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · <kbd>M</kbd> 지도 · <kbd>Tab</kbd> 전황 · <kbd>Shift</kbd> 보행(무음)</li>
+          <li>${kbds('primary', 'secondary', 'knife')} 무기 · ${kbd('command')} 분대 지휘 · <kbd>휠 클릭</kbd> 적 보고 · ${kbd('map')} 지도 · ${kbd('score')} 전황 · ${kbd('walk')} 보행(무음)</li>
         </ul>
         <div class="sc-patches">${LOADOUT_SLOTS.map((s, i) => {
           const id = loadout[i];
-          return `<div class="${id ? '' : 'empty'}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${s.key}</kbd>${id ? `${PATCH_ICONS[id]}<b>${PATCHES[id].name}</b>` : '<b>미장착</b>'}</div>`;
+          return `<div class="${id ? '' : 'empty'}" style="--tier:${PATCH_TIERS[s.tier].color}"><kbd>${K(`patch${i}`)}</kbd>${id ? `${PATCH_ICONS[id]}<b>${PATCHES[id].name}</b>` : '<b>미장착</b>'}</div>`;
         }).join('')}</div>
         <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 작전 개시'}</button>
         ${online ? '<p class="sc-online">온라인 경기 · 구매 시간은 이미 진행 중입니다</p>' : ''}
-        <p>마우스 고정 · <kbd>Esc</kbd> ${online ? '메뉴(경기는 계속)' : '일시 중지'} · <kbd>Ctrl</kbd> 앉기 사용 시 전체 화면 권장(브라우저 단축키 충돌 방지)</p>
+        <p>마우스 고정 · <kbd>Esc</kbd> ${online ? '메뉴(경기는 계속)' : '일시 중지'} · ${kbd('crouch')} 앉기 · 키는 설정 → 키 바꾸기</p>
       </div>
     </section>`);
   // 버튼뿐 아니라 화면 어디를 눌러도 시작
@@ -664,48 +665,49 @@ export function pauseMenu({ onResume, onSettings, onControls, onQuit, online = f
 
 // ───────────────────────── 조작 교범 / 설정 (모달) ─────────────────────────
 export function controlsModal({ onClose }) {
+  // 키 이름은 지금 키 배치(설정 → 키 바꾸기)에서
   const groups = [
     ['기동', [
-      ['W A S D', '이동 (달리면 발소리가 남 · 무거울수록 느리고 둔함)'],
-      ['Shift', '보행 (발소리 거의 없음)'],
-      ['Ctrl', '앉기 (정확도↑ · 피탄 면적↓)'],
-      ['Z / V', '좌 / 우 기울이기'],
-      ['Space', '도약 (지구력 소모)'],
+      [`${K('forward')} ${K('left')} ${K('back')} ${K('right')}`, '이동 (달리면 발소리가 남 · 무거울수록 느리고 둔함)'],
+      [K('walk'), '보행 (발소리 거의 없음)'],
+      [K('crouch'), '앉기 (정확도↑ · 피탄 면적↓)'],
+      [`${K('leanL')} / ${K('leanR')}`, '좌 / 우 기울이기'],
+      [K('jump'), '도약 (지구력 소모)'],
     ]],
     ['사격', [
-      ['좌클릭', '사격 · 칼: 베기'],
+      ['좌클릭', '사격 · 칼: 베기 · 점사 총은 한 번에 3발'],
       ['우클릭', '정조준 · 칼: 찌르기'],
-      ['R', '재장전'],
-      ['1 / 2 / 3 · 휠', '주무기 / 보조무기 / 칼'],
+      [K('reload'), '재장전'],
+      [`${K('primary')} / ${K('secondary')} / ${K('knife')} · 휠`, '주무기 / 보조무기 / 칼'],
     ]],
     ['장비', [
-      ['4', '투척물 들기 · 다시 누르면 다음 종류 (세열·이명·섬광·연막·최루)'],
-      ['5', 'C4 → 붙인 뒤 기폭기 → 정찰 드론 (가진 것만 돌아가며)'],
+      [K('throw'), '투척물 들기 · 다시 누르면 다음 종류 (세열·이명·섬광·연막·최루)'],
+      [K('gadget'), 'C4 → 붙인 뒤 기폭기 → 정찰 드론 (가진 것만 돌아가며)'],
       ['좌클릭 / 우클릭', '멀리 던지기 / 가까이 굴리기 · C4 붙이기 · 기폭 · 드론 띄우기'],
-      ['드론', 'WASD·Space·Ctrl 비행 · 좌클릭 적 표시 · F 복귀'],
+      ['드론', `이동 키·${K('jump')}·${K('crouch')} 비행 · 좌클릭 적 표시 · ${K('interact')} 복귀`],
     ]],
     ['포스 패치 (5 대 5)', [
-      ['C / Q', '일반 패치'],
-      ['E', '특수 패치'],
-      ['X', '필살 패치 (게이지 100%)'],
+      [`${K('patch0')} / ${K('patch1')}`, '일반 패치'],
+      [K('patch2'), '특수 패치'],
+      [K('patch3'), '필살 패치 (게이지 100%)'],
     ]],
     ['문 · 진입', [
-      ['F', '문 열기 · 닫기 (잠긴 문은 덜컹)'],
-      ['F (길게)', '문 행동: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약 설치'],
-      ['G (문을 보고)', '분대 진입 지휘: 대기 · 열고 · 섬광 후 · 폭파 후 · 걷어차고 진입 · 문 밑 확인'],
+      [K('interact'), '문 열기 · 닫기 (잠긴 문은 덜컹)'],
+      [`${K('interact')} (길게)`, '문 행동: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약 설치'],
+      [`${K('command')} (문을 보고)`, '분대 진입 지휘: 대기 · 열고 · 섬광 후 · 폭파 후 · 걷어차고 진입 · 문 밑 확인'],
     ]],
     ['지휘 · 정보', [
-      ['G (누른 채 마우스)', '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
-      ['휠 클릭 / H', '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
-      ['T (누른 채)', '총 살펴보기'],
-      ['M (누른 채)', '큰 지도 (지형 · 문 · 아군 · 아군이 본 적 · 무전 보고)'],
-      ['Tab', '전황판'],
+      [`${K('command')} (누른 채 마우스)`, '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
+      [`휠 클릭 / ${K('report')}`, '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
+      [`${K('inspect')} (누른 채)`, '총 살펴보기'],
+      [`${K('map')} (누른 채)`, '큰 지도 (지형 · 문 · 아군 · 아군이 본 적 · 무전 보고)'],
+      [K('score'), '전황판'],
     ]],
     ['임무', [
-      ['B', '보급 단말기 (보급·준비 시간) · 1~0 · − · = 로 바로 보급 · 보급 점검 문제'],
-      ['F', '폭탄 해체 · 지레 손잡이 · CQB: 연구원 결박 풀기 · 연구 자료 확보'],
+      [K('shop'), '보급 단말기 (보급·준비 시간) · 1~0 · − · = 로 바로 보급 · 보급 점검 문제'],
+      [K('interact'), '폭탄 해체 · 지레 손잡이 · CQB: 연구원 결박 풀기 · 연구 자료 확보'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
-      ['Enter', 'CQB 준비 시간에 바로 작전 개시'],
+      [K('start'), 'CQB 준비 시간에 바로 작전 개시'],
       ['밀며 걷기', '상자 밀기 (여럿이 같은 쪽으로 밀면 빨라짐)'],
       ['Esc', '일시 중지'],
     ]],
@@ -719,7 +721,7 @@ export function controlsModal({ onClose }) {
         <div class="tip"><b>라운드제</b> ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대 · 구매 시간 ${ROUNDS.buyTime}초(전·후반 첫 라운드 ${ROUNDS.buyTimeFirst}초) · 라운드 2분 · 한쪽이 전멸하면 바로 끝남.</div>
         <div class="tip"><b>에너지 (J)</b> 처치 200 · 해체 300 · 라운드 승리 3000 · 패배 1900~2900(연패할수록 더) · 보급 점검 정답 ${ECON.quiz}. 살아남으면 받은 총·방탄(닳은 그대로)이 다음 라운드까지 남음. 탄종(관통탄·확장탄)은 라운드마다 새로. 미니맵에는 아군이 보고 있는 적이 붉게 표시됨.</div>
         <div class="tip"><b>개념 숙달</b> 한 개념을 ${MASTERY.need}번 맞히면(보급 점검·해체 문제·경기 뒤 점검) 그 힘을 쓰는 포스 패치의 재사용 대기 −${Math.round((1 - MASTERY.cooldownMult) * 100)}% · 그 개념의 해체 잠금은 계산 결과가 바로 보이고 더 빨리 풀림.</div>
-        <div class="tip"><b>참고</b> 브라우저 특성상 <kbd>Ctrl</kbd>+<kbd>W</kbd>는 탭 닫기로 처리될 수 있음. 전체 화면에서 플레이 권장.</div>
+        <div class="tip"><b>키 바꾸기</b> 설정 → 키 바꾸기에서 모든 동작 키를 바꿀 수 있음. 경기 중에는 F5 · Ctrl+R(새로고침)과 마우스 뒤로·앞으로 버튼을 막아 둠. Ctrl+W(탭 닫기)·Ctrl+숫자(탭 이동)는 브라우저가 먼저 가져가므로, 앉기(${K('crouch')})를 Ctrl로 쓴다면 전체 화면 권장.</div>
       </div>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -728,7 +730,7 @@ export function controlsModal({ onClose }) {
   return el;
 }
 
-export function settingsModal({ settings, onChange, onClose, qualityNow }) {
+export function settingsModal({ settings, onChange, onClose, qualityNow, onKeys }) {
   const el = h(`
     <section class="modal">
       <div class="modal-card">
@@ -742,6 +744,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
         <div class="field"><span>조준점</span><div class="seg"><button data-cross="cross">점 + 선</button><button data-cross="dot">점만</button><button data-cross="off">없음</button></div></div>
         <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 (가장자리 왜곡 · 필름 노이즈 · 테두리 눈금)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
+        <div class="field"><span>조작 키</span><button class="btn ghost small" data-act="keys">키 바꾸기</button></div>
       </div>
     </section>`);
   const fmt = { sensitivity: (v) => Number(v).toFixed(2), fov: (v) => `${v}°`, volume: (v) => `${Math.round(v * 100)}%`, shake: (v) => `${Math.round(v * 100)}%` };
@@ -786,7 +789,94 @@ export function settingsModal({ settings, onChange, onClose, qualityNow }) {
       onChange('quality');
       segs();
     }
+    if (e.target.closest('[data-act="keys"]')) onKeys?.();
     if (e.target === el || e.target.closest('[data-act="close"]')) onClose();
+  });
+  return el;
+}
+
+// 키 바꾸기: 동작을 누른 뒤 새 키를 누르면 바뀜 (Esc 취소) · 다른 동작이 쓰던 키면 서로 맞바꿈 · 기본값으로
+export function keysModal({ onChange, onClose }) {
+  const el = h(`
+    <section class="modal">
+      <div class="modal-card wide keys-card">
+        <header><h2>키 바꾸기</h2><div class="kb-acts"><button class="btn ghost small" data-act="reset">기본값으로</button><button class="btn ghost small" data-act="close">닫기</button></div></header>
+        <p class="field-note">바꿀 동작을 누른 뒤 새 키를 누르세요 · <kbd>Esc</kbd> 취소 · 다른 동작이 쓰던 키면 두 동작의 키를 서로 맞바꿈</p>
+        <p class="kb-msg" aria-live="polite"></p>
+        <div class="key-groups kb-groups"></div>
+        <div class="tip kb-warn"></div>
+      </div>
+    </section>`);
+  const groupsEl = el.querySelector('.kb-groups');
+  const msg = el.querySelector('.kb-msg');
+  const warn = el.querySelector('.kb-warn');
+  let waiting = null;
+  const fixed = [['사격', '왼쪽 클릭'], ['정조준', '오른쪽 클릭'], ['무기 돌리기', '휠'], ['일시 중지', 'Esc']];
+  const render = () => {
+    const groups = [...new Set(KEY_ACTIONS.map((a) => a.group))];
+    groupsEl.innerHTML = groups.map((g) => `<div class="key-group"><h4>${g}</h4>${KEY_ACTIONS.filter((a) => a.group === g)
+      .map((a) => `<button class="kb-row${waiting === a.id ? ' wait' : ''}" data-id="${a.id}"><span>${a.name}</span><kbd>${waiting === a.id ? '키 입력…' : K(a.id)}</kbd></button>`).join('')}</div>`).join('')
+      + `<div class="key-group fixed"><h4>바꿀 수 없음</h4>${fixed.map(([n, k]) => `<div class="kb-row off"><span>${n}</span><kbd>${k}</kbd></div>`).join('')}</div>`;
+    // 앉기가 Ctrl이면 브라우저 단축키(Ctrl+숫자 = 탭 이동, Ctrl+W = 탭 닫기)와 겹칠 수 있음
+    const ctrl = /^Control/.test(keyOf('crouch'));
+    warn.innerHTML = ctrl
+      ? `<b>브라우저 단축키 주의</b> 앉기가 ${kbd('crouch')}이면 앉은 채 숫자 키를 누를 때 탭이 넘어가거나 ${kbd('crouch')}+${kbd('forward')}로 탭이 닫힐 수 있음 (브라우저가 먼저 가져가 게임이 막을 수 없음). 앉기를 <kbd>C</kbd> 같은 글자 키로 바꾸면 해결.`
+      : '<b>브라우저 단축키</b> 경기 중에는 F5 · Ctrl+R(새로고침) · F1 · F3 · 마우스 뒤로/앞으로 버튼을 막아 둠.';
+  };
+  render();
+  const say = (t, bad = false) => {
+    msg.textContent = t;
+    msg.classList.toggle('bad', bad);
+  };
+  const onKey = (e) => {
+    if (!el.isConnected) {
+      window.removeEventListener('keydown', onKey, true);
+      return;
+    }
+    if (!waiting) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.code === 'Escape') {
+      waiting = null;
+      say('취소함');
+      render();
+      return;
+    }
+    if (KEY_RESERVED.has(e.code)) {
+      say(`${keyName(e.code)} 키는 쓸 수 없음 (Esc · F5 · F11 · F12 · 윈도 키 등)`, true);
+      return;
+    }
+    const name = KEY_ACTIONS.find((a) => a.id === waiting).name;
+    const r = assignKey(waiting, e.code);
+    if (r.ok) {
+      const other = r.swapped ? KEY_ACTIONS.find((a) => a.id === r.swapped) : null;
+      say(other ? `${name} → ${K(waiting)} · 원래 쓰던 '${other.name}'은(는) ${K(other.id)}(으)로 맞바꿈` : `${name} → ${K(waiting)}`);
+      onChange?.();
+    }
+    waiting = null;
+    render();
+  };
+  window.addEventListener('keydown', onKey, true);
+  el.addEventListener('click', (e) => {
+    const row = e.target.closest('button.kb-row');
+    if (row) {
+      waiting = waiting === row.dataset.id ? null : row.dataset.id;
+      say(waiting ? `'${KEY_ACTIONS.find((a) => a.id === waiting).name}'에 쓸 키를 누르세요` : '');
+      render();
+      return;
+    }
+    if (e.target.closest('[data-act="reset"]')) {
+      resetKeys();
+      waiting = null;
+      say('모든 키를 기본값으로 되돌림');
+      onChange?.();
+      render();
+      return;
+    }
+    if (e.target === el || e.target.closest('[data-act="close"]')) {
+      window.removeEventListener('keydown', onKey, true);
+      onClose();
+    }
   });
   return el;
 }
