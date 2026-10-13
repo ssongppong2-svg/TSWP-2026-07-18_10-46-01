@@ -1074,12 +1074,13 @@ button {
 
 .side-block.weapons {
   display: grid;
-  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: center;
-  gap: 8px 16px;
+  gap: 6px 14px;
 }
 
 .side-block.weapons h3 {
+  grid-column: 1 / -1;
   margin: 0;
 }
 
@@ -1118,6 +1119,22 @@ button {
 .wpn small {
   font: 500 11px var(--mono);
   color: var(--muted);
+}
+
+/* 종류·발사 방식 / 피해: 두 줄로 (줄이 넘치면 말줄임) */
+.wpn small span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.side-block.weapons .wpn > div {
+  min-width: 0;
+}
+
+.side-block.weapons .wpn svg {
+  flex-basis: 54px;
 }
 
 .side-note {

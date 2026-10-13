@@ -415,7 +415,7 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
           <div class="patch-detail"></div>
           <div class="side-block weapons">
             <h3>보급 화기 <small>구매 시간에 <kbd>B</kbd> 보급 단말기</small></h3>
-            ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `${w.price.toLocaleString('en-US')} J` : '기본 지급'}</em></b><small>${w.kind} · 몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${Math.round(w.damage * w.headMult)}</small></div></div>`; }).join('')}
+            ${SHOP_WEAPONS.map((id) => { const w = WEAPONS[id]; return `<div class="wpn">${WEAPON_ICONS[id]}<div><b>${w.name} <em>${w.price ? `${w.price.toLocaleString('en-US')} J` : '기본 지급'}</em></b><small><span>${w.kind}${w.burst && !w.kind.includes('점사') ? ` · ${w.burst}점사` : ''}</span><span>몸통 ${w.pellets ? `${w.damage}×${w.pellets}` : w.damage} · 머리 ${w.headKill ? '한 방' : Math.round(w.damage * w.headMult)}</span></small></div></div>`; }).join('')}
           </div>
         </div>
         <aside class="draft-side">
@@ -702,7 +702,7 @@ export function controlsModal({ onClose }) {
       ['Tab', '전황판'],
     ]],
     ['임무', [
-      ['B', '보급 단말기 (보급·준비 시간) · 숫자 키로 바로 보급 · 보급 점검 문제'],
+      ['B', '보급 단말기 (보급·준비 시간) · 1~0 · − · = 로 바로 보급 · 보급 점검 문제'],
       ['F', '폭탄 해체 · 지레 손잡이 · CQB: 연구원 결박 풀기 · 연구 자료 확보'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
       ['Enter', 'CQB 준비 시간에 바로 작전 개시'],
