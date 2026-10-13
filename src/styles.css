@@ -4169,6 +4169,7 @@ button {
 .hud .st-label {
   font: 600 10px var(--mono);
   letter-spacing: 0.16em;
+  white-space: nowrap;
   color: var(--muted);
 }
 
@@ -4972,4 +4973,385 @@ button {
 .hud.droning .hud-bottom,
 .hud.droning .hint-keys {
   opacity: 0.25;
+}
+
+
+/* ───── CQB 작전 ───── */
+/* 점수 대신 작전 목표 (오른쪽 위), 상대 점은 용의자 제압 현황 */
+.hud.op .st-score {
+  display: none;
+}
+
+.hud .op-panel {
+  display: none;
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  min-width: 228px;
+  padding: 9px 12px 10px;
+  background: rgba(9, 13, 17, 0.66);
+  border: 1px solid var(--hud-line);
+  border-left: 2px solid var(--ally);
+}
+
+.hud.op .op-panel {
+  display: block;
+}
+
+.hud .op-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.hud .op-head small {
+  font: 600 9.5px var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.hud .op-head b {
+  font: 700 12.5px var(--sans);
+  color: #e9edf0;
+}
+
+.hud .op-obj {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.hud .op-obj li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  font: 500 12px var(--sans);
+  color: #d6dde2;
+}
+
+.hud .op-obj li i {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(214, 221, 226, 0.6);
+}
+
+.hud .op-obj li b {
+  font: 600 11px var(--mono);
+  color: var(--muted);
+}
+
+.hud .op-obj li.done {
+  color: var(--good);
+}
+
+.hud .op-obj li.done i {
+  border-color: var(--good);
+  background: var(--good);
+  box-shadow: inset 0 0 0 2px rgba(9, 13, 17, 0.85);
+}
+
+.hud .op-obj li.failed b {
+  color: var(--bad);
+}
+
+/* 결박 풀기·자료 확보 진행 막대 (조준점 아래) */
+.hud .op-task {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  transform: translateX(-50%);
+  display: none;
+  min-width: 220px;
+  padding: 7px 12px 8px;
+  text-align: center;
+  background: rgba(9, 13, 17, 0.72);
+  border: 1px solid var(--hud-line);
+}
+
+.hud .op-task.show {
+  display: block;
+}
+
+.hud .op-task b {
+  display: block;
+  font: 600 13px var(--sans);
+  color: #eef2f5;
+}
+
+.hud .ot-bar {
+  height: 4px;
+  margin: 6px 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.hud .ot-bar i {
+  display: block;
+  height: 100%;
+  background: var(--ally);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.hud .op-task small {
+  font: 500 10px var(--mono);
+  color: var(--muted);
+}
+
+/* ═════════════════════════ CQB 작전: 선택 · 결과 ═════════════════════════ */
+.op-btn {
+  border: 1px solid #9fb8d8;
+  color: #dce8f6;
+  background: rgba(159, 184, 216, 0.08);
+}
+
+.op-btn:hover {
+  background: rgba(159, 184, 216, 0.16);
+}
+
+.op-screen {
+  --c: #9fb8d8;
+}
+
+.op-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
+  gap: 12px;
+  width: min(1100px, 100%);
+  margin: 20px auto 0;
+}
+
+.op-card {
+  display: grid;
+  grid-template-columns: minmax(120px, 38%) 1fr;
+  gap: 14px;
+  padding: 12px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--dim);
+  background: var(--panel);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.op-card:hover {
+  background: var(--panel-2);
+}
+
+.op-card.on {
+  border-color: var(--c);
+  border-left-color: var(--c);
+  background: linear-gradient(180deg, rgba(159, 184, 216, 0.1), transparent 80%), var(--panel-2);
+}
+
+.oc-plan {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  background: #0b1014;
+  border: 1px solid var(--line);
+}
+
+.oc-plan canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.oc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.oc-text small {
+  font: 600 10px var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.oc-text b {
+  font-size: 19px;
+}
+
+.oc-text b.oc-best {
+  font: 700 12px var(--display);
+  color: var(--accent);
+}
+
+.oc-text p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #b9c0c7;
+}
+
+.oc-meta {
+  margin-top: auto;
+  font: 500 11px var(--mono);
+  color: #9fb6d0;
+}
+
+.op-brief {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 12px 28px;
+  width: min(1100px, 100%);
+  margin: 18px auto 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.op-brief h3 {
+  margin: 0 0 8px;
+  font: 600 11px var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--c);
+}
+
+.ob-obj {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-obj li {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ob-obj b {
+  font-weight: 600;
+}
+
+.ob-obj span {
+  color: #b9c0c7;
+}
+
+.op-diff-note {
+  margin-left: 6px;
+  letter-spacing: 0;
+  color: #9fb6d0;
+}
+
+.op-screen .team-foot {
+  width: min(1100px, 100%);
+}
+
+/* 결과: 등급 · 목표별 점수 */
+.op-result .op-grade {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 12px 0 2px;
+  padding: 4px 18px 6px;
+  border: 1px solid var(--g, var(--line-strong));
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.op-grade b {
+  font: 700 64px / 1 var(--display);
+  color: var(--g);
+}
+
+.op-grade span {
+  font: 600 16px var(--mono);
+  color: #c3c9cf;
+}
+
+.op-grade.g-S { --g: #f2d27a; }
+.op-grade.g-A { --g: var(--ally); }
+.op-grade.g-B { --g: #8fc1ff; }
+.op-grade.g-C { --g: var(--warn); }
+.op-grade.g-D { --g: var(--enemy); }
+
+.op-objs {
+  display: grid;
+  gap: 4px;
+  width: min(560px, 100%);
+  margin: 16px auto 0;
+  text-align: left;
+}
+
+.op-objs > div {
+  display: grid;
+  grid-template-columns: 14px 120px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.op-objs i {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--dim);
+}
+
+.op-objs .done i {
+  border-color: var(--good);
+  background: var(--good);
+}
+
+.op-objs .failed i,
+.op-objs .pen i {
+  border-color: var(--bad);
+  background: var(--bad);
+}
+
+.op-objs span {
+  font: 500 12px var(--mono);
+  color: var(--muted);
+}
+
+.op-objs em {
+  font: 700 14px var(--display);
+  font-style: normal;
+  color: #c3c9cf;
+}
+
+.op-objs .done em {
+  color: var(--good);
+}
+
+.op-objs .pen em {
+  color: var(--bad);
+}
+
+@media (max-width: 640px) {
+  .op-card {
+    grid-template-columns: 1fr;
+  }
+  .ob-obj li {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .op-objs > div {
+    grid-template-columns: 14px 1fr auto;
+  }
+  .op-objs span {
+    grid-column: 2 / -1;
+  }
+}
+
+/* CQB 작전: 포스 패치 없음 */
+.hud.op .hud-bottom {
+  display: none;
 }

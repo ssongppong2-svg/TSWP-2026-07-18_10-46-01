@@ -14,7 +14,7 @@ export const LAB_ANNEX = {
   weather: 'rain',
   mood: '야간 · 비',
   cqb: true, // CQB 작전 전용 (5대5 맵 목록에는 없음)
-  decor: { labProps: true },
+  decor: { labProps: true, interior: 'lab' },
   doorMat: 'wood',
   layout: [
     '####################################',

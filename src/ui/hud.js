@@ -40,7 +40,7 @@ export class Hud {
     this.squad = me.squad;
     const mapName = match.map.def.nameEn ?? match.map.name;
 
-    const sideName = TEAM_INFO[me.team]?.name ?? '';
+    const sideName = match.op ? '진압팀' : TEAM_INFO[me.team]?.name ?? '';
     this.root.innerHTML = `
       <div class="cam">
         <div class="cam-rec"><i></i>REC <b class="cam-t">00:00</b></div>
@@ -78,6 +78,8 @@ export class Hud {
         <div class="vt-row st"><small>지구력</small><div class="vt-bar"><i></i></div><span class="vt-load"></span></div>
       </div>
       <div class="hud-bottom"><div class="patch-bar"></div></div>
+      <div class="op-panel"><div class="op-head"><small>작전 목표</small><b class="op-name"></b></div><ul class="op-obj"></ul></div>
+      <div class="op-task"><b class="ot-label"></b><div class="ot-bar"><i></i></div><small>움직이거나 쏘면 취소</small></div>
       <div class="vh-weapon">
         <div class="amp-badge">합력 강화</div>
         <div class="vw-energy">${GEAR_ICONS.credit}<b></b><span>J</span></div>
@@ -155,6 +157,12 @@ export class Hud {
       ammoType: $('.am-type'),
       gear: $('.vw-gear'),
       drone: $('.drone-hud'),
+      opPanel: $('.op-panel'),
+      opName: $('.op-name'),
+      opObj: $('.op-obj'),
+      opTask: $('.op-task'),
+      opTaskLabel: $('.ot-label'),
+      opTaskBar: $('.ot-bar i'),
       mirror: $('.mirror-hud'),
       droneBat: $('.dh-bat i'),
       droneSec: $('.dh-sec'),
@@ -167,6 +175,16 @@ export class Hud {
       scope: $('.scope'),
     };
 
+    // CQB 작전: 점수 대신 작전 목표, 상대는 용의자 (점 = 제압 현황), 없는 장치 칸은 숨김
+    if (match.op) {
+      this.root.classList.add('op');
+      this.$('.st-side.ally .st-label').textContent = '진압팀';
+      this.$('.st-side.enemy .st-label').textContent = '용의자';
+      this.els.opName.textContent = match.op.mission.name;
+      this.els.orderText.textContent = '대장 따라감';
+      for (const chip of this.root.querySelectorAll('.bomb-chip')) if (!match.bombs.some((b) => b.id === chip.dataset.bomb)) chip.remove();
+      this.els.hint.innerHTML = '<kbd>B</kbd> 보급 <kbd>1·2·3</kbd> 무기 <kbd>4·5</kbd> 장비 <kbd>F</kbd> 결박·자료·해체·문 <kbd>F</kbd> 길게 문 행동 <kbd>G</kbd> 지휘 <kbd>M</kbd> 지도 <kbd>Tab</kbd> 전황';
+    }
     // 분대 생존 표시: 요원마다 점 하나 (내 분대 왼쪽, 상대 분대 오른쪽)
     this.rosterEls = new Map();
     for (const a of match.agents) {
@@ -215,6 +233,28 @@ export class Hud {
     this.killT = 0;
     this.hintT = 16;
     this.shownConcepts = new Set();
+  }
+
+  // CQB 작전: 목표 목록(0.25초마다) · 결박 풀기·자료 확보 진행 막대
+  updateOp(dt, me) {
+    const m = this.match;
+    const E = this.els;
+    this.opT = (this.opT ?? 0) - dt;
+    if (this.opT <= 0) {
+      this.opT = 0.25;
+      const objs = m.op.objectives();
+      const sig = objs.map((o) => `${o.done ? 1 : 0}${o.failed ? 1 : 0}${o.detail}`).join('|');
+      this.set('opObj', sig, () => {
+        E.opObj.innerHTML = objs.map((o) => `<li class="${o.done ? 'done' : ''} ${o.failed ? 'failed' : ''}"><i></i><span>${esc(o.label)}</span><b>${esc(o.detail)}</b></li>`).join('');
+      });
+    }
+    const t = me.opTask;
+    this.set('opTaskOn', !!t, (v) => E.opTask.classList.toggle('show', v));
+    if (t) {
+      const item = t.kind === 'free' ? m.op.hostages[t.id] : m.op.intel[t.id];
+      this.set('opTaskLabel', `${t.kind}${t.id}`, () => (E.opTaskLabel.textContent = t.kind === 'free' ? `결박 푸는 중 · ${item?.name ?? ''}` : `자료 확보 중 · ${item?.name ?? ''}`));
+      this.set('opTaskP', Math.round((t.t / t.need) * 40), (v) => (E.opTaskBar.style.transform = `scaleX(${v / 40})`));
+    }
   }
 
   // 휠 항목 그리기 (항목·켜짐이 바뀔 때만 다시)
@@ -317,7 +357,9 @@ export class Hud {
   }
 
   order(order, issuer) {
-    const text = order ? ORDER_NAME[order.type] ?? ENTRY_NAME[order.type] ?? order.type : '자율 교전';
+    // CQB 작전에서 명령이 없으면 봇은 대장을 따라감
+    const none = this.match.op ? '대장 따라감' : '자율 교전';
+    const text = order ? ORDER_NAME[order.type] ?? ENTRY_NAME[order.type] ?? order.type : none;
     this.els.orderText.textContent = text;
     this.cache.orderPhase = undefined; // 진입 명령이면 단계가 이어서 붙음
     this.els.order.classList.toggle('active', !!order);
@@ -364,15 +406,19 @@ export class Hud {
     this.set('sA', m.score?.[this.squad] ?? 0, (v) => (E.allyScore.textContent = v));
     this.set('sE', m.score?.[enemySquad] ?? 0, (v) => (E.enemyScore.textContent = v));
     const buying = m.phase === 'buy';
-    const clock = fmtTime(buying ? m.phaseT : m.timeLeft);
+    // 작전: 장치를 모두 해체하면 제한 시간 대신 '해체 완료'
+    const clock = m.op?.devicesDone && !buying ? '해체 완료' : fmtTime(buying ? m.phaseT : m.timeLeft);
     this.set('clock', clock, (v) => (E.clock.textContent = v));
     let sub;
-    if (buying) sub = m.rounds ? `보급 · 라운드 ${m.round}` : '작전 개시 대기';
+    if (buying && m.op) sub = '준비 · B 보급 · Enter 작전 개시';
+    else if (m.op && m.phase === 'live') sub = m.op.devicesDone ? `${m.op.mission.code} · 시간 제한 없음` : `${m.op.mission.code} · 장치 폭발까지`;
+    else if (buying) sub = m.rounds ? `보급 · 라운드 ${m.round}` : '작전 개시 대기';
     else if (m.phase === 'roundEnd') sub = `라운드 ${m.round} 종료`;
     else if (m.phase === 'ended') sub = '경기 종료';
     else sub = m.rounds ? `라운드 ${m.round} · ${a.team === TEAMS.DEFUSE ? '공격' : '수비'}` : TEAM_INFO[me.team].name;
     this.set('sub', sub, (v) => (E.sub.textContent = v));
-    this.set('urgent', m.phase === 'live' && m.timeLeft <= 30, (v) => E.clock.classList.toggle('urgent', v));
+    this.set('urgent', m.phase === 'live' && m.timeLeft <= 30 && !m.op?.devicesDone, (v) => E.clock.classList.toggle('urgent', v));
+    if (m.op) this.updateOp(dt, me);
     this.set('buying', buying, (v) => E.top.classList.toggle('buying', v));
     for (const b of m.bombs) {
       const state = b.state === 'armed' && b.picker ? 'picking' : b.state;
@@ -529,8 +575,11 @@ export class Hud {
       // 지렛대 (지레 셔터)
       const lever = !near && m.devices?.leverAt(a);
       if (lever) prompt = `<kbd>F</kbd> ${lever.d.name ?? '지레 셔터'} ${lever.d.st.closed ? '올리기' : '내리기'}`;
+      // CQB 작전: 연구원 결박 풀기 · 연구 자료 확보
+      const opT = !near && !lever && m.op?.targetFor(a);
+      if (opT) prompt = opT.kind === 'free' ? `<kbd>F</kbd> 결박 풀기 · ${esc(opT.item.name)} <small>(풀면 스스로 투입 지점으로 이동)</small>` : `<kbd>F</kbd> 연구 자료 확보 · ${esc(opT.item.name)}`;
       // 문: 열기·닫기 · 길게 누르면 문 행동 (잠긴 문은 발차기·폭약·산탄총)
-      const door = !near && !lever && !a.mirror && m.doors?.doorAt(a);
+      const door = !near && !lever && !opT && !a.mirror && m.doors?.doorAt(a);
       if (door) {
         const o = m.doors.options(a, door);
         const what = door.mat === 'steel' ? '철문' : '문';

@@ -5,7 +5,7 @@
 // 맵 정의의 op: { extract, hostages, intel, posts }가 배치를 정한다.
 import { segmentAabb } from '../core/vec.js';
 import { BOT_NAMES, CELL, TEAMS } from './constants.js';
-import { freshAmmo, giveWeapon } from './agent.js';
+import { eyePos, freshAmmo, giveWeapon } from './agent.js';
 import { ARMOR } from './data.js';
 import { emptyGear } from './gear.js';
 
@@ -19,6 +19,7 @@ export const OP = {
   hostageSpeed: 3.0, // 호송될 때 (몸을 숙이고 뜀)
   hostageRadius: 0.3,
   hostageHeight: 1.1, // 무릎 꿇은 키 (탄 판정)
+  spot: 14, // 진압팀이 이 거리 안에서 직접 보면 연구원·자료 발견 (지도에 표시)
 };
 
 export const MISSIONS = [
@@ -85,9 +86,10 @@ export class Operation {
 
   reset() {
     for (const h of this.hostages) {
-      Object.assign(h, { x: h.home.x, y: 0, z: h.home.z, prev: { x: h.home.x, z: h.home.z }, vel: { x: 0, z: 0 }, yaw: h.yaw0, state: 'captive', hp: OP.hostageHp, cower: 0, path: null, pathIdx: 0, freedBy: null, hurtBy: null, waitT: 0 });
+      Object.assign(h, { x: h.home.x, y: 0, z: h.home.z, prev: { x: h.home.x, z: h.home.z }, vel: { x: 0, z: 0 }, yaw: h.yaw0, state: 'captive', hp: OP.hostageHp, cower: 0, path: null, pathIdx: 0, freedBy: null, hurtBy: null, waitT: 0, found: false });
     }
-    for (const it of this.intel) it.taken = null;
+    for (const it of this.intel) Object.assign(it, { taken: null, found: false });
+    this.scanT = 0;
     this.devicesDone = false;
     this.stats = { hostageKilledBySwat: 0, hostageKilled: 0 };
     this.endedAt = null;
@@ -198,6 +200,7 @@ export class Operation {
     const t = this.targetFor(a);
     if (!t) return false;
     a.opTask = { kind: t.kind, id: t.item.id, t: 0, need: t.kind === 'free' ? OP.freeTime : OP.intelTime, at: { x: a.pos.x, z: a.pos.z } };
+    t.item.found = true;
     a.vel.x = a.vel.z = 0;
     this.match.emit('opTask', { agent: a, kind: t.kind, item: t.item, state: 'start' });
     return true;
@@ -248,6 +251,29 @@ export class Operation {
     }
     if (this.devicesDone) m.timeLeft = Math.max(m.timeLeft, 1);
     for (const h of this.hostages) this.stepHostage(h, dt);
+    this.scanT -= dt;
+    if (this.scanT <= 0) {
+      this.scanT = 0.25;
+      this.scan();
+    }
+  }
+
+  // 발견: 진압팀 누군가 직접 본 연구원·자료 (지도에 표시, 무전 보고)
+  scan() {
+    const m = this.match;
+    const eyes = this.swat.filter((a) => a.alive).map((a) => ({ a, eye: eyePos(a) }));
+    const look = (list, kind, y) => {
+      for (const t of list) {
+        if (t.found || (kind === 'intel' && t.taken)) continue;
+        const p = { x: t.x, y, z: t.z };
+        const by = eyes.find(({ eye }) => Math.hypot(eye.x - p.x, eye.z - p.z) < OP.spot && m.map.lineOfSight(eye, p));
+        if (!by) continue;
+        t.found = true;
+        m.emit('opFound', { kind, item: t, agent: by.a });
+      }
+    };
+    look(this.hostages, 'hostage', 0.8);
+    look(this.intel, 'intel', 1.0);
   }
 
   stepHostage(h, dt) {
@@ -441,6 +467,7 @@ export class Operation {
       h: this.hostages.map((h) => [ST.indexOf(h.state), r2(h.x), r2(h.z), r2(h.yaw), Math.round(h.hp), r2(h.cower)]),
       i: this.intel.map((it) => (it.taken ? idx(it.taken) : -1)),
       d: this.devicesDone ? 1 : 0,
+      f: [...this.hostages, ...this.intel].reduce((bits, t, k) => bits | (t.found ? 1 << k : 0), 0),
     };
   }
 
@@ -458,5 +485,6 @@ export class Operation {
       if (this.intel[k]) this.intel[k].taken = v >= 0 ? agentAt(v)?.id ?? 'x' : null;
     });
     this.devicesDone = !!s.d;
+    [...this.hostages, ...this.intel].forEach((t, k) => (t.found = !!((s.f ?? 0) & (1 << k))));
   }
 }

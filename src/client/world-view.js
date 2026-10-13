@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 import { TILES, STORY, KIND } from '../sim/map.js';
-import { ceilingTileTexture, claddingTexture, deckTexture, grateTexture, museumTextures, posterTexture, siteDecal, sprayTexture } from './textures.js';
+import { ceilingTileTexture, claddingTexture, deckTexture, grateTexture, museumTextures, plasterTexture, posterTexture, siteDecal, sprayTexture, vinylTexture } from './textures.js';
 import { buildCeilingFixtures } from './ceiling.js';
 import { buildWallProps } from './wall-props.js';
-import { buildLabProps, buildMuseumProps } from './exhibits.js';
-import { puddleRoughness } from './weather.js';
+import { buildLabInterior, buildLabProps, buildMuseumProps } from './exhibits.js';
+import { coverHeights, puddleRoughness } from './weather.js';
 import { buildStructure, shadeFn } from './structure.js';
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
@@ -24,6 +24,10 @@ export function buildWorld(map, baseTex) {
   // 맵 테마: 'industrial'(포스 바운드: 콘크리트·상자) / 'museum'(과학관: 광택 타일·전시물)
   const museum = map.def.theme === 'museum';
   const tex = museum ? { ...baseTex, ...museumTextures() } : baseTex;
+  // 연구동 별관: 지붕 아래(실내)는 페인트 벽·비닐 타일 바닥·천장 텍스 (밖은 비 젖은 콘크리트 그대로)
+  const labInside = !museum && map.def.decor?.interior === 'lab';
+  const cover = labInside ? coverHeights(map) : null;
+  const indoor = labInside ? (c, r) => map.inBounds(c, r) && cover[r * map.cols + c] < 90 : null;
 
   // 비가 오면 모든 표면이 젖어 어둡고 매끈해짐 (등불이 바닥에 번져 반사)
   const wet = map.weather === 'rain' || map.weather === 'wet';
@@ -54,6 +58,7 @@ export function buildWorld(map, baseTex) {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
+  if (labInside) group.add(buildInteriorFloor(map, indoor));
 
   // ── 건물: 벽(1·2층)·창문·2층 바닥판·난간·지붕·계단 (맵의 막힌 높이 구간 그대로, 보이는 면만)
   const worldTex = (t, k = 1) => {
@@ -76,8 +81,9 @@ export function buildWorld(map, baseTex) {
   const slabTex = worldTex(tex.floor);
   const mats = {
     wall: wallMat,
+    inner: labInside ? new THREE.MeshStandardMaterial({ ...V, map: plasterTexture(), roughness: 0.86, metalness: 0, color: '#d9d9d4' }) : null,
     wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
-    ceil: museum
+    ceil: museum || labInside
       ? new THREE.MeshStandardMaterial({ ...V, map: ceilingTileTexture(), color: '#d8d2c6', roughness: 0.92 })
       : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
     clad: museum ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
@@ -104,7 +110,7 @@ export function buildWorld(map, baseTex) {
       ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85 })
       : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.6, metalness: 0.1 }),
   };
-  group.add(buildStructure(map, mats, { museum }));
+  group.add(buildStructure(map, mats, { museum, inner: indoor }));
   // 천장 등 (아트리움 광천장 자리는 따로 꾸밈)
   const ac = map.def.decor?.atriumCeiling;
   group.add(buildCeilingFixtures(map, { museum, skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
@@ -112,6 +118,13 @@ export function buildWorld(map, baseTex) {
   group.add(buildWallProps(map, { museum }));
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
+  //   연구동 별관(decor.interior 'lab'): 지붕 아래 상자 칸은 방에 맞는 가구로 (실험대·흄 후드·서버 랙·책상·선반·데스크)
+  let furnished = null;
+  if (labInside) {
+    const lab = buildLabInterior(map, indoor);
+    group.add(lab);
+    furnished = lab.userData.cells;
+  }
   const kinds = museum ? {} : {
     crate: { tex: tex.crate, top: '#3f432c', rough: 0.85, metal: 0.05, inset: 0.92 },
     bigCrate: { tex: tex.container, top: '#2b373c', rough: 0.6, metal: 0.55, inset: 0.98 },
@@ -122,11 +135,11 @@ export function buildWorld(map, baseTex) {
     const props = buildMuseumProps(map, posterAtlas());
     group.add(props);
     group.userData.tick = props.userData.tick;
-  } else if (map.def.decor?.labProps) group.add(buildLabProps(map));
+  } else if (map.def.decor?.labProps && !furnished) group.add(buildLabProps(map));
   const shade = shadeFn(map, museum);
   for (const [kind, style] of Object.entries(kinds)) {
     // 1층·2층 바닥 위의 상자 (map.props: 칸·높이)
-    const cells = map.props.filter((p) => p.kind === kind).map(({ c, r, y }) => [c, r, y]);
+    const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`)).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
     const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
@@ -825,5 +838,31 @@ function buildCrane(R, day) {
   const a = 0.7;
   mesh.position.set(Math.cos(a) * (R + 30), 0, Math.sin(a) * (R + 30));
   mesh.rotation.y = 2.3;
+  return mesh;
+}
+
+// 연구동 실내 바닥: 실내 칸(문간 포함)만 비닐 타일 판을 바닥 바로 위에 깔아 젖은 콘크리트를 덮음
+function buildInteriorFloor(map, indoor) {
+  const pos = [], uv = [], idx = [];
+  for (let r = 0; r < map.rows; r++) {
+    for (let c = 0; c < map.cols; c++) {
+      if (!indoor(c, r) || map.charAt(c, r) === '#') continue;
+      const x0 = map.originX + c * CELL, z0 = map.originZ + r * CELL;
+      const n = pos.length / 3;
+      for (const [x, z] of [[x0, z0], [x0, z0 + CELL], [x0 + CELL, z0 + CELL], [x0 + CELL, z0]]) {
+        pos.push(x, 0.004, z);
+        uv.push(x / 2.4, -z / 2.4);
+      }
+      idx.push(n, n + 1, n + 2, n, n + 2, n + 3);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: vinylTexture(), roughness: 0.42, metalness: 0, color: '#9c9c97', polygonOffset: true, polygonOffsetFactor: -1 }));
+  mesh.name = 'interiorFloor';
+  mesh.receiveShadow = true;
   return mesh;
 }

@@ -192,3 +192,24 @@ test('작전 AI: 사람 없이 봇 분대만으로도 작전을 끝까지 (수�
   assert.ok(m.op.result.success, m.op.result.reason);
   assert.ok(m.op.hostages.every((h) => h.state === 'rescued' || h.state === 'dead'));
 });
+
+test('발견: 진압팀이 직접 본 연구원·자료만 발견됨(무전 보고) · 상태를 주고받아도 그대로', () => {
+  const m = op(12);
+  goLive(m);
+  const me = m.player;
+  const h = m.op.hostages[0];
+  assert.ok(m.op.hostages.every((x) => !x.found) && m.op.intel.every((x) => !x.found), '처음엔 아무것도 모름');
+  let found = null;
+  m.events.on('opFound', (e) => (found = e));
+  // 투입 지점(건물 밖)에서는 안 보임 → 같은 방 안에서 보면 발견
+  put(me, h.x - 3, h.z, -Math.PI / 2);
+  step(m, 0.5);
+  assert.ok(h.found, '같은 방에서 보면 발견');
+  assert.equal(found?.kind, 'hostage');
+  assert.equal(found.agent, me);
+  const s = m.op.pack((id) => m.agents.findIndex((a) => a.id === id));
+  const m2 = op(12);
+  m2.op.unpack(s, (i) => m2.agents[i]);
+  assert.ok(m2.op.hostages[0].found);
+  assert.ok(!m2.op.hostages[1].found);
+});

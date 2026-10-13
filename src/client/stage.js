@@ -7,7 +7,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GameMap } from '../sim/map.js';
 import { DEFAULT_MAP_ID } from '../sim/maps/index.js';
 import { createTextures } from './textures.js';
-import { RainSystem } from './weather.js';
+import { RainSystem, coverHeights } from './weather.js';
 import { buildWorld } from './world-view.js';
 import { LightRig } from './lights.js';
 
@@ -353,8 +353,20 @@ export class Stage {
       const q = QUALITY[this.qualityKey] ?? QUALITY.high;
       this.rain = new RainSystem({ count: q.rain, splashes: Math.round(q.rain / 7) });
       this.rain.onThunder = (delay, vol) => this.onThunder?.(delay, vol);
+      this.rain.setCover(this.map);
       this.scene.add(this.rain.group);
     }
+    // 렌즈 빗방울: 지붕 아래로 들어가면 서서히 마름
+    this.cover = this.map.weather === 'rain' ? coverHeights(this.map) : null;
+    this.lensWet = 1;
+  }
+
+  // 카메라가 있는 칸이 지붕 아래인지 (실내)
+  underCover(p) {
+    if (!this.cover) return false;
+    const { c, r } = this.map.toCell(p.x, p.z);
+    if (!this.map.inBounds(c, r)) return false;
+    return this.cover[r * this.map.cols + c] < 90 && p.y < this.cover[r * this.map.cols + c];
   }
 
   // key: 'auto' | 'low' | 'medium' | 'high'. 자동이면 기기에 맞춰 고르고, 느리면 한 단계씩 내림
@@ -527,7 +539,7 @@ export class Stage {
     u.pulse.value = pulse;
     u.flash.value = flash;
     u.blur.value = blur;
-    u.rain.value = on && this.map?.weather === 'rain' ? 1 : 0;
+    u.rain.value = on && this.map?.weather === 'rain' ? this.lensWet ?? 1 : 0;
   }
 
   render(dt = 0.016) {
@@ -538,6 +550,9 @@ export class Stage {
     // 비와 번개: 번개가 치면 하늘과 주변이 잠깐 밝아짐
     const w = this.weather ?? WEATHER.clear;
     if (this.rain) {
+      // 실내에서는 렌즈 빗방울이 몇 초에 걸쳐 마르고, 밖으로 나가면 다시 젖음
+      const wet = this.underCover(this.camera.position) ? 0 : 1;
+      this.lensWet += (wet - this.lensWet) * Math.min(1, dt * (wet ? 1.5 : 0.35));
       this.bolt = this.rain.update(dt, this.camera);
       this.sky.material.uniforms.bolt.value = this.bolt;
       this.hemi.intensity = w.hemi + this.bolt * 2.2 + (this.quality?.env ? 0 : 0.3);

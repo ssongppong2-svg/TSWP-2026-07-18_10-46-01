@@ -168,13 +168,13 @@ function liftFrom(list, start, y) {
   for (let i = start; i < list.length; i++) list[i].translate(0, y, 0);
 }
 
-// ── 포스 바운드: 작은 상자 위의 실험 장비 (상자 5개 중 2개꼴)
-export function buildLabProps(map) {
+// ── 포스 바운드: 작은 상자 위의 실험 장비 (상자 5개 중 2개꼴). only: 이 칸들만 ('c,r' 집합)
+export function buildLabProps(map, only = null) {
   const group = new THREE.Group();
   group.name = 'labProps';
   const mat = makeSolidMaterial({ strobe: 0 });
   const by = {};
-  for (const cell of cellsOf(map, 'crate')) {
+  for (const cell of cellsOf(map, 'crate', only ? (c, r) => !only.has(`${c},${r}`) : undefined)) {
     const h = hash(cell.c, cell.r);
     if (h % 5 >= 2) continue;
     (by[SMALL_KEYS[h % SMALL_KEYS.length]] ??= []).push(cell);
@@ -492,4 +492,206 @@ export class ConceptCards {
       }
     });
   }
+}
+
+// ───────────────────────── 연구동 실내 가구 (CQB 작전 별관) ─────────────────────────
+// 실내(지붕 아래) 상자 칸을 그 방에 맞는 가구로 그림. 충돌 상자(1.84 m 사각 · 높이 1.0 / 2.2 / 1.1)를 꽉 채우는 모양
+//   c(1.0 m): 실험실 = 실험대(검은 에폭시 상판·회색 수납장·개수대) / 사무·휴게·로비 = 책상(나무 상판·서랍장·모니터) / 창고 = 그대로 보급 상자
+//   C(2.2 m): 서버실 = 서버 랙(LED) / 화학 실험실 = 흄 후드(유리 새시) / 창고 = 철제 선반(상자) / 그 밖 = 철제 수납장
+//   =(1.1 m): 안내 데스크·바리케이드 (나무 판 + 밝은 상판)
+const LAB = { panel: '#c9ccc8', groove: '#7d8380', epoxy: '#1c2023', steel: '#9aa0a6', dark: '#24272b', plinth: '#2b2e31' };
+const EP = 0.92; // 상자 반폭 (CELL * 0.92 / 2)
+
+const FURNITURE = {
+  bench(v) {
+    const out = [
+      part(box(1.72, 0.1, 1.72), LAB.plinth, 0.8, 0, [0, 0.05, 0]),
+      part(box(1.78, 0.82, 1.78), LAB.panel, 0.55, 0.05, [0, 0.51, 0]),
+      part(box(1.84, 0.045, 1.84), LAB.epoxy, 0.32, 0, [0, 0.9775, 0]),
+    ];
+    for (const z of [-1, 1]) {
+      out.push(part(box(1.74, 0.012, 0.01), LAB.groove, 0.7, 0, [0, 0.76, z * 0.892]));
+      for (const x of [-0.44, 0, 0.44]) out.push(part(box(0.012, 0.62, 0.01), LAB.groove, 0.7, 0, [x, 0.44, z * 0.892]));
+      for (const x of [-0.66, -0.22, 0.22, 0.66]) {
+        out.push(part(box(0.14, 0.018, 0.022), LAB.steel, 0.3, 0.85, [x, 0.7, z * 0.9]));
+        out.push(part(box(0.2, 0.014, 0.022), LAB.steel, 0.3, 0.85, [x, 0.84, z * 0.9]));
+      }
+    }
+    if (v === 1) {
+      // 개수대 + 거위목 수도꼭지 + 가스 밸브
+      out.push(part(box(0.56, 0.012, 0.42), '#41474c', 0.25, 0.7, [0.35, 1.003, 0.2]));
+      out.push(part(box(0.48, 0.006, 0.34), '#15181a', 0.3, 0.4, [0.35, 1.008, 0.2]));
+      out.push(part(cyl(0.016, 0.02, 0.34, 10), LAB.steel, 0.25, 0.9, [0.35, 1.17, -0.06]));
+      out.push(part(new THREE.TorusGeometry(0.08, 0.014, 6, 12, Math.PI), LAB.steel, 0.25, 0.9, [0.35, 1.34, 0.02], [0, Math.PI / 2, 0]));
+      for (const x of [-0.4, -0.25]) {
+        out.push(part(cyl(0.02, 0.02, 0.1, 8), '#c8a23a', 0.35, 0.8, [x, 1.05, -0.7]));
+        out.push(part(box(0.06, 0.012, 0.012), '#c0392b', 0.5, 0, [x, 1.1, -0.68]));
+      }
+    }
+    return out;
+  },
+  desk(v) {
+    const wood = v ? '#7d5f42' : '#8f7356';
+    const out = [
+      part(box(1.84, 0.05, 1.84), wood, 0.6, 0, [0, 0.975, 0]),
+      part(box(0.52, 0.95, 1.74), '#3b3f44', 0.55, 0.2, [-0.64, 0.475, 0]),
+      part(box(0.52, 0.95, 1.74), '#3b3f44', 0.55, 0.2, [0.64, 0.475, 0]),
+    ];
+    for (const z of [-1, 1]) {
+      out.push(part(box(0.78, 0.7, 0.03), '#30343a', 0.6, 0.1, [0, 0.6, z * 0.86]));
+      for (const x of [-0.64, 0.64]) for (const y of [0.28, 0.58, 0.82]) out.push(part(box(0.14, 0.016, 0.02), LAB.steel, 0.3, 0.85, [x, y, z * 0.88]));
+    }
+    // 모니터·키보드·서류
+    out.push(part(box(0.56, 0.34, 0.03), '#121417', 0.3, 0.2, [0.1, 1.27, -0.35]));
+    out.push(part(box(0.5, 0.28, 0.005), '#1f3a4c', 0.15, 0, [0.1, 1.27, -0.333], [0, 0, 0], 1, 0.35));
+    out.push(part(box(0.05, 0.12, 0.05), '#121417', 0.4, 0.3, [0.1, 1.06, -0.37]));
+    out.push(part(box(0.22, 0.012, 0.16), '#121417', 0.4, 0.3, [0.1, 1.006, -0.37]));
+    out.push(part(box(0.44, 0.015, 0.15), '#2a2d31', 0.5, 0.1, [0.1, 1.008, -0.05]));
+    out.push(part(box(0.3, 0.02, 0.22), '#e8e4da', 0.8, 0, [-0.55, 1.01, 0.2], [0, 0.3, 0]));
+    out.push(part(box(0.28, 0.012, 0.2), '#d9d4c6', 0.8, 0, [-0.5, 1.03, 0.25], [0, -0.2, 0]));
+    return out;
+  },
+  rack() {
+    const out = [part(box(1.84, 2.18, 1.84), '#16181b', 0.45, 0.45, [0, 1.09, 0]), part(box(1.86, 0.06, 1.86), '#0f1012', 0.6, 0.3, [0, 0.03, 0])];
+    const LED = ['#3dff7a', '#3dff7a', '#3dff7a', '#ffb43d', '#3da5ff'];
+    let k = 7;
+    const rnd = () => ((k = (k * 16807) % 2147483647) / 2147483647);
+    for (const z of [-1, 1]) {
+      for (const x of [-0.46, 0.46]) {
+        out.push(part(box(0.86, 2.02, 0.02), '#202327', 0.5, 0.5, [x, 1.1, z * 0.925]));
+        out.push(part(box(0.025, 0.36, 0.03), LAB.steel, 0.3, 0.85, [x + 0.36, 1.15, z * 0.94]));
+        // 장비 단 (가로 홈) + 상태등
+        for (let i = 0; i < 9; i++) {
+          const y = 0.3 + i * 0.2;
+          out.push(part(box(0.8, 0.008, 0.01), '#0c0d0f', 0.6, 0, [x, y, z * 0.937]));
+          for (let j = 0; j < 3; j++) if (rnd() < 0.75) out.push(part(box(0.018, 0.018, 0.012), LED[Math.floor(rnd() * LED.length)], 0.4, 0, [x - 0.33 + j * 0.05 + (rnd() < 0.3 ? 0.4 : 0), y + 0.08, z * 0.938], [0, 0, 0], 1, 3));
+        }
+      }
+      out.push(part(box(0.32, 0.06, 0.006), '#e8e8e2', 0.7, 0, [-0.46, 2.06, z * 0.937]));
+    }
+    return out;
+  },
+  hood() {
+    const out = [
+      part(box(1.8, 0.86, 1.74), LAB.panel, 0.55, 0.05, [0, 0.43, -0.02]),
+      part(box(1.84, 0.04, 1.8), LAB.epoxy, 0.32, 0, [0, 0.88, 0]),
+      // 위 몸통 (뒤판·옆판·윗덮개는 하나로) + 앞 유리 새시
+      part(box(1.84, 1.3, 1.6), '#d6d8d4', 0.5, 0.08, [0, 1.55, -0.12]),
+      part(box(1.84, 0.34, 1.84), '#c4c7c3', 0.5, 0.08, [0, 2.03, 0]),
+      part(box(1.5, 0.82, 0.02), '#24323b', 0.06, 0.4, [0, 1.38, 0.9]),
+      part(box(1.56, 0.04, 0.05), LAB.steel, 0.3, 0.85, [0, 1.8, 0.9]),
+      part(box(1.56, 0.04, 0.05), LAB.steel, 0.3, 0.85, [0, 0.96, 0.9]),
+      part(box(0.04, 0.86, 0.05), LAB.steel, 0.3, 0.85, [-0.76, 1.38, 0.9]),
+      part(box(0.04, 0.86, 0.05), LAB.steel, 0.3, 0.85, [0.76, 1.38, 0.9]),
+      part(box(0.04, 0.84, 0.035), LAB.steel, 0.3, 0.85, [0, 1.38, 0.91]),
+      part(box(1.3, 0.03, 0.02), '#ffffff', 0.3, 0, [0, 1.74, 0.85], [0, 0, 0], 1, 2.2),
+      part(box(1.0, 0.05, 0.03), LAB.steel, 0.25, 0.9, [0, 1.04, 0.93]),
+      // 경고 띠 · 배기 덕트
+      part(box(0.5, 0.1, 0.006), '#d9b23a', 0.6, 0, [0, 2.03, 0.923]),
+      part(cyl(0.16, 0.16, 0.5, 14), '#a9adb0', 0.4, 0.6, [0, 2.45, -0.3]),
+    ];
+    for (const x of [-0.44, 0.44]) out.push(part(box(0.012, 0.62, 0.01), LAB.groove, 0.7, 0, [x, 0.44, 0.852]));
+    for (const x of [-0.66, -0.22, 0.22, 0.66]) out.push(part(box(0.14, 0.018, 0.022), LAB.steel, 0.3, 0.85, [x, 0.72, 0.86]));
+    return out;
+  },
+  cabinet(v) {
+    const body = v ? '#b8bcbb' : '#c9c4b5';
+    const out = [part(box(1.84, 2.16, 1.84), body, 0.5, 0.35, [0, 1.08, 0]), part(box(1.86, 0.04, 1.86), '#8f9496', 0.45, 0.5, [0, 2.18, 0])];
+    for (const z of [-1, 1]) {
+      for (const x of [-0.46, 0, 0.46]) out.push(part(box(0.012, 2.04, 0.01), '#6f7476', 0.6, 0.2, [x, 1.08, z * 0.922]));
+      for (const x of [-0.69, -0.23, 0.23, 0.69]) {
+        out.push(part(box(0.022, 0.16, 0.03), LAB.steel, 0.3, 0.85, [x + (x < 0 ? 0.17 : -0.17) * (Math.abs(x) > 0.4 ? 1 : -1), 1.1, z * 0.932]));
+        // 환기 홈
+        for (let i = 0; i < 4; i++) out.push(part(box(0.24, 0.012, 0.012), '#53585b', 0.6, 0.2, [x, 1.86 + i * 0.045, z * 0.925]));
+        out.push(part(box(0.16, 0.06, 0.006), v ? '#d9b23a' : '#e8e4da', 0.6, 0, [x, 1.66, z * 0.924]));
+      }
+    }
+    return out;
+  },
+  shelf() {
+    const out = [part(box(1.78, 2.1, 0.03), '#2d3135', 0.7, 0.3, [0, 1.05, 0])];
+    for (const x of [-0.9, 0.9]) for (const z of [-0.88, 0.88]) out.push(part(box(0.06, 2.2, 0.06), '#c2652b', 0.5, 0.4, [x, 1.1, z]));
+    for (const y of [0.12, 1.06, 2.0]) {
+      out.push(part(box(1.8, 0.03, 1.8), '#7c8186', 0.6, 0.4, [0, y, 0]));
+      for (const z of [-0.9, 0.9]) out.push(part(box(1.84, 0.08, 0.05), '#c2652b', 0.5, 0.4, [0, y - 0.03, z]));
+    }
+    let k = 3;
+    const rnd = () => ((k = (k * 16807) % 2147483647) / 2147483647);
+    for (const y of [0.135, 1.075]) {
+      for (const z of [-1, 1]) {
+        let x = -0.86;
+        while (x < 0.7) {
+          const w = 0.32 + rnd() * 0.22, h = 0.35 + rnd() * 0.42, d = 0.6 + rnd() * 0.22;
+          if (x + w > 0.88) break;
+          const col = rnd() < 0.7 ? (rnd() < 0.5 ? '#a37b4c' : '#8f6a40') : '#5f6a74';
+          out.push(part(box(w - 0.02, h, d), col, 0.85, 0, [x + w / 2, y + h / 2, z * (0.06 + d / 2)]));
+          if (col !== '#5f6a74') out.push(part(box(w - 0.02, 0.04, 0.005), '#c9b48a', 0.8, 0, [x + w / 2, y + h * 0.6, z * (0.065 + d)]));
+          x += w;
+        }
+      }
+    }
+    return out;
+  },
+  counter(v) {
+    const out = [
+      part(box(1.9, 1.04, 1.9), v ? '#5f4a37' : '#6f5641', 0.65, 0, [0, 0.52, 0]),
+      part(box(1.94, 0.05, 1.94), '#d9d6cf', 0.45, 0, [0, 1.075, 0]),
+      part(box(1.92, 0.08, 1.92), LAB.plinth, 0.8, 0, [0, 0.04, 0]),
+    ];
+    for (const z of [-1, 1]) out.push(part(box(1.9, 0.03, 0.01), LAB.steel, 0.3, 0.8, [0, 0.82, z * 0.952]));
+    for (const x of [-1, 1]) out.push(part(box(0.01, 0.03, 1.9), LAB.steel, 0.3, 0.8, [x * 0.952, 0.82, 0]));
+    return out;
+  },
+};
+const furnCache = new Map();
+const furnGeo = (key, v) => {
+  const k = `${key}${v}`;
+  if (!furnCache.has(k)) furnCache.set(k, mergeGeometries(FURNITURE[key](v)));
+  return furnCache.get(k);
+};
+
+// indoor(c, r): 그 칸이 실내(지붕 아래)인지. 반환 group.userData.cells = 가구로 그린 칸 ('c,r')
+export function buildLabInterior(map, indoor) {
+  const group = new THREE.Group();
+  group.name = 'labInterior';
+  const mat = makeSolidMaterial({ strobe: 1 });
+  const area = (c, r) => map.callouts.find((k) => k.f == null && r >= k.r0 && r <= k.r1 && c >= k.c0 && c <= k.c1)?.name ?? '';
+  const pick = {
+    crate: (a) => (/실험/.test(a) ? 'bench' : /창고/.test(a) ? null : 'desk'),
+    bigCrate: (a) => (/서버/.test(a) ? 'rack' : /화학/.test(a) ? 'hood' : /창고/.test(a) ? 'shelf' : 'cabinet'),
+    barrier: () => 'counter',
+  };
+  // 앞면(로컬 +z)이 트인 쪽을 보게
+  const open = (c, r) => map.charAt(c, r) === '.' || map.charAt(c, r) === 'D';
+  const faceYaw = (c, r) => (open(c, r + 1) ? 0 : open(c, r - 1) ? Math.PI : open(c + 1, r) ? Math.PI / 2 : open(c - 1, r) ? -Math.PI / 2 : 0);
+  const cells = new Set();
+  const by = new Map();
+  for (const p of map.props) {
+    if (!pick[p.kind] || !indoor(p.c, p.r)) continue;
+    const key = pick[p.kind](area(p.c, p.r));
+    if (!key) continue;
+    const h = hash(p.c, p.r);
+    const v = key === 'bench' ? (h % 5 === 2 || h % 5 === 4 ? 1 : 0) : h % 2;
+    const yaw = key === 'hood' || key === 'rack' ? faceYaw(p.c, p.r) : (h % 4) * (Math.PI / 2);
+    const k = `${key}|${v}`;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push({ ...p, yaw });
+    cells.add(`${p.c},${p.r}`);
+  }
+  const q = new THREE.Quaternion();
+  for (const [k, list] of by) {
+    const [key, v] = k.split('|');
+    const mesh = instanced(furnGeo(key, +v), mat, list, (m, { c, r, y, yaw }) => {
+      q.setFromAxisAngle(new V3(0, 1, 0), yaw);
+      m.compose(new V3(map.cellX(c), y, map.cellZ(r)), q, new V3(1, 1, 1));
+    });
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  // 실험대 위 실험 장비 (개수대가 없는 실험대만)
+  const benches = new Set([...(by.get('bench|0') ?? [])].map((p) => `${p.c},${p.r}`));
+  group.add(buildLabProps(map, benches));
+  group.userData.cells = cells;
+  return group;
 }

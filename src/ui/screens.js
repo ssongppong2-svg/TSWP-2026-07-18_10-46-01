@@ -10,6 +10,8 @@ import { PATCH_ICONS, UI_ICONS, WEAPON_ICONS } from './icons.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT, pickQuiz } from '../sim/concepts.js';
 import { loadProgress, masteredIds, recordQuiz } from '../core/progress.js';
 import { PUZZLE_INFO } from '../sim/lockpick.js';
+import { MISSIONS, OP } from '../sim/operation.js';
+import { GameMap, STORY, TILES } from '../sim/map.js';
 
 const h = (html) => {
   const t = document.createElement('template');
@@ -22,7 +24,7 @@ const tierColor = (id) => PATCH_TIERS[PATCHES[id].tier].color;
 const slotKeys = (tier) => LOADOUT_SLOTS.filter((s) => s.tier === tier).map((s) => s.key).join('·');
 
 // ───────────────────────── 타이틀 ─────────────────────────
-export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline }) {
+export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline, onOp }) {
   const prog = loadProgress();
   const mastered = masteredIds().length;
   const el = h(`
@@ -34,8 +36,9 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>힘의 원리를 아는 요원이 이긴다.<br>2층 작전 지역의 힘 장치와 포스 패치로 ${ROUNDS.winTo}라운드를 먼저 가져와라.</p>
         <div class="menu">
           <div class="menu-main">
-            <button class="btn primary big" data-act="start">작전 개시 <small>봇 9명</small></button>
-            <button class="btn big online-btn" data-act="online">온라인 작전 <small>친구와 함께</small></button>
+            <button class="btn primary big" data-act="start">5 대 5 교전 <small>봇 9명</small></button>
+            <button class="btn big op-btn" data-act="op">CQB 작전 <small>인질 구출 · 진압</small></button>
+            <button class="btn big online-btn" data-act="online">온라인 <small>친구와 함께</small></button>
           </div>
           <div class="menu-row">
             <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}${mastered ? ` · 숙달 ${mastered}` : ''}</small></button>
@@ -57,6 +60,207 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
     if (act === 'fullscreen') onFullscreen();
     if (act === 'codex') onCodex?.();
     if (act === 'online') onOnline?.();
+    if (act === 'op') onOp?.();
+  });
+  return el;
+}
+
+// ───────────────────────── CQB 작전 선택 ─────────────────────────
+// 작전마다 건물 평면도(벽·창·문·장치·투입 지점) + 브리핑 + 목표, 난이도(용의자 수·무장·숙련도)
+export function planCanvas(mapId, { px = 6 } = {}) {
+  const map = new GameMap(mapId);
+  const c = document.createElement('canvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = map.cols * px * dpr;
+  c.height = map.rows * px * dpr;
+  c.style.aspectRatio = `${map.cols} / ${map.rows}`;
+  const g = c.getContext('2d');
+  g.scale(dpr, dpr);
+  g.fillStyle = '#0b1014';
+  g.fillRect(0, 0, map.cols * px, map.rows * px);
+  for (let r = 0; r < map.rows; r++) {
+    for (let cc = 0; cc < map.cols; cc++) {
+      const ch = map.charAt(cc, r);
+      const kind = TILES[ch]?.kind;
+      const x = cc * px, y = r * px;
+      if (kind === 'wall') continue;
+      g.fillStyle = kind ? '#3b4650' : map.ramp(cc, r) ? '#33404a' : map.surfaces(cc, r).includes(STORY) ? '#26323c' : '#1a232a';
+      g.fillRect(x, y, px, px);
+      if (ch === 'D') {
+        g.fillStyle = 'rgba(79, 224, 192, 0.32)';
+        g.fillRect(x, y, px, px);
+      }
+    }
+  }
+  // 벽 가장자리 (바닥과 닿는 벽 칸만 밝게 → 평면도 선)
+  g.fillStyle = '#6f8191';
+  for (let r = 0; r < map.rows; r++) {
+    for (let cc = 0; cc < map.cols; cc++) {
+      if (TILES[map.charAt(cc, r)]?.kind !== 'wall') continue;
+      let edge = false;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (map.inBounds(cc + dc, r + dr) && TILES[map.charAt(cc + dc, r + dr)]?.kind !== 'wall') edge = true;
+      if (edge) g.fillRect(cc * px, r * px, px, px);
+    }
+  }
+  // 문: 문짝 선 (사전 정보로 잠긴 보안 문은 붉게)
+  g.lineCap = 'round';
+  for (const d of map.doors) {
+    const x = (d.c + 0.5) * px, y = (d.r + 0.5) * px;
+    g.strokeStyle = d.def.locked ? '#ff5f56' : '#e2c48e';
+    g.lineWidth = Math.max(1.5, px * 0.42);
+    g.beginPath();
+    g.moveTo(x - d.u.x * px * 0.42, y - d.u.z * px * 0.42);
+    g.lineTo(x + d.u.x * px * 0.42, y + d.u.z * px * 0.42);
+    g.stroke();
+  }
+  // 장치 (확인된 위치)
+  for (const b of map.bombs) {
+    g.fillStyle = '#ff7a3d';
+    g.beginPath();
+    g.arc((b.c + 0.5) * px, (b.r + 0.5) * px, px * 0.75, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.8)';
+    g.lineWidth = 1;
+    g.stroke();
+  }
+  return c;
+}
+
+export function opScreen({ settings, onBack, onStart, best = {} }) {
+  let id = MISSIONS.some((m) => m.id === settings.opMission) ? settings.opMission : MISSIONS[0].id;
+  let difficulty = settings.opDifficulty ?? 'normal';
+  const DIFF = { easy: '쉬움', normal: '보통', hard: '어려움' };
+  const el = h(`
+    <section class="screen op-screen">
+      <header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>CQB 작전</h2><span></span></header>
+      <div class="op-cards">${MISSIONS.map((m) => `
+        <button class="op-card" data-op="${m.id}">
+          <div class="oc-plan"></div>
+          <div class="oc-text">
+            <small>${m.code} · ${esc(getMapDef(m.map).name)}${best[m.id] ? ` · 최고 등급 <b class="oc-best">${best[m.id]}</b>` : ''}</small>
+            <b>${esc(m.name)}</b>
+            <p>${esc(m.brief)}</p>
+            <span class="oc-meta">제한 ${Math.round(m.time / 60)}분 (장치 해체 시 해제) · ${getMapDef(m.map).mood ?? ''}</span>
+          </div>
+        </button>`).join('')}</div>
+      <div class="op-brief">
+        <div class="ob-col">
+          <h3>작전 목표</h3>
+          <ul class="ob-obj">
+            <li><b>용의자 전원 제압</b><span>건물을 점거한 무장 용의자</span></li>
+            <li><b>장치 해체</b><span>힘 잠금 문제를 풀어 해체 · 제한 시간이 지나면 폭발</span></li>
+            <li><b>연구원 구출</b><span>위치 미상 · <kbd>F</kbd>로 결박을 풀면 스스로 투입 지점까지 이동</span></li>
+            <li><b>연구 자료 확보</b><span><kbd>F</kbd>로 확보</span></li>
+          </ul>
+        </div>
+        <div class="ob-col">
+          <h3>진압팀 운용</h3>
+          <ul class="ob-obj">
+            <li><b>준비 ${OP.prep}초</b><span>투입 지점에서 <kbd>B</kbd> 보급 (예산 ${OP.budget.toLocaleString('en-US')} J) · <kbd>Enter</kbd> 바로 개시</span></li>
+            <li><b>문</b><span><kbd>F</kbd> 열기 · <kbd>F</kbd> 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 붉은 선 = 잠긴 문</span></li>
+            <li><b>분대 지휘</b><span>평소엔 대장(나)을 따라옴 · 문을 보고 <kbd>G</kbd> → 대기·열고/섬광/폭파/걷어차고 진입</span></li>
+            <li><b>평가</b><span>목표마다 25점 · 아군 사격으로 숨진 연구원 −15 · 쓰러진 대원 −4 → S·A·B·C·D</span></li>
+          </ul>
+        </div>
+      </div>
+      <footer class="screen-foot sticky team-foot">
+        <div class="team-options">
+          <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '나')}"></label>
+          <div class="field"><span>난이도 <small class="op-diff-note"></small></span>
+            <div class="seg">${Object.entries(DIFF).map(([k, n]) => `<button data-diff="${k}">${n}</button>`).join('')}</div>
+          </div>
+        </div>
+        <button class="btn primary big" data-act="go">작전 개시 →</button>
+      </footer>
+    </section>`);
+  // 평면도 (작전마다 한 번 그림)
+  el.querySelectorAll('.op-card').forEach((card) => {
+    const m = MISSIONS.find((x) => x.id === card.dataset.op);
+    card.querySelector('.oc-plan').appendChild(planCanvas(m.map, { px: 5 }));
+  });
+  const refresh = () => {
+    el.querySelectorAll('.op-card').forEach((c) => c.classList.toggle('on', c.dataset.op === id));
+    el.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === difficulty));
+    const m = MISSIONS.find((x) => x.id === id);
+    el.querySelector('.op-diff-note').textContent = `용의자 ${m.suspects[difficulty]}명`;
+  };
+  refresh();
+  const go = () => onStart({ mission: id, difficulty, name: el.querySelector('.name-input').value.trim() || '나' });
+  el.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-op]');
+    if (c) id = c.dataset.op;
+    const d = e.target.closest('[data-diff]');
+    if (d) difficulty = d.dataset.diff;
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'back') onBack();
+    if (act === 'go') go();
+    refresh();
+  });
+  el.addEventListener('dblclick', (e) => {
+    if (e.target.closest('[data-op]')) go();
+  });
+  return el;
+}
+
+// CQB 작전 시작 안내 (클릭하면 마우스 고정 · 준비 단계)
+export function opStartOverlay({ mission, difficulty, onClick, online = false }) {
+  const DIFF = { easy: '쉬움', normal: '보통', hard: '어려움' };
+  const el = h(`
+    <section class="overlay start-overlay t-defuse">
+      <div class="start-card">
+        <div class="sc-team"><small>${mission.code}</small>진압팀 · ${esc(getMapDef(mission.map).name)} · ${DIFF[difficulty] ?? ''}</div>
+        <h2>${esc(mission.name)}</h2>
+        <ul class="sc-rules">
+          <li><b>준비</b> — 투입 지점에서 <kbd>B</kbd> 보급 단말기 (예산 ${OP.budget.toLocaleString('en-US')} J) · 다 샀으면 <kbd>Enter</kbd> 작전 개시</li>
+          <li><b>목표</b> — 용의자 전원 제압 · 장치 해체 · 연구원 구출(<kbd>F</kbd> 결박 풀기) · 연구 자료 확보(<kbd>F</kbd>)</li>
+          <li><b>문</b> — <kbd>F</kbd> 열기·닫기 · <kbd>F</kbd> 길게: 살짝 열기·발차기·문 밑 카메라·폭약 · 잠긴 문은 발차기·C4·산탄총</li>
+          <li><b>분대</b> — 봇 대원은 나를 따라옴 · 문을 보고 <kbd>G</kbd> 진입 지휘 · 아니면 <kbd>G</kbd> 집결·사수·자율 교전</li>
+          <li><b>주의</b> — 연구원도 총에 맞음 (아군 사격으로 숨지면 감점) · 섬광·이명은 비살상 제압에</li>
+        </ul>
+        <button class="btn primary big">${online ? '클릭 · 합류' : '클릭 · 투입'}</button>
+        <p>마우스 고정 · <kbd>Esc</kbd> ${online ? '메뉴(작전은 계속)' : '일시 중지'} · 전체 화면 권장</p>
+      </div>
+    </section>`);
+  el.addEventListener('click', onClick);
+  return el;
+}
+
+// CQB 작전 결과: 등급 · 목표별 점수 · 감점 · 내 기록 · 분대 기록
+export function opResultScreen({ result, onAgain, onMissions, onMenu, online = false }) {
+  const r = result.op;
+  const s = result.player.stats;
+  const el = h(`
+    <section class="screen result-screen op-result ${r.success ? 'win' : 'lose'}">
+      <div class="result-head">
+        <div class="rh-kicker">${esc(MISSIONS.find((m) => m.id === r.mission)?.code ?? '')} · 작전 결과 · ${Math.floor(r.time / 60)}분 ${String(Math.floor(r.time % 60)).padStart(2, '0')}초</div>
+        <div class="op-grade g-${r.grade}"><b>${r.grade}</b><span>${r.total}점</span></div>
+        <h1>${r.success ? '작전 성공' : '작전 실패'}</h1>
+        <p>${esc(r.reason)}</p>
+        <div class="op-objs">${r.objectives.map((o) => `<div class="${o.done ? 'done' : ''} ${o.failed ? 'failed' : ''}"><i></i><b>${esc(o.label)}</b><span>${esc(o.detail)}</span><em>${o.points} / 25</em></div>`).join('')}
+          ${r.penalty ? `<div class="pen"><i></i><b>감점</b><span>${r.hostagesKilledBySwat ? `아군 사격 연구원 ${r.hostagesKilledBySwat}명 · ` : ''}쓰러진 대원 ${r.swatDown}명</span><em>−${r.penalty}</em></div>` : ''}
+        </div>
+        <div class="my-stats">
+          <div><b>${s.kills}</b><span>제압</span></div>
+          <div><b>${s.deaths}</b><span>쓰러짐</span></div>
+          <div><b>${s.damage}</b><span>피해량</span></div>
+          <div><b>${s.headshots}</b><span>머리 명중</span></div>
+          <div><b>${s.defuses}</b><span>장치 해체</span></div>
+        </div>
+      </div>
+      ${studyBlock(result.study)}
+      <div class="result-body"></div>
+      <footer class="screen-foot">
+        <button class="btn ghost" data-act="menu">${online ? '방 나가기' : '메인'}</button>
+        ${online ? '' : '<button class="btn ghost" data-act="missions">작전 선택</button>'}
+        <button class="btn primary big" data-act="again">${online ? '대기실로' : '같은 작전 다시'}</button>
+      </footer>
+    </section>`);
+  el.querySelector('.result-body').appendChild(scoreboard(result.match, { me: result.player, head: false }));
+  el.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'again') onAgain();
+    if (act === 'missions') onMissions?.();
+    if (act === 'menu') onMenu();
   });
   return el;
 }
@@ -581,17 +785,19 @@ export function scoreboard(match, { me = match.player, head: showHead = true } =
   const squad = me?.squad ?? TEAMS.DEFUSE;
   const enemy = match.agents.find((a) => a.squad !== squad)?.squad ?? TEAMS.FORCE;
   const mine = match.score?.[squad] ?? 0, theirs = match.score?.[enemy] ?? 0;
+  const op = !!match.op;
+  const down = match.agents.filter((a) => a.squad !== squad && !a.alive).length, total = match.agents.filter((a) => a.squad !== squad).length;
   const table = (sq, ally) => `
     <div class="sb-team ${ally ? 'ally' : 'enemy'}">
-      <h3><b>${ally ? mine : theirs}</b>${ally ? '아군 분대' : '상대 분대'}<small>${TEAM_INFO[match.agents.find((a) => a.squad === sq)?.team ?? sq].name}</small></h3>
+      <h3>${op ? `<b>${ally ? match.agents.filter((a) => a.squad === sq && a.alive).length : `${down}/${total}`}</b>${ally ? '진압팀' : '용의자'}<small>${ally ? '생존' : '제압'}</small>` : `<b>${ally ? mine : theirs}</b>${ally ? '아군 분대' : '상대 분대'}<small>${TEAM_INFO[match.agents.find((a) => a.squad === sq)?.team ?? sq].name}</small>`}</h3>
       <table>
-        <tr><th>요원</th><th>무기</th><th>처치</th><th>죽음</th><th>도움</th><th>피해</th>${ally ? '<th>에너지</th>' : ''}<th>포스 패치</th></tr>
+        <tr><th>요원</th><th>무기</th><th>처치</th><th>죽음</th><th>도움</th><th>피해</th>${ally ? '<th>에너지</th>' : ''}${op ? '' : '<th>포스 패치</th>'}</tr>
         ${match.agents
           .filter((a) => a.squad === sq)
           .sort((p, q) => q.stats.kills - p.stats.kills || q.stats.damage - p.stats.damage)
-          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.id === me?.id ? 'me' : ''}"><td>${esc(a.name)}</td><td class="sb-w">${WEAPON_ICONS[a.primary ?? a.secondary ?? 'pistol'] ?? ''}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.assists ?? 0}</td><td>${a.stats.damage}</td>${ally ? `<td class="sb-c">${(a.credits ?? 0).toLocaleString('en-US')} <small>J</small></td>` : ''}<td class="sb-patches">${a.patches
+          .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a.id === me?.id ? 'me' : ''}"><td>${esc(a.name)}</td><td class="sb-w">${WEAPON_ICONS[a.primary ?? a.secondary ?? 'pistol'] ?? ''}</td><td>${a.stats.kills}</td><td>${a.stats.deaths}</td><td>${a.stats.assists ?? 0}</td><td>${a.stats.damage}</td>${ally ? `<td class="sb-c">${(a.credits ?? 0).toLocaleString('en-US')} <small>J</small></td>` : ''}${op ? '' : `<td class="sb-patches">${a.patches
             .map((p) => (p ? `<i style="--tier:${tierColor(p.id)}" title="${PATCHES[p.id].name}">${PATCH_ICONS[p.id]}</i>` : '<i class="empty"></i>'))
-            .join('')}</td></tr>`)
+            .join('')}</td>`}</tr>`)
           .join('')}
       </table>
     </div>`;

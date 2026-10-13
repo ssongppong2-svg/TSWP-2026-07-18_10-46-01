@@ -17,6 +17,8 @@ import { ConceptCards } from './exhibits.js';
 import { DevicesView } from './devices-view.js';
 import { GearView } from './gear-view.js';
 import { DoorsView } from './doors-view.js';
+import { OpView } from './op-view.js';
+import { missionById } from '../sim/operation.js';
 import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
 import { GEAR } from '../sim/gear.js';
 import { conceptCardTexture } from './textures.js';
@@ -34,7 +36,8 @@ const PATCH_SOUNDS = {
 // 한 경기를 화면에 연결: 시뮬레이션 + 3D + 소리 + HUD
 export class GameClient {
   // net: 온라인 경기 { role: 'host' | 'client', session, start(방장이 올린 시작 정보), myKey }
-  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, mapId, seed = Date.now(), hooks = {}, net = null }) {
+  // op: CQB 작전 { mission(작전 id), difficulty(용의자 수·무장) } — 없으면 5대5 라운드제
+  constructor({ stage, audio, settings, uiRoot, team, difficulty, loadouts, mapId, seed = Date.now(), hooks = {}, net = null, op = null }) {
     this.stage = stage;
     this.audio = audio;
     this.settings = settings;
@@ -69,6 +72,13 @@ export class GameClient {
       this.netT = 0;
       this.netN = 0;
       this.netCheckT = 0;
+    } else if (op) {
+      // CQB 작전: 진압팀(나 + 봇 4) vs 용의자 봇, 준비 단계에 보급
+      const mission = missionById(op.mission);
+      stage.setMap(mission.map);
+      this.match = new Match({ map: stage.map, playerTeam: TEAMS.DEFUSE, playerName: settings.name || '나', loadouts, seed, conceptIds: [], conceptCount: 0, rules: 'cqb', mission: mission.id, opDifficulty: op.difficulty ?? 'normal', playerMastery: masteredIds() });
+      attachBots(this.match, difficulty);
+      this.player = this.match.player;
     } else {
       stage.setMap(mapId ?? stage.map.id);
       this.match = new Match({ map: stage.map, playerTeam: team, playerName: settings.name || '나', loadouts, seed, conceptIds: fresh, rules: 'rounds', playerMastery: masteredIds() });
@@ -106,6 +116,7 @@ export class GameClient {
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
     this.doorsView = new DoorsView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
+    this.opView = this.match.op ? new OpView(stage.scene, this.match) : null;
     this.pickedConcepts = []; // 이번 경기에서 주운 개념 (결과 화면 점검 문제에 씀)
     this.newConcepts = [];
     // 이번 경기 공부 기록 (결과 화면): 보급 점검·해체 문제·힘 장치 사용·새로 숙달한 개념
@@ -509,6 +520,11 @@ export class GameClient {
     });
     ev.on('bombDefused', (e) => {
       A.play('defused');
+      if (this.match.op) {
+        const left = this.match.bombs.filter((b) => b.state === 'armed').length;
+        this.hud.banner(`장치 ${this.match.bombs.length > 1 ? e.bomb.id + ' ' : ''}해체`, `${e.agent.name}${left ? ` · 남은 장치 ${left}기` : ''}`, 'good');
+        return;
+      }
       const left = this.match.bombs.filter((b) => b.state === 'armed').length;
       // 포스팀은 누가 해체했는지 모름 (폭탄 신호만 끊김)
       const who = this.team === TEAMS.DEFUSE ? `${e.agent.name} · ` : '';
@@ -526,7 +542,36 @@ export class GameClient {
     ev.on('roundStart', () => {
       A.play('roundStart');
       this.shop.close();
-      this.hud.banner('교전 개시', this.team === TEAMS.DEFUSE ? '폭탄 2기 해체 또는 적 전원 제압' : '폭탄 방어 · 해체팀 제압', 'good');
+      if (this.match.op) this.hud.roundBanner(this.match.op.mission.code, '작전 개시', '용의자 제압 · 장치 해체 · 연구원 구출 · 연구 자료 확보', 'info', 3);
+      else this.hud.banner('교전 개시', this.team === TEAMS.DEFUSE ? '폭탄 2기 해체 또는 적 전원 제압' : '폭탄 방어 · 해체팀 제압', 'good');
+    });
+    // ── CQB 작전: 결박 풀기·자료 확보·구출·연구원 피해·장치
+    ev.on('opTask', (e) => {
+      if (!viewing(e.agent)) return;
+      if (e.state === 'start') A.play(e.kind === 'free' ? 'snipStart' : 'inspect');
+      else if (e.state === 'done') {
+        A.play(e.kind === 'free' ? 'snip' : 'intel');
+        this.hud.banner(e.kind === 'free' ? `${e.item.name} 결박 해제` : '연구 자료 확보', e.kind === 'free' ? '스스로 투입 지점으로 이동 · 엄호' : e.item.name, 'good');
+      } else if (e.state === 'cancel') A.play('denied');
+    });
+    ev.on('opFound', (e) => {
+      A.play('radio');
+      this.hud.banner(e.kind === 'hostage' ? '연구원 발견' : '연구 자료 발견', `${e.item.name} · ${e.agent.name} 보고 · 지도에 표시`, 'info');
+    });
+    ev.on('hostageRescued', (e) => {
+      A.play('rescue');
+      this.hud.banner('연구원 구출', `${e.hostage.name} · 투입 지점 도착`, 'good');
+    });
+    ev.on('hostageHit', (e) => {
+      if (e.attacker && isMe(e.attacker)) this.hud.banner('사격 중지 — 연구원 피격', e.hostage.name, 'bad');
+    });
+    ev.on('hostageDown', (e) => {
+      A.play('lockFail');
+      this.hud.banner('연구원 사망', `${e.hostage.name}${e.attacker?.team === TEAMS.DEFUSE ? ' · 아군 사격 (감점)' : ''}`, 'bad');
+    });
+    ev.on('opDevices', () => {
+      A.play('defused');
+      this.hud.banner('장치 해체 완료', '시간 제한 해제 · 남은 목표 수행', 'good');
     });
     // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
     ev.on('roundPrep', (e) => {
@@ -641,7 +686,7 @@ export class GameClient {
 
   result() {
     const m = this.match;
-    return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts }, study: this.study };
+    return { match: m, winner: m.winner, reason: m.reason, team: this.player.squad, player: this.player, concepts: { picked: this.pickedConcepts, fresh: this.newConcepts }, study: this.study, op: m.op?.result ?? null };
   }
 
   // ───────────── 매 프레임 ─────────────
@@ -656,7 +701,14 @@ export class GameClient {
 
     const pressed = this.input.pressed.slice();
     // 상점: 구매 시간에 B로 열고 닫음 (구매 시간이 끝나거나 쓰러지면 닫힘)
-    const canShop = m.rounds && m.phase === 'buy' && this.player.alive && this.started && !this.paused && !this.ended;
+    const canShop = m.canBuy && m.phase === 'buy' && this.player.alive && this.started && !this.paused && !this.ended;
+    // CQB 작전 준비: Enter = 준비 완료 (3초 뒤 개시). 온라인은 방장만
+    if (pressed.includes('Enter') && m.op && m.phase === 'buy' && m.phaseT > 3 && this.started && !this.paused && !this.clientSync) {
+      m.phaseT = 3;
+      this.shop.close();
+      this.audio.play('radioOut');
+      this.hud.banner('작전 개시 3초 전', '진압팀 진입 준비', 'warn');
+    }
     if (pressed.includes('KeyB') && canShop && this.input.active) {
       this.shop.toggle();
       this.audio.play('ui');
@@ -710,6 +762,7 @@ export class GameClient {
     this.conceptCards.update(time, this.player.id);
     this.devicesView.update();
     this.doorsView.update(dt, alpha);
+    this.opView?.update(dt, alpha);
     const va = this.viewAgent ?? this.player;
     const cam = this.stage.camera;
     const vel = this.tmpVel.set(va.vel.x, va.vel.y, va.vel.z).applyQuaternion(this.tmpQuat.copy(cam.quaternion).invert());
@@ -811,6 +864,7 @@ export class GameClient {
       cam.rotation.set(mv.pitch, mv.yaw, 0);
       this.stage.setZoom(0.72);
       this.audio.setListener(eyePos(a), { x: -Math.sin(a.yaw), y: 0, z: -Math.cos(a.yaw) });
+      this.audio.setShelter(this.stage.underCover(eyePos(a)));
       return;
     }
     if (drone) {
@@ -827,6 +881,7 @@ export class GameClient {
       cam.rotation.set(this.camPitch, this.camYaw, -lateral * 0.03);
       this.stage.setZoom(1);
       this.audio.setListener(cam.position, { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) });
+      this.audio.setShelter(this.stage.underCover(cam.position));
       return;
     }
     const shakeScale = this.settings.shake ?? 1;
@@ -887,6 +942,7 @@ export class GameClient {
     this.stage.setZoom(zoom);
     const fwd = { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) };
     this.audio.setListener(cam.position, fwd);
+    this.audio.setShelter(this.stage.underCover(cam.position));
   }
 
   // 드론 프로펠러 소리: 날고 있는 드론마다 계속 (사라지면 끔)
@@ -1046,6 +1102,7 @@ export class GameClient {
     this.conceptCards.dispose();
     this.devicesView.dispose();
     this.doorsView.dispose();
+    this.opView?.dispose();
     this.stage.overlay = null;
     this.stage.onThunder = null;
     this.stage.setZoom(1);

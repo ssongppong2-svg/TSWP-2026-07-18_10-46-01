@@ -1,7 +1,33 @@
 import * as THREE from 'three';
+import { KIND } from '../sim/map.js';
+
+// 지붕 지도: 칸마다 1층 위를 덮는 가장 낮은 천장 높이 (지붕·2층 바닥판, m / 16 → 0~1, 없으면 1 = 하늘)
+//   빗줄기는 그 높이 아래로 내려오지 않고, 덮인 칸에는 물이 튀지 않음 (실내에 비가 내리지 않게)
+const NOT_COVER = new Set([KIND.crate, KIND.bigCrate, KIND.barrier, KIND.rail, KIND.wall, KIND.sill, KIND.lintel, KIND.gate, KIND.lift, KIND.push]);
+export function coverHeights(map) {
+  const out = new Float32Array(map.cols * map.rows).fill(99);
+  for (let r = 0; r < map.rows; r++) {
+    for (let c = 0; c < map.cols; c++) {
+      for (const [y0, , k] of map.spansAt(c, r)) if (!NOT_COVER.has(k) && y0 > 1.9 && y0 < out[r * map.cols + c]) out[r * map.cols + c] = y0;
+    }
+  }
+  return out;
+}
+
+const COVER_GLSL = /* glsl */ `
+  uniform sampler2D uCover;
+  uniform vec4 uMap; // originX, originZ, width, depth
+  float coverAt(vec2 xz) {
+    vec2 uv = (xz - uMap.xy) / uMap.zw;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 99.0;
+    float v = texture2D(uCover, uv).r;
+    return v > 0.99 ? 99.0 : v * 16.0;
+  }
+`;
 
 // 비: 카메라 주변 상자 안에서 빗줄기·물 튀김을 셰이더로 움직임 (CPU는 시간만 넘김)
 const RAIN_VERT = /* glsl */ `
+  ${COVER_GLSL}
   uniform float uTime, uSize, uHeight, uSpeed, uLen;
   uniform vec3 uCenter;
   uniform vec2 uWind;
@@ -17,7 +43,7 @@ const RAIN_VERT = /* glsl */ `
     vec3 v = normalize(vec3(uWind.x, -uSpeed, uWind.y));
     p += v * uLen * aEnd;
     float d = length(xz - uCenter.xz);
-    vAlpha = (0.16 + aSeed.w * 0.2) * smoothstep(uSize * 0.5, uSize * 0.12, d) * smoothstep(0.0, 0.6, h);
+    vAlpha = (0.16 + aSeed.w * 0.2) * smoothstep(uSize * 0.5, uSize * 0.12, d) * smoothstep(0.0, 0.6, h) * step(coverAt(xz) + uLen + 0.1, h);
     gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
   }
 `;
@@ -31,6 +57,7 @@ const RAIN_FRAG = /* glsl */ `
 `;
 
 const SPLASH_VERT = /* glsl */ `
+  ${COVER_GLSL}
   uniform float uTime, uSize, uPixel;
   uniform vec3 uCenter;
   attribute vec3 aSeed; // 위상, 주기, 난수
@@ -45,7 +72,7 @@ const SPLASH_VERT = /* glsl */ `
     vec4 mv = viewMatrix * vec4(xz.x, 0.05, xz.y, 1.0);
     gl_Position = projectionMatrix * mv;
     // 지름 3~10cm 정도로 퍼지는 물방울 (uPixel = 1m가 1m 거리에서 차지하는 픽셀)
-    gl_PointSize = uPixel * (0.03 + vLife * 0.07) / -mv.z;
+    gl_PointSize = coverAt(xz) < 90.0 ? 0.0 : uPixel * (0.03 + vLife * 0.07) / -mv.z;
   }
 `;
 const SPLASH_FRAG = /* glsl */ `
@@ -96,6 +123,8 @@ export class RainSystem {
         uWind: { value: new THREE.Vector2(1.6, 0.7) },
         uColor: { value: new THREE.Color('#8e9cab') },
         uFlash: { value: 0 },
+        uCover: { value: null },
+        uMap: { value: new THREE.Vector4(-1e4, -1e4, 2e4, 2e4) },
       },
       vertexShader: RAIN_VERT,
       fragmentShader: RAIN_FRAG,
@@ -121,6 +150,8 @@ export class RainSystem {
         uPixel: { value: 600 },
         uCenter: { value: new THREE.Vector3() },
         uColor: { value: new THREE.Color('#9fb0c2') },
+        uCover: { value: null },
+        uMap: { value: new THREE.Vector4(-1e4, -1e4, 2e4, 2e4) },
       },
       vertexShader: SPLASH_VERT,
       fragmentShader: SPLASH_FRAG,
@@ -135,6 +166,21 @@ export class RainSystem {
     this.flash = 0;
     this.nextBolt = 14 + Math.random() * 20;
     this.onThunder = null;
+  }
+
+  // 맵의 지붕 지도 (지붕 아래 = 실내에는 비가 안 옴)
+  setCover(map) {
+    const h = coverHeights(map);
+    const data = new Uint8Array(map.cols * map.rows * 4);
+    h.forEach((y, i) => (data[i * 4] = y > 90 ? 255 : Math.min(250, Math.round((y / 16) * 255))));
+    this.coverTex?.dispose();
+    this.coverTex = new THREE.DataTexture(data, map.cols, map.rows, THREE.RGBAFormat);
+    this.coverTex.magFilter = this.coverTex.minFilter = THREE.NearestFilter;
+    this.coverTex.needsUpdate = true;
+    for (const mat of [this.rainMat, this.splashMat]) {
+      mat.uniforms.uCover.value = this.coverTex;
+      mat.uniforms.uMap.value.set(map.originX, map.originZ, map.width, map.depth);
+    }
   }
 
   setPixelScale(heightPx) {
@@ -171,6 +217,7 @@ export class RainSystem {
   }
 
   dispose() {
+    this.coverTex?.dispose();
     this.rain.geometry.dispose();
     this.rainMat.dispose();
     this.splash.geometry.dispose();

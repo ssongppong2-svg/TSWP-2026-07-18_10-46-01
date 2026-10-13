@@ -189,7 +189,21 @@ export class AudioEngine {
       lfo.start();
       this.rain = { out, layers, lfo };
     }
-    if (this.rain) this.rain.out.gain.setTargetAtTime(intensity * 0.55, ctx.currentTime, 0.8);
+    this.rainLevel = intensity;
+    this.shelter = false;
+    if (this.rain) {
+      this.rain.out.gain.setTargetAtTime(intensity * 0.55, ctx.currentTime, 0.8);
+      this.rain.layers[0].g.gain.setTargetAtTime(0.22, ctx.currentTime, 0.8);
+    }
+  }
+
+  // 지붕 아래(실내)에 들어가면 빗소리가 멀어지고 높은 쉬익 소리가 줄어듦 (지붕을 두드리는 낮은 소리만)
+  setShelter(indoor) {
+    if (!this.rain || !this.ctx || this.shelter === indoor) return;
+    this.shelter = indoor;
+    const t = this.ctx.currentTime;
+    this.rain.out.gain.setTargetAtTime((this.rainLevel ?? 1) * (indoor ? 0.22 : 0.55), t, 0.45);
+    this.rain.layers[0].g.gain.setTargetAtTime(indoor ? 0.03 : 0.22, t, 0.45);
   }
 
   // ───────── 맵 배경음 (경기 중에만) ─────────
@@ -1192,6 +1206,37 @@ const SOUNDS = {
   snatched(a, t) {
     const o = a.out(null, 0.25, 0.3, 0);
     a.tone(o, t, 0.12, { type: 'sine', freq: 420, to: 330, gain: 0.2 });
+  },
+  // ── CQB 작전 ──
+  // 결박 풀기 시작: 커터를 케이블 타이에 거는 플라스틱 긁힘
+  snipStart(a, t) {
+    const o = a.out(null, 0.32, 0.6, 0.03);
+    a.noise(o, t, 0.18, { type: 'bandpass', freq: 3600, q: 3, gain: 0.35, attack: 0.02, sweepTo: 2600 });
+    a.click(o, t + 0.22, 3200, 0.45, 7);
+    a.noise(o, t + 0.3, 0.22, { type: 'bandpass', freq: 3000, q: 3, gain: 0.3, attack: 0.03, sweepTo: 4200 });
+  },
+  // 결박 끊김: 날카로운 '딱' + 타이가 떨어지는 짧은 소리
+  snip(a, t) {
+    const o = a.out(null, 0.42, 0.5, 0.04);
+    a.click(o, t, 4200, 1, 9);
+    a.noise(o, t, 0.035, { type: 'highpass', freq: 3000, gain: 0.7 });
+    a.click(o, t + 0.16, 1900, 0.3, 4);
+  },
+  // 연구 자료 확보: 노트북 닫힘 + 가방 걸쇠 두 번 + 무전 확인음
+  intel(a, t) {
+    const o = a.out(null, 0.38, 0.9, 0.05);
+    a.noise(o, t, 0.06, { type: 'lowpass', freq: 700, gain: 0.8 });
+    a.click(o, t + 0.18, 2500, 0.8, 6);
+    a.click(o, t + 0.3, 2300, 0.8, 6);
+    a.tone(o, t + 0.45, 0.08, { type: 'sine', freq: 1320, gain: 0.12 });
+    a.tone(o, t + 0.56, 0.12, { type: 'sine', freq: 1760, gain: 0.12 });
+  },
+  // 연구원 구출: 무전 잡음 + 확인 세 음
+  rescue(a, t) {
+    const o = a.out(null, 0.36, 1.2, 0.1);
+    a.noise(o, t, 0.08, { type: 'bandpass', freq: 1500, q: 0.8, gain: 0.4 });
+    [880, 1109, 1319].forEach((f, i) => a.tone(o, t + 0.12 + i * 0.11, 0.22, { type: 'sine', freq: f, gain: 0.16 }));
+    a.noise(o, t + 0.55, 0.06, { type: 'bandpass', freq: 1500, q: 0.8, gain: 0.3 });
   },
 };
 

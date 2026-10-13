@@ -379,6 +379,61 @@ export function claddingTexture() {
 }
 
 // 과학관 천장: 흡음 천장판 격자 (UV 1 = 4m → 0.67m 판 6×6) + 잔 구멍 무늬
+// 연구동 실내 벽: 연회색 페인트 석고벽 + 걸레받이 + 허리 높이 벽 보호대 (4 m × 4.8 m 한 장, 아래가 바닥)
+export function plasterTexture() {
+  const W = 256, H = 512;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  paintNoise(g, W, H, [206, 206, 200], 6, { seed: 53, cells: 6, octaves: 3 });
+  const px = H / 4.8; // 1 m
+  // 허리 보호대 (0.9~1.0 m): 연한 회색 띠 + 그림자
+  g.fillStyle = 'rgba(150,154,156,0.9)';
+  g.fillRect(0, H - px * 1.0, W, px * 0.1);
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.fillRect(0, H - px * 1.0, W, 2);
+  g.fillStyle = 'rgba(40,40,40,0.18)';
+  g.fillRect(0, H - px * 0.9, W, 3);
+  // 걸레받이 (0~0.12 m)
+  g.fillStyle = '#3b3e41';
+  g.fillRect(0, H - px * 0.12, W, px * 0.12);
+  g.fillStyle = 'rgba(255,255,255,0.12)';
+  g.fillRect(0, H - px * 0.12, W, 2);
+  // 아래쪽 때 (발길·바퀴 자국)
+  const grime = g.createLinearGradient(0, H - px * 0.12, 0, H - px * 0.6);
+  grime.addColorStop(0, 'rgba(60,56,50,0.22)');
+  grime.addColorStop(1, 'rgba(60,56,50,0)');
+  g.fillStyle = grime;
+  g.fillRect(0, H - px * 0.6, W, px * 0.48);
+  return toTexture(c);
+}
+
+// 연구동 실내 바닥: 30 cm 비닐 타일 (두 가지 색이 엇갈림 · 잔점) — 1장 = 2.4 m
+export function vinylTexture() {
+  const S = 512, n = 8, step = S / n;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const r = rng(61);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const k = r();
+      const base = k < 0.18 ? [150, 152, 146] : k < 0.24 ? [118, 124, 128] : [186, 186, 178];
+      g.fillStyle = `rgb(${base.map((v) => v + Math.round((r() - 0.5) * 8)).join(',')})`;
+      g.fillRect(i * step, j * step, step, step);
+    }
+  }
+  for (let i = 0; i < 9000; i++) {
+    g.fillStyle = r() < 0.5 ? `rgba(70,70,64,${0.1 + r() * 0.25})` : `rgba(255,255,250,${0.1 + r() * 0.2})`;
+    g.fillRect(r() * S, r() * S, 1 + r() * 1.5, 1 + r() * 1.5);
+  }
+  g.fillStyle = 'rgba(80,80,76,0.45)';
+  for (let i = 0; i <= n; i++) {
+    g.fillRect(i * step - 0.5, 0, 1, S);
+    g.fillRect(0, i * step - 0.5, S, 1);
+  }
+  blotches(g, S, S, 10, 'rgba(90,84,70,0.06)', 30, 90, 7);
+  return toTexture(c);
+}
+
 export function ceilingTileTexture() {
   const S = 256;
   const c = makeCanvas(S, S);

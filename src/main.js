@@ -10,6 +10,7 @@ import { makeRoster } from './sim/match.js';
 import * as S from './ui/screens.js';
 import { onlineScreen } from './ui/online.js';
 import { getMapDef } from './sim/maps/index.js';
+import { missionById } from './sim/operation.js';
 
 const app = document.getElementById('app');
 const ui = document.getElementById('ui');
@@ -172,6 +173,7 @@ function showTitle() {
   setScreen(
     S.titleScreen({
       onStart: showTeam,
+      onOp: showOp,
       onOnline: showOnline,
       onCodex: () => openModal(S.codexModal({ onClose: closeModal })),
       onControls: openControls,
@@ -221,6 +223,7 @@ function showDraft(team) {
 }
 
 function startGame(team, loadouts, byClick) {
+  endGame();
   setScreen(null);
   closeModal();
   game = new GameClient({
@@ -265,6 +268,74 @@ function startGame(team, loadouts, byClick) {
     },
   });
   setOverlay(S.clickToStart({ team, loadout: loadouts.get(game.player.id) ?? [], mapId: game.match.map.id, onClick: () => game.requestStart() }));
+  if (byClick) game.requestStart();
+}
+
+// ───── CQB 작전 (혼자 + 봇 분대) ─────
+const GRADES = ['S', 'A', 'B', 'C', 'D'];
+function showOp() {
+  endGame();
+  setScreen(
+    S.opScreen({
+      settings,
+      best: settings.opBest ?? {},
+      onBack: showTitle,
+      onStart: ({ mission, difficulty, name }) => {
+        Object.assign(settings, { opMission: mission, opDifficulty: difficulty, name });
+        saveSettings(settings);
+        startOpGame();
+      },
+    }),
+  );
+}
+
+function startOpGame(byClick = false) {
+  endGame();
+  const mission = missionById(settings.opMission);
+  const difficulty = settings.opDifficulty ?? 'normal';
+  setScreen(null);
+  closeModal();
+  audio.setRain(getMapDef(mission.map).weather === 'rain' ? 1 : 0);
+  game = new GameClient({
+    stage,
+    audio,
+    settings,
+    uiRoot: ui,
+    team: TEAMS.DEFUSE,
+    difficulty,
+    op: { mission: mission.id, difficulty },
+    hooks: {
+      onStarted: () => setOverlay(null),
+      onPause: () => setOverlay(S.pauseMenu({ onResume: () => game?.resume(), onSettings: openSettings, onControls: openControls, onQuit: showOp })),
+      onResume: () => {
+        setOverlay(null);
+        closeModal();
+      },
+      onToast: toast,
+      onQualityChange: () => saveSettings(settings),
+      onScoreboard: (show, match) => {
+        board?.remove();
+        board = null;
+        if (show) {
+          board = S.scoreboard(match, { me: game?.player });
+          board.classList.add('floating');
+          ui.appendChild(board);
+        }
+      },
+      onEnd: (result) => {
+        endGame();
+        // 작전별 최고 등급 (성공한 작전만)
+        const r = result.op;
+        if (r?.success) {
+          const best = (settings.opBest ??= {});
+          if (!best[r.mission] || GRADES.indexOf(r.grade) < GRADES.indexOf(best[r.mission])) best[r.mission] = r.grade;
+          saveSettings(settings);
+        }
+        setScreen(S.opResultScreen({ result, onAgain: () => startOpGame(true), onMissions: showOp, onMenu: showTitle }));
+      },
+    },
+  });
+  setOverlay(S.opStartOverlay({ mission, difficulty, onClick: () => game.requestStart() }));
   if (byClick) game.requestStart();
 }
 
@@ -316,6 +387,14 @@ function exposeDebug() {
     },
     showTeam,
     showDraft,
+    showOp,
+    quickOp(mission = 'annex', difficulty = 'normal') {
+      Object.assign(settings, { opMission: mission, opDifficulty: difficulty });
+      startOpGame();
+      game.input.fallback = true;
+      game.onLockChange(true);
+      return game;
+    },
     quickStart(team = TEAMS.DEFUSE, seed = 1, mapId = null) {
       if (mapId) settings.mapId = mapId;
       const rng = createRng(seed);

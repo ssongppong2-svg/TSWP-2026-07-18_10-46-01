@@ -244,6 +244,64 @@ export class TacticalMap {
       if ((b.y ?? 0) > 1) this.upMark(x, y, col);
     }
 
+    // CQB 작전: 호송 지점(점선 테두리) · 발견한 연구원(결박 = 노란 고리, 호송 중 = 청록, 사망 = ×) · 발견한 연구 자료(◇)
+    const op = m.op;
+    if (op) {
+      const e = op.extract;
+      const [x0, y0] = this.toPx(e.x0, e.z0), [x1, y1] = this.toPx(e.x1, e.z1);
+      g.fillStyle = 'rgba(79,224,192,0.08)';
+      g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      g.strokeStyle = 'rgba(79,224,192,0.7)';
+      g.lineWidth = 1.2;
+      g.setLineDash([3, 2]);
+      g.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1);
+      g.setLineDash([]);
+      if (!this.mini) {
+        g.fillStyle = 'rgba(79,224,192,0.85)';
+        g.font = `700 ${Math.max(9, S)}px Rajdhani, sans-serif`;
+        g.fillText('EXTRACT · 호송 지점', (x0 + x1) / 2, y1 - S * 0.9);
+      }
+      for (const it of op.intel) {
+        if (!it.found || it.taken) continue;
+        const [x, y] = this.toPx(it.x, it.z);
+        g.save();
+        g.translate(x, y);
+        g.rotate(Math.PI / 4);
+        g.fillStyle = 'rgba(6,8,10,0.9)';
+        g.fillRect(-S * 0.55, -S * 0.55, S * 1.1, S * 1.1);
+        g.strokeStyle = '#9fb8d8';
+        g.lineWidth = 1.6;
+        g.strokeRect(-S * 0.55, -S * 0.55, S * 1.1, S * 1.1);
+        g.restore();
+      }
+      for (const h of op.hostages) {
+        if (!h.found || h.state === 'rescued') continue;
+        const [x, y] = this.toPx(h.x, h.z);
+        if (h.state === 'dead') {
+          g.strokeStyle = 'rgba(160,166,172,0.8)';
+          g.lineWidth = 1.5;
+          g.beginPath();
+          g.moveTo(x - S * 0.5, y - S * 0.5);
+          g.lineTo(x + S * 0.5, y + S * 0.5);
+          g.moveTo(x + S * 0.5, y - S * 0.5);
+          g.lineTo(x - S * 0.5, y + S * 0.5);
+          g.stroke();
+          continue;
+        }
+        const col = h.state === 'free' ? ALLY : '#f2d27a';
+        const pulse = h.state === 'captive' ? 1 + 0.25 * Math.sin(this.t * 5) : 1;
+        g.beginPath();
+        g.arc(x, y, S * 0.75 * pulse, 0, Math.PI * 2);
+        g.strokeStyle = col;
+        g.lineWidth = 1.6;
+        g.stroke();
+        g.beginPath();
+        g.arc(x, y, S * 0.32, 0, Math.PI * 2);
+        g.fillStyle = col;
+        g.fill();
+      }
+    }
+
     // 적: 아군 누군가가 지금 보고 있거나 무게 감지기에 잡히면 붉은 점, 놓친 뒤 잠시 ? 표시
     for (const e of m.agents) {
       if (e.team === myTeam) continue;
