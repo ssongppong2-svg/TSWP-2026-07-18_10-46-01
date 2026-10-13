@@ -30,10 +30,10 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
   const el = h(`
     <section class="screen title-screen">
       <div class="title-center">
-        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 연구소 요원 바디캠 · 5 대 5 전술</div>
+        <div class="logo-kicker"><i></i>중1 과학 「힘」 · 연구소 요원 바디캠 · 5 대 5 전술 · CQB 작전</div>
         <h1 class="logo">FORCE</h1>
         <div class="logo-ko">포스</div>
-        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>힘의 원리를 아는 요원이 이긴다.<br>2층 작전 지역의 힘 장치와 포스 패치로 ${ROUNDS.winTo}라운드를 먼저 가져와라.</p>
+        <p class="logo-desc">중력 · 탄성력 · 마찰력 · 합력 · 부력 · 작용 반작용.<br>힘의 원리를 아는 요원이 이긴다.<br>2층 작전 지역의 힘 장치와 포스 패치로 ${ROUNDS.winTo}라운드를 먼저 가져오고,<br>점거된 건물에 문을 열고 들어가 연구원을 구출하라.</p>
         <div class="menu">
           <div class="menu-main">
             <button class="btn primary big" data-act="start">5 대 5 교전 <small>봇 9명</small></button>
@@ -49,7 +49,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
         </div>
       </div>
       <footer class="title-foot">
-        <span>작전 지역 ${MAP_ORDER.length}곳 · 2층 구조</span><span>${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대</span><span>폭탄 2기 · 라운드 2:00</span>
+        <span>교전 지역 ${MAP_ORDER.length}곳 · ${ROUNDS.winTo}라운드 선승 · ${ROUNDS.half}라운드 뒤 공수 교대</span><span>CQB 작전 ${MISSIONS.length}개 · 인질 구출 · 장치 해체</span><span>탄종·방탄 · 무게 · 수류탄·C4·드론 · 문 돌파</span>
       </footer>
     </section>`);
   el.addEventListener('click', (e) => {
@@ -666,11 +666,11 @@ export function pauseMenu({ onResume, onSettings, onControls, onQuit, online = f
 export function controlsModal({ onClose }) {
   const groups = [
     ['기동', [
-      ['W A S D', '이동 (달리면 발소리가 남)'],
+      ['W A S D', '이동 (달리면 발소리가 남 · 무거울수록 느리고 둔함)'],
       ['Shift', '보행 (발소리 거의 없음)'],
       ['Ctrl', '앉기 (정확도↑ · 피탄 면적↓)'],
       ['Z / V', '좌 / 우 기울이기'],
-      ['Space', '도약'],
+      ['Space', '도약 (지구력 소모)'],
     ]],
     ['사격', [
       ['좌클릭', '사격 · 칼: 베기'],
@@ -678,22 +678,34 @@ export function controlsModal({ onClose }) {
       ['R', '재장전'],
       ['1 / 2 / 3 · 휠', '주무기 / 보조무기 / 칼'],
     ]],
-    ['포스 패치', [
+    ['장비', [
+      ['4', '투척물 들기 · 다시 누르면 다음 종류 (세열·이명·섬광·연막·최루)'],
+      ['5', 'C4 → 붙인 뒤 기폭기 → 정찰 드론 (가진 것만 돌아가며)'],
+      ['좌클릭 / 우클릭', '멀리 던지기 / 가까이 굴리기 · C4 붙이기 · 기폭 · 드론 띄우기'],
+      ['드론', 'WASD·Space·Ctrl 비행 · 좌클릭 적 표시 · F 복귀'],
+    ]],
+    ['포스 패치 (5 대 5)', [
       ['C / Q', '일반 패치'],
       ['E', '특수 패치'],
       ['X', '필살 패치 (게이지 100%)'],
+    ]],
+    ['문 · 진입', [
+      ['F', '문 열기 · 닫기 (잠긴 문은 덜컹)'],
+      ['F (길게)', '문 행동: 살짝 열기 · 발차기 · 문 밑 카메라 · 폭약 설치'],
+      ['G (문을 보고)', '분대 진입 지휘: 대기 · 열고 · 섬광 후 · 폭파 후 · 걷어차고 진입 · 문 밑 확인'],
     ]],
     ['지휘 · 정보', [
       ['G (누른 채 마우스)', '분대 지휘: 집결 · 사수 · 지정 지점 · A · B · 자율'],
       ['휠 클릭 / H', '적 보고: 조준한 곳을 무전으로 알림 (아군이 경계·수색)'],
       ['T (누른 채)', '총 살펴보기'],
-      ['M (누른 채)', '큰 지도 (지형 · 아군 · 아군이 본 적 · 무전 보고)'],
+      ['M (누른 채)', '큰 지도 (지형 · 문 · 아군 · 아군이 본 적 · 무전 보고)'],
       ['Tab', '전황판'],
     ]],
     ['임무', [
-      ['B', '보급 단말기 (구매 시간) · 숫자 1~8로 바로 보급 · 보급 점검 문제'],
-      ['F', '폭탄 해체 개시 · 중단 · 지레 손잡이 당기기'],
+      ['B', '보급 단말기 (보급·준비 시간) · 숫자 키로 바로 보급 · 보급 점검 문제'],
+      ['F', '폭탄 해체 · 지레 손잡이 · CQB: 연구원 결박 풀기 · 연구 자료 확보'],
       ['1 ~ 6', '해체 중 힘 카드 선택'],
+      ['Enter', 'CQB 준비 시간에 바로 작전 개시'],
       ['밀며 걷기', '상자 밀기 (여럿이 같은 쪽으로 밀면 빨라짐)'],
       ['Esc', '일시 중지'],
     ]],

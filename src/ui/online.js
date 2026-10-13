@@ -57,7 +57,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
             <li>한 사람이 <b>방 만들기</b> → 화면의 방 코드 4자리를 친구에게 알려 줌</li>
             <li>친구는 같은 링크에서 <b>코드로 참가</b></li>
           </ol>
-          <p class="online-note">혼자 할 때는 메인의 <b>작전 개시</b>(봇 9명)를 이용하세요.</p>
+          <p class="online-note">혼자 할 때는 메인의 <b>5 대 5 교전</b>(봇 9명) 또는 <b>CQB 작전</b>(봇 분대)을 이용하세요.</p>
         </div>`;
       return;
     }

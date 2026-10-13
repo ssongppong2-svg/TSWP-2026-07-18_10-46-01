@@ -1347,6 +1347,11 @@ button {
   font-size: 13px;
 }
 
+.key-row kbd {
+  flex: none;
+  white-space: nowrap;
+}
+
 .key-row span {
   color: #c3c9cf;
   text-align: right;
@@ -5338,6 +5343,12 @@ button {
 @media (max-width: 640px) {
   .op-card {
     grid-template-columns: 1fr;
+  }
+  /* 좁은 화면: 아래 띠가 카드를 가리지 않게 붙이지 않음 */
+  .op-screen .screen-foot.sticky {
+    position: static;
+    margin-bottom: 0;
+    background: none;
   }
   .ob-obj li {
     grid-template-columns: 1fr;
