@@ -158,6 +158,7 @@ export class HostSync {
         ao: Math.max(0, AMMO_ORDER.indexOf(a.ammo ?? 'fmj')),
         sp: Math.round(a.stamina ?? 100),
         g: GEAR_ORDER.map((id) => a.gear?.[id] ?? 0),
+        db: r1(a.droneBat ?? 0), // 손에 있는 드론 배터리
         fx: [r2(a.stunT ?? 0), r2(a.flashT ?? 0), r2(a.gasT ?? 0)],
         bt: (a.bought ?? []).map((b) => ITEMS.indexOf(b.item)),
         pc: a.patches.map((p) => (p ? [r2(p.cd), r2(p.activeT)] : 0)),
@@ -324,6 +325,7 @@ export class ClientSync {
       a.ammo = AMMO_ORDER[h.ao] ?? 'fmj';
       a.gear = emptyGear();
       (h.g ?? []).forEach((n, k) => (a.gear[GEAR_ORDER[k]] = n));
+      if (h.db != null) a.droneBat = h.db;
       if (h.fx) [a.stunT, a.flashT, a.gasT] = h.fx;
       // 지구력: 이 화면도 같은 규칙으로 계산하므로 많이 어긋날 때만 맞춤
       if (h.sp != null && Math.abs(h.sp - (a.stamina ?? 100)) > 8) {

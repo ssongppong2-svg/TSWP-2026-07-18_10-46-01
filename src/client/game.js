@@ -33,7 +33,7 @@ import { DoorsView } from './doors-view.js';
 import { OpView } from './op-view.js';
 import { missionById } from '../sim/operation.js';
 import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
-import { GEAR } from '../sim/gear.js';
+import { DRONE, GEAR } from '../sim/gear.js';
 import { conceptCardTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
@@ -404,12 +404,13 @@ export class GameClient {
         this.effects.sparks.burst(e, '#ffd27a', 24, { speed: 4, up: 1, life: 0.5, gravity: 9 });
       }
       if (viewing(e.agent) && e.reason === 'shot') this.hud.banner('드론 격추됨', '', 'bad');
-      else if (viewing(e.agent) && e.reason === 'battery') this.hud.banner('드론 배터리 소진', '', '');
+      else if (viewing(e.agent) && e.reason === 'battery') this.hud.banner('드론 배터리 소진', '공중에서 멈춰 잃음 · 다음엔 일찍 회수', 'bad');
+      else if (viewing(e.agent) && e.reason === 'recall') this.hud.banner('드론 회수', `남은 배터리 ${Math.ceil(e.agent?.droneBat ?? 0)}초 · 바로 다시 띄울 수 있음`, 'small');
     });
     ev.on('gearDenied', (e) => {
       if (!isMe(e.agent)) return;
       A.play('denied');
-      const msg = { none: e.which === 'throw' ? '투척물이 없음 · 보급 단말기에서 받기' : 'C4가 없음', far: '붙일 곳이 너무 멂 · 벽·바닥에 가까이', arming: 'C4 준비 중 · 잠시 뒤 기폭' }[e.reason];
+      const msg = { none: e.which === 'throw' ? '투척물이 없음 · 보급 단말기에서 받기' : 'C4가 없음', battery: `드론 충전 중 · ${Math.ceil(e.left ?? 0)}초 (${DRONE.minLaunch}초부터 띄움)`, far: '붙일 곳이 너무 멂 · 벽·바닥에 가까이', arming: 'C4 준비 중 · 잠시 뒤 기폭' }[e.reason];
       if (msg) this.hud.banner(msg, '', 'bad');
     });
     ev.on('melee', (e) => {

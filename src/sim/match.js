@@ -273,6 +273,7 @@ export class Match {
       a.ammo = 'fmj'; // 탄종은 라운드마다 새로 보급
       a.equip = null;
       a.drone = null;
+      a.droneBat = GEAR.drone.battery; // 라운드마다 드론 배터리 가득
       a.mirror = null;
       a.kickT = 0;
       a.stunT = a.flashT = a.gasT = 0;
@@ -406,6 +407,7 @@ export class Match {
       }
       a.credits -= gear.price;
       a.gear[item] = have + 1;
+      if (item === 'drone') a.droneBat = GEAR.drone.battery; // 새 드론은 가득
       a.bought.push({ item, price: gear.price });
       this.emit('buy', { agent: a, item });
       return true;
@@ -606,6 +608,8 @@ export class Match {
     }
     if (a.ampT > 0) a.ampT = Math.max(0, a.ampT - dt);
     if (a.bounceT > 0) a.bounceT = Math.max(0, a.bounceT - dt);
+    // 손에 있는 드론은 천천히 충전
+    if (!a.drone && (a.gear?.drone ?? 0) > 0 && (a.droneBat ?? GEAR.drone.battery) < GEAR.drone.battery) a.droneBat = Math.min(GEAR.drone.battery, (a.droneBat ?? 0) + DRONE.recharge * dt);
     if (a.tagT > 0) a.tagT = Math.max(0, a.tagT - dt);
     this.decayEffects(a, dt);
     a.punch *= Math.exp(-dt * 8);
@@ -1712,12 +1716,18 @@ export class Match {
   // 띄우기: 눈앞에서 떠오름. 사람은 드론 카메라로 조종(입력이 드론으로), 봇은 목표까지 자동 비행
   launchDrone(a, autopilot = null) {
     if (!((a.gear?.drone ?? 0) > 0) || a.drone || this.client) return false;
+    const bat = a.droneBat ?? GEAR.drone.battery;
+    if (bat < DRONE.minLaunch) {
+      this.emit('gearDenied', { agent: a, which: 'gadget', reason: 'battery', left: bat });
+      return false;
+    }
     a.gear.drone--;
+    a.droneBat = 0; // 배터리는 드론과 함께 날아감
     const f = { x: -Math.sin(a.yaw), z: -Math.cos(a.yaw) };
     const eye = eyePos(a);
     const pos = { x: eye.x + f.x * 0.5, y: eye.y - 0.2, z: eye.z + f.z * 0.5 };
     if (!this.map.lineOfSight(eye, pos)) Object.assign(pos, { x: eye.x, y: eye.y - 0.2, z: eye.z });
-    const d = { id: this.nextId++, ownerId: a.id, team: a.team, pos, vel: { x: f.x * 1.5, y: 1.2, z: f.z * 1.5 }, yaw: a.yaw, pitch: -0.1, battery: GEAR.drone.battery, scanT: 0, buzzT: 0, autopilot, marks: [] };
+    const d = { id: this.nextId++, ownerId: a.id, team: a.team, pos, vel: { x: f.x * 1.5, y: 1.2, z: f.z * 1.5 }, yaw: a.yaw, pitch: -0.1, battery: bat, scanT: 0, buzzT: 0, autopilot, marks: [] };
     this.drones.push(d);
     a.drone = d.id;
     a.droneHome = { yaw: a.yaw, pitch: a.pitch };
@@ -1786,6 +1796,11 @@ export class Match {
         a.yaw = a.droneHome.yaw;
         a.pitch = a.droneHome.pitch;
       }
+    }
+    // 회수(또는 조종 중 몸이 맞아 급히 거둠): 드론이 바로 손으로 돌아옴 (남은 배터리 그대로 · 바로 다시 띄울 수 있음)
+    if ((reason === 'recall' || reason === 'hurt') && a?.alive) {
+      a.gear.drone = Math.min(GEAR.drone.max, (a.gear.drone ?? 0) + 1);
+      a.droneBat = Math.max(0, d.battery);
     }
     this.emit('droneEnd', { drone: d, agent: a, reason, x: d.pos.x, y: d.pos.y, z: d.pos.z });
   }

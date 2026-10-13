@@ -5077,6 +5077,11 @@ button.kb-row:hover {
   color: #f2f5f7;
 }
 
+/* 드론 충전 중 (띄우기엔 모자람) */
+.hud .vg.low {
+  opacity: 0.5;
+}
+
 .hud .vg.on {
   color: #08151a;
   background: var(--instr);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Match } from '../src/sim/match.js';
 import { emptyIntent } from '../src/sim/agent.js';
 import { DT, TEAMS } from '../src/sim/constants.js';
-import { DRONE, GEAR } from '../src/sim/gear.js';
+import { DRONE, GEAR, stepDrone } from '../src/sim/gear.js';
 import { WEAPONS } from '../src/sim/data.js';
 
 const live = (seed = 3) => {
@@ -99,9 +99,56 @@ test('드론: 배터리가 다 되거나 몸이 맞으면 화면이 몸으로 �
   assert.ok(m.launchDrone(me));
   step(m, GEAR.drone.battery + 0.2);
   assert.equal(me.drone, null, '배터리');
-  me.gear.drone = 1;
+  assert.equal(me.gear.drone, 0, '공중에서 배터리가 다 되면 잃음');
+  me.gear.drone = 1; // 새로 받은 드론 (보급과 같이 가득)
+  me.droneBat = GEAR.drone.battery;
   assert.ok(m.launchDrone(me));
   const e = m.agents.find((a) => a.team === TEAMS.FORCE);
   m.applyDamage(me, 10, e);
   assert.equal(me.drone, null, '몸이 맞음');
+});
+
+test('드론: 회수하면 바로 손으로 돌아와 남은 배터리로 다시 띄움 · 손에 있으면 충전 · 너무 적으면 못 띄움', () => {
+  const m = live(7);
+  still(m);
+  const me = m.player;
+  place(m, me, 0, 0, 0);
+  me.gear.drone = 1;
+  me.droneBat = GEAR.drone.battery;
+  assert.ok(m.launchDrone(me));
+  step(m, 10);
+  // 회수 (F)
+  m.setController(me.id, { getIntent: (mm, a) => ({ ...emptyIntent(a), interact: true }) });
+  step(m, 0.05);
+  m.setController(me.id, { getIntent: (mm, a) => emptyIntent(a) });
+  assert.equal(me.drone, null);
+  assert.equal(me.gear.drone, 1, '손으로 돌아옴');
+  assert.ok(Math.abs(me.droneBat - (GEAR.drone.battery - 10)) < 0.6, `남은 배터리 ${me.droneBat}`);
+  // 바로 다시 띄움
+  assert.ok(m.launchDrone(me));
+  m.endDrone(m.drones[0], 'recall');
+  const left = me.droneBat;
+  step(m, 4);
+  assert.ok(me.droneBat > left + 1.5, '손에 있으면 충전');
+  // 배터리가 거의 없으면 못 띄움
+  me.droneBat = DRONE.minLaunch - 1;
+  let denied = null;
+  m.events.on('gearDenied', (e) => (denied = e));
+  assert.equal(m.launchDrone(me), false);
+  assert.equal(denied?.reason, 'battery');
+});
+
+test('드론: 높이 제한 없이 하늘(실외)까지 올라감', () => {
+  const m = live(8);
+  const d = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0 };
+  const s = m.map.spawns.defuse[0];
+  d.pos.x = s.x;
+  d.pos.z = s.z;
+  d.pos.y = m.map.dropToGround(s.x, s.z, 2) + 1;
+  const ground = d.pos.y - 1;
+  const ceil = m.map.ceilingHeight(d.pos.x, d.pos.z, DRONE.radius, d.pos.y);
+  for (let i = 0; i < 60 * 12; i++) stepDrone(m.map, d, { up: true, yaw: 0, pitch: 0 }, DT);
+  const top = Math.min(ceil - 0.25, ground + DRONE.maxAlt);
+  assert.ok(d.pos.y > ground + 3.5, `옛 상한(3 m)보다 높이 ${d.pos.y - ground}`);
+  assert.ok(d.pos.y <= top + 1e-6);
 });

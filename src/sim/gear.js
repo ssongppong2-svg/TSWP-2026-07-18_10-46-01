@@ -18,13 +18,15 @@ export const GEAR = {
   gas: { id: 'gas', name: '최루탄', short: '최루', kind: 'throw', price: 300, mass: 0.5, max: 1, fuse: 1.2, radius: 4, time: 10, noise: 20 },
   c4: { id: 'c4', name: 'C4 폭약', short: 'C4', kind: 'place', price: 400, mass: 1.0, max: 1, radius: 5, damage: 110, pen: 3, wear: 2, reach: 2.6, arm: 0.6, noise: 85 },
   // 정찰 드론: 띄우면 드론 카메라로 조종, 보이는 적은 팀에 표시 (작용·반작용: 프로펠러가 공기를 아래로 밀면 공기가 드론을 위로 밂)
-  drone: { id: 'drone', name: '정찰 드론', short: '드론', kind: 'drone', price: 400, mass: 1.2, max: 1, battery: 20, range: 30, mark: 5, noise: 16 },
+  //   배터리 45초 · 회수(F)하면 바로 손으로 돌아와 남은 배터리로 다시 띄움 (들고 있는 동안 천천히 충전) · 격추되거나 공중에서 배터리가 다 되면 잃음
+  drone: { id: 'drone', name: '정찰 드론', short: '드론', kind: 'drone', price: 400, mass: 1.2, max: 1, battery: 45, range: 40, mark: 5, noise: 16 },
 };
 export const THROW_ORDER = ['frag', 'stun', 'flash', 'smoke', 'gas'];
 export const GADGET_ORDER = ['c4', 'drone'];
 
-// 드론 비행: 원하는 속도로 다가감(관성), 벽에 막히고, 바닥 위 0.35~3 m · 천장 아래에서만
-export const DRONE = { radius: 0.22, speed: 6, accel: 6, climb: 2.6, minAlt: 0.35, maxAlt: 3, fov: 0.5, scanEvery: 0.15 };
+// 드론 비행: 원하는 속도로 다가감(관성), 벽에 막힘. 높이는 천장 아래(실외는 하늘 40 m)까지 자유롭게
+//   recharge: 손에 있을 때 초당 충전되는 배터리(초) · minLaunch: 이만큼은 있어야 띄움
+export const DRONE = { radius: 0.22, speed: 6, accel: 6, climb: 4, minAlt: 0.35, maxAlt: 40, fov: 0.5, scanEvery: 0.15, recharge: 0.5, minLaunch: 3 };
 export function stepDrone(map, d, inp, dt) {
   d.yaw = inp.yaw;
   d.pitch = Math.max(-1.3, Math.min(1.2, inp.pitch ?? 0));

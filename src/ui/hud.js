@@ -2,7 +2,7 @@ import { TEAM_INFO, TEAMS, BOMB, LOAD, ULT } from '../sim/constants.js';
 import { carriedMass, loadFactors } from '../sim/agent.js';
 import { PATCH_CONCEPT } from '../sim/concepts.js';
 import { AMMO, ARMOR, LOADOUT_SLOTS, PATCHES, PATCH_TIERS, WEAPONS } from '../sim/data.js';
-import { GEAR, THROW_ORDER } from '../sim/gear.js';
+import { DRONE, GEAR, THROW_ORDER } from '../sim/gear.js';
 import { COMMANDS } from '../client/input.js';
 import { ENTRY_NAME, ENTRY_PHASE } from '../sim/entry-orders.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
@@ -503,10 +503,14 @@ export class Hud {
     const eq = a.equip;
     const charges = (m.charges ?? []).filter((c) => c.ownerId === a.id).length;
     const gearItems = [...THROW_ORDER, 'c4', 'drone'].filter((id) => (a.gear?.[id] ?? 0) > 0);
-    const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}`;
+    // 손에 있는 드론: 남은 배터리(초) — 충전 중이면 흐리게
+    const dBat = (a.gear?.drone ?? 0) > 0 ? Math.floor(a.droneBat ?? GEAR.drone.battery) : -1;
+    const gearSig = `${gearItems.map((id) => `${id}${a.gear[id]}`).join(',')}|${eq?.kind ?? ''}${eq?.id ?? ''}|${charges}|${dBat}`;
     this.set('gear', gearSig, () => {
       const on = (id) => (eq?.kind === 'throw' && eq.id === id) || (id === eq?.kind && (id === 'c4' || id === 'drone'));
-      const cells = gearItems.map((id) => `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
+      const cells = gearItems.map((id) => id === 'drone'
+        ? `<span class="vg ${on(id) ? 'on' : ''} ${dBat < DRONE.minLaunch ? 'low' : ''}" title="${GEAR[id].name} · 배터리 ${dBat}초">${GEAR_ICONS[id]}<i>${dBat}s</i></span>`
+        : `<span class="vg ${on(id) ? 'on' : ''}" title="${GEAR[id].name}">${GEAR_ICONS[id]}${a.gear[id] > 1 ? `<i>${a.gear[id]}</i>` : ''}</span>`);
       if (charges) cells.push(`<span class="vg ${eq?.kind === 'det' ? 'on' : ''}" title="기폭기 · 붙인 C4 ${charges}개">${GEAR_ICONS.det}<i>${charges}</i></span>`);
       E.gear.innerHTML = cells.length ? `${kbds('throw', 'gadget')}${cells.join('')}` : '';
       E.gear.classList.toggle('show', cells.length > 0);
