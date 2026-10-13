@@ -248,25 +248,63 @@ class BombView {
     this.group = g;
     this.liquid = new THREE.MeshStandardMaterial({ color: '#b2281f', emissive: '#b2281f', emissiveIntensity: 0.7 });
     const glass = new THREE.MeshStandardMaterial({ color: '#9fb6c2', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2 });
-    // 단색 부품 (받침·몸체·마개·전선)
+    // 열린 하드 케이스 안의 장치: 가스 실린더 2 · 제어 상자(키패드) · 붉은 시약병 3 · 배선 · 배터리 · 기판
+    //   뚜껑 안쪽에 타이머 화면 (앞 = +z, 해체하는 사람 쪽)
+    const OLIVE = '#30352a', BLACK = '#17181b', FOAM = '#26282b', STEEL = '#7f848a';
+    const RB = (w, h, d, r = 0.02) => new RoundedBoxGeometry(w, h, d, 2, r);
+    const lidTilt = -0.2;
+    const lid = (geo, y, z) => placed(geo.rotateX(lidTilt), 0, y, z);
     const solid = [
-      tinted(placed(new RoundedBoxGeometry(1.0, 0.16, 0.7, 2, 0.03), 0, 0.08, 0), '#121417', 0.8, 0.3),
-      tinted(placed(new RoundedBoxGeometry(0.86, 0.42, 0.52, 2, 0.03), 0, 0.37, 0), '#3d4130', 0.85, 0),
+      // 케이스 몸통 · 테두리 · 걸쇠 · 손잡이 · 바닥 고무발
+      tinted(placed(RB(0.92, 0.26, 0.62, 0.04), 0, 0.13, 0), OLIVE, 0.62, 0.05),
+      tinted(placed(RB(0.94, 0.035, 0.64, 0.012), 0, 0.262, 0), '#262a21', 0.6, 0.05),
+      ...[-0.27, 0.27].map((x) => tinted(placed(RB(0.07, 0.07, 0.03, 0.01), x, 0.21, 0.322), BLACK, 0.5, 0.2)),
+      tinted(placed(RB(0.24, 0.035, 0.05, 0.015), 0, 0.17, 0.335), BLACK, 0.7, 0.05),
+      ...[[-0.38, -0.24], [0.38, -0.24], [-0.38, 0.24], [0.38, 0.24]].map(([x, z]) => tinted(placed(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 10), x, 0.01, z), BLACK, 0.9, 0)),
+      // 뚜껑 (뒤쪽 경첩에서 열려 비스듬히 섬) + 안쪽 스펀지
+      tinted(lid(RB(0.92, 0.62, 0.07, 0.035), 0.58, -0.35), OLIVE, 0.62, 0.05),
+      tinted(lid(RB(0.84, 0.54, 0.02, 0.008), 0.585, -0.31), FOAM, 0.95, 0),
+      // 화면 베젤 (뚜껑 안쪽)
+      tinted(lid(RB(0.5, 0.28, 0.03, 0.01), 0.62, -0.295), BLACK, 0.45, 0.2),
+      // 안쪽 스펀지 바닥
+      tinted(placed(RB(0.86, 0.04, 0.56, 0.01), 0, 0.255, 0), FOAM, 0.95, 0),
     ];
+    // 가스 실린더 (가로로 눕혀 끈으로 고정) · 노란 경고 띠 · 밸브 · 압력계
+    for (const z of [-0.14, 0.02]) {
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.068, 0.068, 0.5, 18).rotateZ(Math.PI / 2), -0.05, 0.345, z), STEEL, 0.32, 0.65));
+      solid.push(tinted(placed(new THREE.SphereGeometry(0.068, 16, 10).scale(0.5, 1, 1), 0.2, 0.345, z), STEEL, 0.32, 0.65));
+      solid.push(tinted(placed(new THREE.SphereGeometry(0.068, 16, 10).scale(0.5, 1, 1), -0.3, 0.345, z), STEEL, 0.32, 0.65));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.0695, 0.0695, 0.06, 18).rotateZ(Math.PI / 2), -0.12, 0.345, z), '#c9a227', 0.5, 0.1));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.018, 0.022, 0.06, 10).rotateZ(Math.PI / 2), 0.255, 0.345, z), '#b58a3c', 0.3, 0.85));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 14).rotateX(Math.PI / 2), 0.29, 0.38, z + 0.012), '#d9d9d4', 0.4, 0.3));
+      for (const x of [-0.2, 0.1]) solid.push(tinted(placed(new THREE.CylinderGeometry(0.072, 0.072, 0.025, 18, 1, true).rotateZ(Math.PI / 2), x, 0.345, z), BLACK, 0.85, 0));
+    }
+    // 제어 상자 (키패드 · 스위치 · 안테나) · 배터리 묶음 · 초록 기판
+    solid.push(tinted(placed(RB(0.24, 0.1, 0.16, 0.012), 0.27, 0.325, 0.19), BLACK, 0.55, 0.15));
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) solid.push(tinted(placed(RB(0.032, 0.012, 0.028, 0.004), 0.2 + c * 0.045, 0.381, 0.15 + r * 0.035), '#3a3d42', 0.6, 0.1));
+    solid.push(tinted(placed(new THREE.CylinderGeometry(0.004, 0.004, 0.22, 6), 0.37, 0.48, 0.15), BLACK, 0.6, 0.2));
+    solid.push(tinted(placed(RB(0.16, 0.07, 0.1, 0.01), -0.05, 0.31, 0.2), '#2c4a8a', 0.5, 0.1));
+    solid.push(tinted(placed(RB(0.16, 0.012, 0.1, 0.004), -0.05, 0.35, 0.2), '#1d1e20', 0.6, 0.1));
+    solid.push(tinted(placed(RB(0.2, 0.008, 0.13, 0.002), -0.33, 0.283, 0.17), '#1f5a33', 0.55, 0.1));
+    for (let i = 0; i < 6; i++) solid.push(tinted(placed(RB(0.02, 0.012, 0.014, 0.002), -0.4 + (i % 3) * 0.05, 0.292, 0.13 + Math.floor(i / 3) * 0.05), i % 2 ? '#1a1a1a' : '#a8a39a', 0.5, 0.2));
+    // 배선 (제어 상자 → 실린더 밸브 · 시약병 · 배터리 · 뚜껑 화면)
+    const wire = (pts, color) => {
+      const curve = new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => new THREE.Vector3(x, y, z)));
+      solid.push(tinted(placed(new THREE.TubeGeometry(curve, 18, 0.006, 5), 0, 0, 0), color, 0.6, 0));
+    };
+    wire([[0.18, 0.36, 0.14], [0.22, 0.43, 0.05], [0.25, 0.39, -0.14]], '#8a2a20');
+    wire([[0.2, 0.36, 0.13], [0.24, 0.42, 0.06], [0.26, 0.39, 0.02]], '#c9a43a');
+    wire([[0.16, 0.34, 0.2], [0.05, 0.38, 0.22], [0.02, 0.35, 0.2]], '#2a4a8a');
+    wire([[0.3, 0.37, 0.12], [0.33, 0.5, -0.1], [0.2, 0.62, -0.27]], '#1a1a1a');
+    wire([[0.25, 0.36, 0.14], [0.0, 0.42, 0.2], [-0.28, 0.42, 0.2]], '#8a2a20');
     const glassParts = [];
     const liquidParts = [];
-    for (const x of [-0.3, 0, 0.3]) {
-      glassParts.push(placed(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 14), x, 0.83, -0.08));
-      liquidParts.push(placed(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), x, 0.8, -0.08));
-      solid.push(tinted(placed(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 14), x, 1.1, -0.08), '#2b2e33', 0.5, 0.75));
-      solid.push(tinted(placed(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 14), x, 0.6, -0.08), '#2b2e33', 0.5, 0.75));
-    }
-    // 전선
-    for (let i = 0; i < 3; i++) {
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.3 + i * 0.3, 1.12, -0.08), new THREE.Vector3(-0.2 + i * 0.2, 1.2, 0.1), new THREE.Vector3(0.0, 0.62, 0.24),
-      ]);
-      solid.push(tinted(placed(new THREE.TubeGeometry(curve, 16, 0.008, 5), 0, 0, 0), ['#8a2a20', '#2a4a8a', '#c9a43a'][i], 0.6, 0));
+    // 붉은 시약병 3 (철 받침에 꽂힘) — 상태에 따라 색이 바뀜
+    solid.push(tinted(placed(RB(0.17, 0.03, 0.06, 0.006), -0.28, 0.29, 0.2), '#3a3d42', 0.5, 0.5));
+    for (const x of [-0.335, -0.28, -0.225]) {
+      glassParts.push(placed(new THREE.CylinderGeometry(0.022, 0.022, 0.17, 12), x, 0.38, 0.2));
+      liquidParts.push(placed(new THREE.CylinderGeometry(0.017, 0.017, 0.12, 10), x, 0.36, 0.2));
+      solid.push(tinted(placed(new THREE.CylinderGeometry(0.024, 0.024, 0.025, 12), x, 0.47, 0.2), BLACK, 0.6, 0.1));
     }
     const mesh = (geo, mat, shadow = true) => {
       const m = new THREE.Mesh(geo, mat);
@@ -274,15 +312,16 @@ class BombView {
       g.add(m);
       return m;
     };
-    mesh(mergeGeometries(solid), makeSolidMaterial({ strobe: 0 }));
+    mesh(mergeGeometries(solid), makeSolidMaterial({ strobe: 0, detail: 4, amt: [0.6, 0.8, 0.9, 1] }));
     mesh(mergeGeometries(glassParts), glass, false);
     mesh(mergeGeometries(liquidParts), this.liquid);
     const screen = createBombScreen();
     this.screen = screen;
-    const scr = mesh(new THREE.PlaneGeometry(0.42, 0.21), new THREE.MeshBasicMaterial({ map: screen.texture }), false);
-    scr.position.set(0, 0.42, 0.262);
-    this.lamp = mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: '#ff2a2a', emissive: '#ff2a2a', emissiveIntensity: 3 }), false);
-    this.lamp.position.set(0.34, 0.62, 0.2);
+    const scr = mesh(new THREE.PlaneGeometry(0.44, 0.22), new THREE.MeshBasicMaterial({ map: screen.texture }), false);
+    scr.position.set(0, 0.62, -0.276);
+    scr.rotation.x = lidTilt;
+    this.lamp = mesh(new THREE.SphereGeometry(0.03, 10, 8), new THREE.MeshStandardMaterial({ color: '#ff2a2a', emissive: '#ff2a2a', emissiveIntensity: 3 }), false);
+    this.lamp.position.set(0.38, 0.87, -0.34);
     // 경고등 (실제 점광원은 LightRig가 가까울 때만 배정)
     this.light = { pos: new THREE.Vector3(bomb.x, (bomb.y ?? 0) + 1.0, bomb.z + 0.3), color: new THREE.Color('#ff3020'), intensity: 3, distance: 5, priority: 0.5 };
     // 해체 진행 표시: 바닥 고리 16칸 (한 메시, 칸마다 정점 색)
