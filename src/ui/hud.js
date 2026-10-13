@@ -101,6 +101,9 @@ export class Hud {
       <div class="pulse-hud"><div class="ph-screen"><div class="ph-fan"></div><i class="ph-me"></i><div class="ph-dots"></div></div>
         <div class="ph-text"><b>심장 박동</b><span class="ph-n">탐지 중</span></div></div>
       <div class="emp-hud"><b>EMP</b><span>전자 장비 먹통 · 지도·장비 정지 <em class="emp-sec"></em></span></div>
+      <div class="killcam"><div class="kc-frame"></div>
+        <div class="kc-top"><b>킬캠</b><span class="kc-who"></span><i class="kc-bar"><i></i></i><span class="kc-skip"></span></div></div>
+      <div class="death-card"></div>
       <div class="hint-keys"></div>
       <div class="concept-toast"></div>
       <div class="spectate"></div>
@@ -182,6 +185,11 @@ export class Hud {
       pulseN: $('.ph-n'),
       emp: $('.emp-hud'),
       empSec: $('.emp-sec'),
+      killcam: $('.killcam'),
+      kcWho: $('.kc-who'),
+      kcBar: $('.kc-bar i'),
+      kcSkip: $('.kc-skip'),
+      deathCard: $('.death-card'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
       vignette: $('.status-vignette'),
@@ -354,6 +362,46 @@ export class Hud {
       if (key) key.textContent = K(`patch${i}`);
     });
     if (this.cache) delete this.cache.gear; // 장비 칸의 키 표시도 다시
+  }
+
+  // 킬캠: 상대 시점 다시보기 (who = 상대 이름·무기, p = 진행 0~1) · null이면 숨김
+  setKillcam(kc) {
+    const E = this.els;
+    E.killcam.classList.toggle('show', !!kc);
+    this.root.classList.toggle('killcamming', !!kc);
+    if (!kc) return;
+    if (this.cache.kcWho !== kc.who) {
+      this.cache.kcWho = kc.who;
+      E.kcWho.innerHTML = kc.who;
+      E.kcSkip.innerHTML = `${kbd('jump')} 건너뛰기`;
+    }
+    E.kcBar.style.transform = `scaleX(${kc.p.toFixed(3)})`;
+  }
+
+  // 죽음 분석표: 무엇에 당했는지 · 받은 피해 · 내가 준 피해 · 다음엔
+  deathCard(r) {
+    const E = this.els;
+    if (!r) {
+      E.deathCard.classList.remove('show');
+      return;
+    }
+    const k = r.killer;
+    const hpBar = (v) => `<i class="dc-hp"><i style="transform:scaleX(${Math.max(0, Math.min(1, v / 100)).toFixed(2)})"></i></i>`;
+    const icon = WEAPON_ICONS[r.weapon] ?? GEAR_ICONS[r.weapon] ?? '';
+    const rows = r.attackers.slice(0, 3).map((x) => `<li><b>${esc(x.name)}</b><span>${x.hits}발${x.headshots ? ` · 머리 ${x.headshots}` : ''}</span><em>${Math.round(x.amount)}</em></li>`).join('');
+    const acc = r.dealt.shots ? ` · 명중 ${r.dealt.hits}/${r.dealt.shots}` : '';
+    E.deathCard.innerHTML = `
+      <header><small>죽음 분석</small><b>${k ? esc(k.name) : '알 수 없음'}</b><span class="dc-w">${icon}${esc(r.weaponName)}${r.headshot ? ' <em>머리</em>' : ''}</span></header>
+      <div class="dc-facts">
+        <div><small>거리</small><b>${r.distance != null ? `${r.distance} m` : '—'}</b></div>
+        <div><small>교전</small><b>${r.ttk < 0.05 ? '한 번에' : `${r.ttk.toFixed(1)}초`}</b></div>
+        <div><small>상대 남은 체력</small><b>${k ? (k.alive ? k.hp : '제압됨') : '—'}</b>${k && k.alive ? hpBar(k.hp) : ''}</div>
+      </div>
+      <section><h5>받은 피해 <em>${r.taken.total}</em><span>${r.taken.hits}발${r.taken.headshots ? ` · 머리 ${r.taken.headshots}` : ''}${r.taken.blocked ? ` · 방탄이 막음 ${r.taken.blocked}` : ''}</span></h5><ul>${rows}</ul></section>
+      <section><h5>내가 준 피해 <em>${r.dealt.total}</em><span>${k ? `${esc(k.name)}에게 ${r.dealt.killer}` : ''}${acc}</span></h5></section>
+      <section class="dc-tips"><h5>다음엔</h5>${r.tips.map(([t, d]) => `<p><b>${esc(t)}</b>${esc(d)}</p>`).join('')}</section>
+      <footer>${kbd('jump')} 닫기 · 클릭 다른 아군 보기</footer>`;
+    E.deathCard.classList.add('show');
   }
 
   hitmark(kind) {

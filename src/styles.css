@@ -5990,3 +5990,222 @@ button.kb-row:hover {
     min-width: 0;
   }
 }
+
+/* ───── 킬캠 (상대 시점 다시보기) · 죽음 분석표 ───── */
+.hud .killcam {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+}
+.hud .killcam.show {
+  display: block;
+}
+.hud .kc-frame {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 3px rgba(229, 83, 75, 0.55), inset 0 0 120px rgba(80, 0, 0, 0.45);
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+}
+.hud .kc-top {
+  position: absolute;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  background: rgba(16, 8, 8, 0.72);
+  border: 1px solid rgba(229, 83, 75, 0.55);
+  font: 600 13px var(--mono);
+  color: #f3dcd9;
+  white-space: nowrap;
+}
+.hud .kc-top > b {
+  color: #ff6b61;
+  letter-spacing: 0.14em;
+}
+.hud .kc-top > b::before {
+  content: '●';
+  margin-right: 6px;
+  animation: blink 1s steps(2) infinite;
+}
+.hud .kc-bar {
+  position: relative;
+  display: block;
+  width: 120px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+}
+.hud .kc-bar i {
+  position: absolute;
+  inset: 0;
+  background: #ff6b61;
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.hud .kc-skip {
+  font-weight: 500;
+  font-size: 11px;
+  color: #c9b3b0;
+}
+.hud.killcamming .vh-weapon,
+.hud.killcamming .hud-bottom,
+.hud.killcamming .hint-keys,
+.hud.killcamming .vh-vitals,
+.hud.killcamming .spectate,
+.hud.killcamming .crosshair {
+  opacity: 0;
+}
+
+.hud .death-card {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%) translateX(12px);
+  width: 300px;
+  max-height: calc(100% - 220px);
+  overflow: hidden;
+  padding: 12px 14px 10px;
+  background: rgba(12, 14, 17, 0.86);
+  border: 1px solid var(--hud-line);
+  border-left: 3px solid #e5534b;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: #dfe5ea;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.hud .death-card.show {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+.hud .death-card header {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 8px;
+}
+.hud .death-card header small {
+  font: 600 10px var(--mono);
+  letter-spacing: 0.14em;
+  color: #e5534b;
+}
+.hud .death-card header b {
+  font-size: 17px;
+  color: #fff;
+}
+.hud .dc-w {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b9c3cc;
+}
+.hud .dc-w svg {
+  height: 14px;
+  width: auto;
+  max-width: 54px;
+}
+.hud .dc-w em {
+  font-style: normal;
+  color: #ffb4ac;
+  font-weight: 700;
+}
+.hud .dc-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.hud .dc-facts div {
+  display: grid;
+  gap: 2px;
+  padding: 5px 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.hud .dc-facts small {
+  font-size: 9.5px;
+  color: #8f9aa4;
+}
+.hud .dc-facts b {
+  font: 600 14px var(--mono);
+}
+.hud .dc-hp {
+  display: block;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.hud .dc-hp i {
+  display: block;
+  height: 100%;
+  background: #e5534b;
+  transform-origin: left;
+}
+.hud .death-card section {
+  padding: 6px 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+.hud .death-card h5 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #c7d0d8;
+}
+.hud .death-card h5 em {
+  font: 700 13px var(--mono);
+  font-style: normal;
+  color: #fff;
+}
+.hud .death-card h5 span {
+  margin-left: auto;
+  font-weight: 500;
+  font-size: 10.5px;
+  color: #8f9aa4;
+}
+.hud .death-card ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.hud .death-card li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11.5px;
+}
+.hud .death-card li span {
+  color: #8f9aa4;
+}
+.hud .death-card li em {
+  font: 600 12px var(--mono);
+  font-style: normal;
+  color: #ffb4ac;
+}
+.hud .dc-tips p {
+  display: grid;
+  gap: 1px;
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #aeb8c1;
+}
+.hud .dc-tips p b {
+  color: #f0d68a;
+  font-size: 11.5px;
+}
+.hud .death-card footer {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: #7f8a94;
+}
+@media (max-width: 900px) {
+  .hud .death-card {
+    width: 260px;
+    right: 10px;
+  }
+}

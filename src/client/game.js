@@ -35,7 +35,11 @@ import { missionById } from '../sim/operation.js';
 import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
 import { DRONE, GEAR, RC } from '../sim/gear.js';
 import { camLimits } from '../sim/gadgets.js';
-import { conceptCardTexture } from './textures.js';
+import { DeathLog, weaponName } from '../sim/death-report.js';
+import { KILLCAM, KillcamPlayback, KillcamRecorder } from './killcam.js';
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+import { conceptCardTexture, labelTexture } from './textures.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from '../sim/concepts.js';
 import { addConcept, loadProgress, masteredIds, masteryOf, recordQuiz, recordUse } from '../core/progress.js';
 import { PUZZLE_INFO } from '../sim/lockpick.js';
@@ -174,6 +178,17 @@ export class GameClient {
     this.perf = { t: 0, frames: 0, sum: 0, done: false, warm: 1, holdT: 0 };
     this.tmp = new THREE.Vector3();
     this.tmp2 = new THREE.Vector3();
+    // 킬캠(쓰러지기 전 몇 초를 상대 시점으로) · 죽음 분석표
+    this.killRec = new KillcamRecorder(this.match);
+    this.deathLog = new DeathLog(this.match, this.player.id);
+    this.killcam = null;
+    this.agentIndex = new Map(this.match.agents.map((a, i) => [a.id, i]));
+    // 킬캠에서 내 위치 표시 (벽 너머로도 보임)
+    this.kcMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture('나', '#ff6b61'), transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+    this.kcMark.scale.set(2.6, 0.58, 1);
+    this.kcMark.renderOrder = 30;
+    this.kcMark.visible = false;
+    stage.scene.add(this.kcMark);
     this.bindEvents();
     // 맵의 소리 공간(실내 울림·실외 메아리)과 배경음, 비 오는 맵이면 빗소리와 번개 뒤 천둥
     this.audio.setEnvironment(this.match.map);
@@ -550,7 +565,12 @@ export class GameClient {
       }
       if (isMe(e.victim)) {
         A.play('death');
-        this.hud.banner('전투 불능', `${e.killer?.name ?? ''} · 아군 시점으로 전환`, 'bad');
+        // 분석표는 킬캠이 끝나면 (상대가 없거나 아군이면 바로)
+        this.deathReport = this.deathLog.report(e);
+        const enemy = e.killer && e.killer.team !== e.victim.team;
+        this.killcamWait = enemy ? { at: performance.now() / 1000 + KILLCAM.delay, killerId: e.killer.id, deathT: this.match.time } : null;
+        if (!enemy) this.hud.deathCard(this.deathReport);
+        this.hud.banner('전투 불능', enemy ? `${e.killer.name} · ${weaponName(e.weapon)} · 잠시 뒤 상대 시점 다시보기` : '아군 시점으로 전환', 'bad');
       }
     });
     // 발밑 재질(콘크리트·철제 통로·타일·계단)에 따라 다른 발소리
@@ -697,6 +717,7 @@ export class GameClient {
     });
     // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
     ev.on('roundPrep', (e) => {
+      this.endKillcam(true);
       this.controller.syncFrom(this.player);
       this.doorsView.clearDebris();
       this.camYaw = this.player.yaw;
@@ -874,6 +895,8 @@ export class GameClient {
       if (steps === 6) this.acc = 0;
       if (this.clientSync) this.clientSync.smooth(dt, now / 1000);
       if (this.net) this.netSend(dt);
+      this.killRec.sample();
+      this.updateKillcam(dt, pressed);
       this.caughtT -= dt;
       this.hitSoundT = (this.hitSoundT ?? 0) - dt;
       this.sounds(dt);
@@ -885,7 +908,22 @@ export class GameClient {
 
     const time = now / 1000;
     AgentView.eye.copy(this.stage.camera.position);
+    const kc = this.killcam;
+    this.kcMark.visible = !!kc;
     for (const v of this.views.values()) {
+      if (kc) {
+        // 킬캠: 기록된 모습으로 그림 (상대 눈 안이므로 상대 몸은 숨김)
+        const real = v.agent;
+        v.agent = kc.ghostOf(real, this.agentIndex.get(real.id));
+        v.update(dt, 1, time);
+        v.agent = real;
+        v.root.visible = this.agentIndex.get(real.id) !== kc.killerIdx;
+        if (real === this.player) {
+          const g = kc.ghosts.get(real.id);
+          if (g) this.kcMark.position.set(g.pos.x, g.pos.y + (g.alive ? 2.15 : 0.9), g.pos.z);
+        }
+        continue;
+      }
       v.update(dt, alpha, time);
       // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임)
       v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView && !this.camViewing);
@@ -912,7 +950,7 @@ export class GameClient {
     // 손에 든 장비가 있으면 총 대신 그 장비
     const held = va.equip ? `gear:${va.equip.kind === 'throw' ? va.equip.id : va.equip.kind}` : null;
     this.viewmodel.update(dt, {
-      visible: va.alive && !this.ended && !scoped && !this.droneView && !this.mirrorView && !this.camViewing,
+      visible: va.alive && !this.ended && !scoped && !this.droneView && !this.mirrorView && !this.camViewing && !this.killcam,
       weapon: held ?? va.weapon,
       speed: Math.hypot(va.vel.x, va.vel.z),
       velLocal: vel,
@@ -1010,6 +1048,18 @@ export class GameClient {
 
   updateCamera(dt, alpha) {
     const m = this.match;
+    if (this.killcam) {
+      // 킬캠: 나를 쓰러뜨린 상대의 눈으로
+      const e = this.killcam.eye();
+      const cam = this.stage.camera;
+      cam.position.set(e.pos.x, e.pos.y, e.pos.z);
+      cam.rotation.set(e.pitch, e.yaw, 0);
+      this.camYaw = e.yaw;
+      this.camPitch = e.pitch;
+      this.stage.setZoom(1);
+      this.audio.setListener(cam.position, { x: -Math.sin(e.yaw), y: 0, z: -Math.cos(e.yaw) });
+      return;
+    }
     let a = this.player;
     if (!a.alive) {
       const mates = m.agents.filter((x) => x.alive && x.team === this.team);
@@ -1152,6 +1202,47 @@ export class GameClient {
     const fwd = { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) };
     this.audio.setListener(cam.position, fwd);
     this.audio.setShelter(this.stage.underCover(cam.position));
+  }
+
+  // 킬캠 진행: 쓰러지고 잠시 뒤 시작 → 끝나면(또는 건너뛰면) 분석표
+  updateKillcam(dt, pressed) {
+    const skip = pressed.some((c) => isKey(c, 'jump'));
+    const w = this.killcamWait;
+    if (w && performance.now() / 1000 >= w.at) {
+      this.killcamWait = null;
+      if (!this.player.alive && this.match.phase !== 'ended') {
+        const kc = new KillcamPlayback(this.killRec, this.match, { killerId: w.killerId, victimId: this.player.id, deathT: w.deathT });
+        if (kc.done) this.hud.deathCard(this.deathReport);
+        else {
+          this.killcam = kc;
+          this.audio.play('camOn');
+        }
+      }
+    } else if (w && skip) {
+      // 킬캠을 기다리는 동안 건너뛰면 바로 분석표
+      this.killcamWait = null;
+      this.hud.deathCard(this.deathReport);
+      return;
+    }
+    const kc = this.killcam;
+    if (kc) {
+      kc.step(dt);
+      const killer = this.match.agents[kc.killerIdx];
+      this.hud.setKillcam({ who: `${esc(killer?.name ?? '')} · ${weaponName(this.deathReport?.weapon)}${this.deathReport?.headshot ? ' · 머리' : ''}`, p: kc.progress });
+      if (kc.done || skip || this.player.alive) this.endKillcam();
+    } else if (skip && this.hud.els.deathCard.classList.contains('show')) this.hud.deathCard(null);
+  }
+
+  endKillcam(silent = false) {
+    this.killcamWait = null;
+    if (this.killcam) {
+      this.killcam = null;
+      this.hud.setKillcam(null);
+      if (!silent) this.audio.play('camOff');
+      // 끝나면 분석표 (살아난 경우·새 라운드는 제외)
+      if (!silent && !this.player.alive && this.deathReport) this.hud.deathCard(this.deathReport);
+    }
+    if (silent) this.hud.deathCard(null);
   }
 
   // 드론 프로펠러 소리: 날고 있는 드론마다 계속 (사라지면 끔)
