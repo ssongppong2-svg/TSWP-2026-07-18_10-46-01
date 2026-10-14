@@ -3,6 +3,7 @@ import { GEAR, previewArc, throwVelocity } from '../sim/gear.js';
 import { eyePos } from '../sim/agent.js';
 import { dirFromAngles } from '../core/vec.js';
 import { glowTexture, smokeTexture } from './textures.js';
+import { BlastView } from './blast-view.js';
 
 // 투척·폭발 장비의 3D 모습
 //   날아가는 투척물 · 붙여 둔 C4(빨간 불이 깜빡임) · 연막(회색 연기 덩어리)·최루(누런 연기)
@@ -103,6 +104,8 @@ export class GearView {
     this.group.add(this.landMark);
     this.tmpV = new THREE.Vector3();
     this.up = new THREE.Vector3(0, 1, 0);
+    // 세열·C4 폭발 연출 (불덩이·충격파·파편·그을음)
+    this.blasts = new BlastView(scene, match.map, effects, lights);
   }
 
   // 터짐: 종류별 효과. cameraPos = 보는 사람 눈 (가까우면 화면이 흔들림)
@@ -111,14 +114,14 @@ export class GearView {
     const fx = this.effects;
     const near = cameraPos ? Math.hypot(cameraPos.x - p.x, cameraPos.y - p.y, cameraPos.z - p.z) : 99;
     if (e.kind === 'frag' || e.kind === 'c4') {
-      // 플라스마 폭발: 흰빛·주황 불티 + 보랏빛 파편 + 퍼지는 고리 + 어두운 보랏빛 연기
+      // 플라스마 폭발: 흰빛·주황 불티 + 보랏빛 파편 + 어두운 보랏빛 먼지
+      //   (불덩이·충격파·달궈진 파편·그을음·폭발 빛은 BlastView)
       const big = e.kind === 'c4' ? 1.4 : 1;
       fx.sparks.burst(p, '#ffd9a8', Math.round(70 * big), { speed: 13 * big, up: 2, life: 0.9, gravity: 6, spread: 1.4 });
       fx.sparks.burst(p, '#c39bff', Math.round(50 * big), { speed: 10 * big, up: 2, life: 0.8, gravity: 2, spread: 1.5 });
-      fx.dust.burst(p, '#2f2a3a', Math.round(80 * big), { speed: 7 * big, up: 2, life: 2.4, gravity: 0.6, spread: 1.3, drag: 1.4 });
-      fx.smoke.burst(p, '#2a2734', Math.round(24 * big), { speed: 3, up: 2.2, life: 3.5, gravity: -0.6, spread: 1, drag: 0.9 });
-      fx.pulses.push(fx.makePulse({ x: p.x, y: p.y - 0.1, z: p.z }, 6 * big, '#c9a6ff'));
-      this.pop(p, '#d2a8ff', 600 * big, 28, 0.6);
+      fx.dust.burst(p, '#2f2a3a', Math.round(60 * big), { speed: 7 * big, up: 2, life: 2.4, gravity: 0.6, spread: 1.3, drag: 1.4 });
+      fx.smoke.burst(p, '#2a2734', Math.round(10 * big), { speed: 3, up: 2.2, life: 3.5, gravity: -0.6, spread: 1, drag: 0.9 });
+      this.blasts?.spawn(e, e.kind);
       if (near < 18) fx.shake = Math.max(fx.shake, (1 - near / 18) * 1.2 * big);
     } else if (e.kind === 'flash') {
       fx.sparks.burst(p, '#ffffff', 40, { speed: 6, up: 1, life: 0.25, gravity: 0 });
@@ -547,6 +550,7 @@ export class GearView {
   }
 
   dispose() {
+    this.blasts.dispose();
     for (const p of this.pops) this.lights?.remove(p.light);
     this.scene.remove(this.group);
     this.group.traverse((o) => {

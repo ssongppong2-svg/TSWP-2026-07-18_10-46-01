@@ -150,6 +150,7 @@ export const BodycamShader = {
     bh0: { value: new THREE.Vector4(0, 0, 0, 0) },
     bh1: { value: new THREE.Vector4(0, 0, 0, 0) },
     voidFade: { value: 0 },
+    shock: { value: new THREE.Vector4(0, 0, 0, 0) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -158,7 +159,7 @@ export const BodycamShader = {
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp, glitch, voidFade;
-    uniform vec4 bh0, bh1;
+    uniform vec4 bh0, bh1, shock;
     varying vec2 vUv;
     float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
     vec2 lens(vec2 uv) {
@@ -206,8 +207,22 @@ export const BodycamShader = {
       ring += bh.w * exp(-pow((r - R * 1.55) / (R * 0.16 + 0.002), 2.0));
       return uv - (d / r) * bend / vec2(aspect, 1.0);
     }
+    // 폭발 충격파: 퍼져 나가는 고리를 따라 화면이 일렁임 (앞쪽은 바깥으로, 뒤쪽은 안으로 밀림) · shock = (화면 x, y, 반지름, 세기)
+    vec2 shockWarp(vec2 uv, out float glow) {
+      glow = 0.0;
+      if (shock.w <= 0.0) return uv;
+      vec2 d = (uv - shock.xy) * vec2(aspect, 1.0);
+      float r = max(length(d), 1e-4);
+      float w = 0.03 + shock.z * 0.16;
+      float x = (r - shock.z) / w;
+      float g = exp(-x * x);
+      glow = g * shock.w;
+      return uv - (d / r) * (g * x) * shock.w * 0.028 / vec2(aspect, 1.0);
+    }
     void main() {
       vec2 uv = lens(vUv);
+      float shockGlow;
+      uv = shockWarp(uv, shockGlow);
       float ring = 0.0, hole = 0.0;
       uv = gravLens(uv, bh0, ring, hole);
       uv = gravLens(uv, bh1, ring, hole);
@@ -247,6 +262,7 @@ export const BodycamShader = {
       col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))) * vec3(0.85, 0.93, 1.08), glitch * 0.25);
       // 블랙홀 둘레의 빛 고리 · 빨려 들면 화면이 어둠으로
       col += vec3(1.0, 0.72, 0.42) * ring * 0.35;
+      col += vec3(1.0, 0.86, 0.7) * shockGlow * 0.07; // 충격파 앞면이 살짝 밝게
       col *= 1.0 - hole;
       col = mix(col, vec3(0.0), clamp(voidFade, 0.0, 1.0));
       // 섬광
@@ -583,7 +599,7 @@ export class Stage {
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
   // scope: 조준경으로 들여다보는 중 → 렌즈 왜곡·색 번짐·노이즈·빗방울을 끄고 또렷하게 (가장자리는 조준경 그늘이 맡음)
-  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0, holes = [], voidFade = 0, scope = false } = {}) {
+  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0, holes = [], voidFade = 0, shock = null, scope = false } = {}) {
     const u = this.bodycam.uniforms;
     const on = !!this.settings.bodycam && !scope;
     // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
@@ -604,6 +620,8 @@ export class Stage {
       else u[key].value.set(0, 0, 0, 0);
     }
     u.voidFade.value = voidFade;
+    if (shock && this.settings.shake !== 0) u.shock.value.set(shock.x, shock.y, shock.r, Math.min(1.4, shock.k));
+    else u.shock.value.set(0, 0, 0, 0);
     u.rain.value = on && this.map?.weather === 'rain' ? this.lensWet ?? 1 : 0;
   }
 

@@ -403,6 +403,17 @@ export class GameClient {
         const d = Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
         this.blastDeaf = Math.max(this.blastDeaf ?? 0, Math.max(0, 1 - d / 12) * 0.85);
         this.shake = Math.min(1, this.shake + Math.max(0, 1 - d / 16) * 0.6);
+        // 폭풍이 얼굴을 때림: 고개가 폭발 반대쪽으로 젖혀지고(가까울수록 큼) 눈앞이 잠깐 하얗게
+        const k = Math.max(0, 1 - d / 14) * (e.kind === 'c4' ? 1.3 : 1);
+        if (k > 0 && (this.viewAgent ?? this.player).alive) {
+          const right = this.tmpVel.set(1, 0, 0).applyQuaternion(this.stage.camera.quaternion);
+          const side = Math.sign((e.x - cam.x) * right.x + (e.z - cam.z) * right.z) || 1;
+          this.kickVel.y += 0.09 * k;
+          this.kickVel.x += side * 0.06 * k;
+          this.rollKickVel += -side * 0.05 * k;
+          this.blur = Math.max(this.blur, 0.9 * k);
+          this.effects.flash = Math.max(this.effects.flash ?? 0, 0.12 * k * k);
+        }
       }
       // 내가 이명·섬광에 맞으면 귀가 울림
       const hit = e.hit?.find((h) => h.id === this.viewAgent?.id);
@@ -724,6 +735,7 @@ export class GameClient {
     // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
     ev.on('roundPrep', (e) => {
       this.closeDeathCard();
+      this.gearView.blasts.clear();
       this.absorbedSeen = false;
       this.voidT = 0;
       this.holeCam = null;
@@ -946,6 +958,7 @@ export class GameClient {
       // 심장 박동 표시는 내 센서 결과만 (관전 중이면 보고 있는 요원)
       const va0 = this.viewAgent ?? this.player;
       this.gearView.update(dt, alpha, this.droneView?.id ?? null, { viewer: va0, pulseHits: va0.alive && va0.pulseOn ? va0.pulseHits : null });
+      this.gearView.blasts.update(dt, this.stage.camera);
     }
     this.updateDroneSounds();
     {
@@ -1007,7 +1020,7 @@ export class GameClient {
     this.voidT = Math.max(0, (this.voidT ?? 0) - dt);
     const vt = this.voidT;
     const voidFade = vt <= 0 ? 0 : vt > 1.15 ? (1.4 - vt) / 0.25 : Math.min(1, vt / 0.75);
-    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0, holes: this.holesView.screen, voidFade, scope: scoped && va.alive && !this.droneView && !this.mirrorView && !this.camViewing });
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0, holes: this.holesView.screen, voidFade, shock: this.gearView.blasts.shock, scope: scoped && va.alive && !this.droneView && !this.mirrorView && !this.camViewing });
     this.blastDeaf = Math.max(0, (this.blastDeaf ?? 0) - dt * 0.6);
     this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85, this.blastDeaf));
     if (gassed && this.started && !this.paused) {
@@ -1183,12 +1196,16 @@ export class GameClient {
       this.camYaw += d * k;
       this.camPitch += (a.pitch + a.recoil + a.punch - this.camPitch) * k;
     }
-    // 발사 충격 (스프링으로 금방 돌아옴)
-    this.kickVel.addScaledVector(this.kickCam, -260 * dt).multiplyScalar(Math.exp(-dt * 22));
-    this.kickCam.addScaledVector(this.kickVel, dt * 10);
-    this.rollKickVel += -this.rollKick * 220 * dt;
-    this.rollKickVel *= Math.exp(-dt * 18);
-    this.rollKick += this.rollKickVel * dt * 10;
+    // 발사·폭풍 충격 (스프링으로 금방 돌아옴) — 프레임이 느려도(끊김) 튀지 않게 1/60초씩 나눠 계산
+    for (let left = dt; left > 1e-6; ) {
+      const h = Math.min(left, 1 / 60);
+      left -= h;
+      this.kickVel.addScaledVector(this.kickCam, -260 * h).multiplyScalar(Math.exp(-h * 22));
+      this.kickCam.addScaledVector(this.kickVel, h * 10);
+      this.rollKickVel += -this.rollKick * 220 * h;
+      this.rollKickVel *= Math.exp(-h * 18);
+      this.rollKick += this.rollKickVel * h * 10;
+    }
     // 손떨림 (가만히 있어도 약간)
     const t = performance.now() / 1000;
     const hand = (0.0025 + bobAmp * 0.003) * shakeScale * (1 - a.adsT * 0.6);

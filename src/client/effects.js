@@ -184,6 +184,29 @@ class Particles {
     }
   }
 
+  // 가운데에서 바닥을 따라 둥글게 퍼져 나가는 고리 (폭발 먼지 치마)
+  ring(center, color, count, speed, life, up = 0.5) {
+    const c = new THREE.Color(color);
+    for (let k = 0; k < count; k++) {
+      const i = this.next;
+      this.next = (this.next + 1) % this.max;
+      const a = (k / count) * Math.PI * 2 + Math.random() * 0.2;
+      const s = speed * (0.75 + Math.random() * 0.4);
+      this.pos[i * 3] = center.x + Math.cos(a) * 0.4;
+      this.pos[i * 3 + 1] = center.y + Math.random() * 0.2;
+      this.pos[i * 3 + 2] = center.z + Math.sin(a) * 0.4;
+      this.vel[i * 3] = Math.cos(a) * s;
+      this.vel[i * 3 + 1] = up * (0.4 + Math.random());
+      this.vel[i * 3 + 2] = Math.sin(a) * s;
+      this.life[i] = this.total[i] = life * (0.7 + Math.random() * 0.6);
+      this.base[i * 3] = c.r;
+      this.base[i * 3 + 1] = c.g;
+      this.base[i * 3 + 2] = c.b;
+      this.grav[i] = 0;
+      this.drag[i] = 2.6;
+    }
+  }
+
   inward(center, color, count, radius, t = 0.55) {
     const c = new THREE.Color(color);
     for (let k = 0; k < count; k++) {
