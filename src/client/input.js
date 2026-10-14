@@ -1,0 +1,400 @@
+import { emptyIntent } from '../sim/agent.js';
+import { actionOfCode, codesOf, isKey } from '../core/keys.js';
+
+// 지휘 명령 휠: G를 누른 채 마우스로 방향을 고르고 떼면 명령 (또는 숫자 키)
+// 각도는 화면 기준(오른쪽 0°, 아래 90°). key = 휠이 열려 있을 때의 숫자 키
+export const COMMANDS = [
+  { type: 'regroup', label: '집결', sub: '분대장 위치로', key: 1, angle: -90 },
+  { type: 'B', label: 'B 목표', sub: '해체 진입 / 방어', key: 5, angle: -30 },
+  { type: 'move', label: '지정 지점', sub: '조준한 곳으로 이동', key: 3, angle: 30 },
+  { type: 'hold', label: '위치 사수', sub: '현 위치 경계', key: 2, angle: 90 },
+  { type: 'free', label: '자율 교전', sub: '명령 해제', key: 6, angle: 150 },
+  { type: 'A', label: 'A 목표', sub: '해체 진입 / 방어', key: 4, angle: 210 },
+];
+
+import { ENTRY_COMMANDS } from '../sim/entry-orders.js';
+
+// 문 행동 휠 (문을 보고 F를 길게 누름 · 짧게 누르면 열기/닫기)
+export const DOOR_ACTIONS = [
+  { act: 'crack', label: '살짝 열기', sub: '틈으로 엿보기', key: 1, angle: -90 },
+  { act: 'kick', label: '발차기', sub: '걷어차 단숨에 엶', key: 2, angle: 0 },
+  { act: 'mirror', label: '문 밑 카메라', sub: '건너편 엿보기', key: 3, angle: 90 },
+  { act: 'charge', label: '폭약 설치', sub: 'C4로 문 폭파', key: 4, angle: 180 },
+];
+const DOOR_HOLD = 0.28; // F를 이만큼(초) 누르고 있으면 휠
+
+// 키보드·마우스 입력. event.code를 써서 한글 자판 상태에서도 WASD가 그대로 동작합니다.
+export class Input {
+  constructor(target) {
+    this.target = target;
+    this.down = new Set();
+    this.pressed = [];
+    this.mouseDx = 0;
+    this.mouseDy = 0;
+    this.buttons = 0;
+    this.wheel = 0;
+    this.locked = false;
+    this.everLocked = false;
+    this.lockedAt = 0;
+    this.fallback = false; // 마우스 잠금이 막힌 환경에서 쓰는 모드
+    this.enabled = false;
+    this.onLockChange = null;
+
+    this.handlers = {
+      keydown: (e) => {
+        if (!this.enabled) return;
+        // 게임에 쓰는 키는 브라우저 기본 동작(스크롤·빠른 찾기 등)을 막음
+        if (['Tab', 'Space', 'ArrowUp', 'ArrowDown'].includes(e.code) || actionOfCode(e.code)) e.preventDefault();
+        // 앉기(Ctrl)를 누른 채 다른 키를 눌러도 브라우저 단축키(저장·북마크 등)가 실행되지 않게
+        if (e.ctrlKey && (this.locked || this.fallback)) e.preventDefault();
+        if (!this.down.has(e.code)) this.pressed.push(e.code);
+        this.down.add(e.code);
+      },
+      keyup: (e) => this.down.delete(e.code),
+      mousemove: (e) => {
+        if (!this.enabled || (!this.locked && !this.fallback)) return;
+        // 잠금 직후나 브라우저 버그로 생기는 비정상적으로 큰 이동값은 버림 (시점이 갑자기 튀는 것 방지)
+        if (performance.now() - this.lockedAt < 120) return;
+        const dx = e.movementX || 0, dy = e.movementY || 0;
+        if (Math.abs(dx) > 400 || Math.abs(dy) > 400) return;
+        this.mouseDx += dx;
+        this.mouseDy += dy;
+      },
+      mousedown: (e) => {
+        if (!this.enabled) return;
+        if (e.button === 1) e.preventDefault(); // 휠 클릭(적 보고)으로 자동 스크롤이 켜지지 않게
+        if (this.locked || this.fallback) {
+          this.buttons |= 1 << e.button;
+          this.pressed.push(`Mouse${e.button}`);
+        }
+      },
+      mouseup: (e) => (this.buttons &= ~(1 << e.button)),
+      wheel: (e) => {
+        if (this.enabled && (this.locked || this.fallback)) this.wheel += Math.sign(e.deltaY);
+      },
+      blur: () => {
+        this.down.clear();
+        this.buttons = 0;
+      },
+      lockchange: () => {
+        this.locked = document.pointerLockElement === this.target;
+        if (this.locked) {
+          this.everLocked = true;
+          this.lockedAt = performance.now();
+          this.mouseDx = this.mouseDy = 0;
+        }
+        if (!this.locked) {
+          this.down.clear();
+          this.buttons = 0;
+        }
+        this.onLockChange?.(this.locked);
+      },
+      lockerror: () => {
+        // 한 번도 잠긴 적이 없으면 이 환경에선 잠금이 막힌 것 → 제한 모드로 진행
+        // (Esc 직후 다시 잠그려다 실패한 경우는 잠시 뒤 다시 클릭하면 됨)
+        if (!this.everLocked) this.fallback = true;
+        this.onLockChange?.(this.fallback, { error: true, fallback: this.fallback });
+      },
+      contextmenu: (e) => e.preventDefault(),
+    };
+    window.addEventListener('keydown', this.handlers.keydown);
+    window.addEventListener('keyup', this.handlers.keyup);
+    window.addEventListener('mousemove', this.handlers.mousemove);
+    window.addEventListener('mousedown', this.handlers.mousedown);
+    window.addEventListener('mouseup', this.handlers.mouseup);
+    window.addEventListener('wheel', this.handlers.wheel, { passive: true });
+    window.addEventListener('blur', this.handlers.blur);
+    document.addEventListener('pointerlockchange', this.handlers.lockchange);
+    document.addEventListener('pointerlockerror', this.handlers.lockerror);
+    target.addEventListener('contextmenu', this.handlers.contextmenu);
+  }
+
+  requestLock() {
+    if (this.fallback) {
+      this.onLockChange?.(true);
+      return;
+    }
+    if (!this.target.requestPointerLock) {
+      this.handlers.lockerror();
+      return;
+    }
+    try {
+      this.target.requestPointerLock()?.catch?.(() => {});
+    } catch {
+      this.handlers.lockerror();
+    }
+  }
+
+  exitLock() {
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  get active() {
+    return this.enabled && (this.locked || this.fallback);
+  }
+
+  isDown(code) {
+    return this.down.has(code);
+  }
+
+  // 동작(키 바꾸기에서 정한 키)을 누르고 있는지
+  held(action) {
+    return codesOf(action).some((c) => this.down.has(c));
+  }
+
+  takeMouse() {
+    const d = { dx: this.mouseDx, dy: this.mouseDy };
+    this.mouseDx = this.mouseDy = 0;
+    return d;
+  }
+
+  takePressed() {
+    const p = this.pressed;
+    this.pressed = [];
+    return p;
+  }
+
+  takeWheel() {
+    const w = this.wheel;
+    this.wheel = 0;
+    return w;
+  }
+
+  dispose() {
+    window.removeEventListener('keydown', this.handlers.keydown);
+    window.removeEventListener('keyup', this.handlers.keyup);
+    window.removeEventListener('mousemove', this.handlers.mousemove);
+    window.removeEventListener('mousedown', this.handlers.mousedown);
+    window.removeEventListener('mouseup', this.handlers.mouseup);
+    window.removeEventListener('wheel', this.handlers.wheel);
+    window.removeEventListener('blur', this.handlers.blur);
+    document.removeEventListener('pointerlockchange', this.handlers.lockchange);
+    document.removeEventListener('pointerlockerror', this.handlers.lockerror);
+    this.target.removeEventListener('contextmenu', this.handlers.contextmenu);
+  }
+}
+
+// 사람이 조종하는 요원. 매 프레임 마우스로 시점을 돌리고, 시뮬레이션 틱마다 intent를 넘깁니다.
+export class PlayerController {
+  constructor(input, settings) {
+    this.input = input;
+    this.settings = settings;
+    this.yaw = 0;
+    this.pitch = 0;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: [], command: null, report: false, buys: [], equip: null, door: null };
+    this.shop = null; // 상점이 열려 있으면: 마우스는 상점 커서, 숫자 키는 구매
+    this.doorTarget = null; // (요원) → 손이 닿는 문 (게임이 넣어 줌)
+    this.entryTarget = null; // (요원) → 진입 명령을 내릴 문 (바라보는 4.5 m 안의 문)
+    this.cmdItems = COMMANDS; // 지휘 휠 항목: 문을 보고 있으면 문 진입 명령
+    this.doorItems = DOOR_ACTIONS; // 지금 문 상태에 맞춘 휠 항목 (off: 지금은 못 함)
+    this.fHold = null; // 문 앞에서 F를 누른 시각
+    this.doorWheel = null; // { vec, sel, used }
+    this.lastDx = 0;
+    this.lastDy = 0;
+    this.wheelOpen = false;
+    this.wheelVec = { x: 0, y: 0 };
+    this.wheelSel = -1;
+    this.wheelUsed = false;
+  }
+
+  // 휠 방향 → 항목 번호 (가운데 근처면 -1)
+  pickSector(v, items = COMMANDS) {
+    if (Math.hypot(v.x, v.y) < 26) return -1;
+    const ang = (Math.atan2(v.y, v.x) * 180) / Math.PI;
+    let best = -1, bestD = Infinity;
+    items.forEach((c, i) => {
+      let d = Math.abs(((ang - c.angle + 540) % 360) - 180);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    return best;
+  }
+
+  syncFrom(agent) {
+    this.yaw = agent.yaw;
+    this.pitch = agent.pitch;
+  }
+
+  // 렌더 프레임마다 호출
+  frame(agent) {
+    const { dx, dy } = this.input.takeMouse();
+    if (this.shop?.isOpen) {
+      // 상점: 시점은 고정, 마우스는 커서, 왼쪽 클릭 = 구매, 숫자 키 = 바로 구매
+      this.shop.move(dx, dy);
+      this.lastDx = this.lastDy = 0;
+      for (const code of this.input.takePressed()) {
+        if (code === 'Mouse0') this.shop.click();
+        else this.shop.key(code);
+      }
+      this.input.takeWheel();
+      return;
+    }
+    // 문 행동 휠: 문 앞에서 F를 길게 → 휠, 짧게 떼면 열기·닫기
+    if (this.fHold && (!agent?.alive || !this.input.active)) {
+      // 쓰러졌거나 일시정지(마우스 고정 풀림): 아무것도 하지 않고 취소
+      this.fHold = null;
+      this.doorWheel = null;
+    }
+    if (this.fHold) {
+      const down = this.input.held('interact');
+      if (!down) {
+        if (!this.doorWheel) this.queue.interact = true;
+        else if (!this.doorWheel.used) {
+          const it = this.doorItems[this.doorWheel.sel];
+          if (it && !it.off) this.queue.door = it.act;
+          else if (it) this.denied = true;
+        }
+        this.fHold = null;
+        this.doorWheel = null;
+      } else if (!this.doorWheel && (performance.now() - this.fHold.t) / 1000 >= DOOR_HOLD) {
+        this.doorWheel = { vec: { x: 0, y: 0 }, sel: -1, used: false };
+      }
+    }
+    if (this.doorWheel) {
+      const w = this.doorWheel;
+      w.vec.x += dx;
+      w.vec.y += dy;
+      const l = Math.hypot(w.vec.x, w.vec.y);
+      if (l > 110) {
+        w.vec.x *= 110 / l;
+        w.vec.y *= 110 / l;
+      }
+      if (!w.used) w.sel = this.pickSector(w.vec, this.doorItems);
+      this.lastDx = this.lastDy = 0;
+      for (const code of this.input.takePressed()) {
+        const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
+        const k = this.doorItems.findIndex((c) => c.key === digit);
+        if (k >= 0 && !w.used) {
+          w.sel = k;
+          w.used = true;
+          if (!this.doorItems[k].off) this.queue.door = this.doorItems[k].act;
+          else this.denied = true;
+        }
+      }
+      this.input.takeWheel();
+      return;
+    }
+    // 지휘 휠: G를 누르고 있는 동안 시점은 고정, 마우스는 명령 선택에 사용
+    const canCommand = agent?.alive && !agent.lockpick && this.input.active;
+    const gDown = canCommand && this.input.held('command');
+    if (gDown && !this.wheelOpen) {
+      this.wheelOpen = true;
+      this.cmdItems = this.entryTarget?.(agent) ? ENTRY_COMMANDS : COMMANDS;
+      this.wheelVec = { x: 0, y: 0 };
+      this.wheelUsed = false;
+    }
+    if (this.wheelOpen) {
+      if (gDown) {
+        this.wheelVec.x += dx;
+        this.wheelVec.y += dy;
+        const l = Math.hypot(this.wheelVec.x, this.wheelVec.y);
+        if (l > 110) {
+          this.wheelVec.x *= 110 / l;
+          this.wheelVec.y *= 110 / l;
+        }
+        this.wheelSel = this.pickSector(this.wheelVec, this.cmdItems);
+        this.lastDx = this.lastDy = 0;
+      } else {
+        if (!this.wheelUsed && this.wheelSel >= 0) this.queue.command = { type: this.cmdItems[this.wheelSel].type };
+        this.wheelOpen = false;
+        this.wheelSel = -1;
+      }
+    }
+    if (this.wheelOpen) {
+      for (const code of this.input.takePressed()) {
+        const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
+        const cmd = this.cmdItems.find((c) => c.key === digit);
+        if (cmd && !this.wheelUsed) {
+          this.queue.command = { type: cmd.type };
+          this.wheelUsed = true;
+          this.wheelSel = this.cmdItems.indexOf(cmd);
+        }
+      }
+      this.input.takeWheel();
+      return;
+    }
+    this.lastDx = dx;
+    this.lastDy = dy;
+    // 확대된 만큼 느리게 (화면에서 같은 거리를 움직이는 느낌) × 조준 감도 (설정)
+    const zoom = this.zoomOf?.(agent) ?? 1;
+    const adsSens = 1 + ((this.settings.adsSensitivity ?? 1) - 1) * Math.min(1, agent?.adsT ?? 0);
+    const sens = (0.0022 * (this.settings.sensitivity ?? 1) * adsSens) / zoom;
+    this.yaw -= dx * sens;
+    this.pitch -= dy * sens * (this.settings.invertY ? -1 : 1);
+    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
+
+    for (const code of this.input.takePressed()) {
+      const digit = code.startsWith('Digit') ? Number(code.slice(5)) : code.startsWith('Numpad') ? Number(code.slice(6)) : NaN;
+      if (agent?.lockpick && digit >= 1 && digit <= 6) {
+        this.queue.cards.push(digit - 1);
+        continue;
+      }
+      const slot = [0, 1, 2, 3].find((n) => isKey(code, `patch${n}`));
+      if (slot !== undefined) this.queue.patch[slot] = true;
+      else if (isKey(code, 'interact')) {
+        // 문을 보고 있으면 길게 누르는지 기다림 (문 밑 카메라 중에는 바로 거둠)
+        if (!agent?.mirror && !agent?.lockpick && this.doorTarget?.(agent)) this.fHold = { t: performance.now() };
+        else this.queue.interact = true;
+      }
+      else if (isKey(code, 'reload')) this.queue.reload = true;
+      else if (code === 'Mouse1' || isKey(code, 'report')) this.queue.report = true;
+      else if (isKey(code, 'primary') && agent?.primary) this.queue.switchTo = agent.primary;
+      else if (isKey(code, 'secondary') && agent?.secondary) this.queue.switchTo = agent.secondary;
+      else if (isKey(code, 'knife')) this.queue.switchTo = 'knife';
+      // 투척물 들기 (다시 누르면 다음 종류) · C4 → 붙였으면 기폭기 → 드론
+      else if (isKey(code, 'throw')) this.queue.equip = 'throw';
+      else if (isKey(code, 'gadget')) this.queue.equip = 'gadget';
+    }
+    const w = this.input.takeWheel();
+    if (w && agent && !agent.lockpick) {
+      // 가진 무기만 돌아가며 (주무기 → 보조무기 → 칼)
+      const order = [agent.primary, agent.secondary, 'knife'].filter(Boolean);
+      const i = Math.max(0, order.indexOf(agent.weapon));
+      this.queue.switchTo = order[(i + (w > 0 ? 1 : order.length - 1)) % order.length];
+    }
+  }
+
+  // 상점에서 고른 것 (틱마다 하나씩 시뮬레이션으로)
+  buy(item) {
+    this.queue.buys.push(item);
+  }
+
+  // 보급 점검 문제의 답 (보기 번호)
+  answerQuiz(choice) {
+    this.queue.quiz = choice;
+  }
+
+  getIntent(match, agent) {
+    const i = emptyIntent(agent);
+    const inp = this.input;
+    const on = inp.active;
+    i.yaw = this.yaw;
+    i.pitch = this.pitch;
+    if (on) {
+      i.moveZ = (inp.held('forward') ? 1 : 0) - (inp.held('back') ? 1 : 0);
+      i.moveX = (inp.held('right') ? 1 : 0) - (inp.held('left') ? 1 : 0);
+      i.walk = inp.held('walk');
+      i.jump = inp.held('jump');
+      i.crouch = inp.held('crouch');
+      i.lean = (inp.held('leanR') ? 1 : 0) - (inp.held('leanL') ? 1 : 0);
+      i.fire = (inp.buttons & 1) !== 0 && !this.wheelOpen && !this.doorWheel && !this.shop?.isOpen;
+      i.ads = (inp.buttons & 4) !== 0 && !this.doorWheel && !this.shop?.isOpen;
+    }
+    const q = this.queue;
+    i.patch = q.patch;
+    i.interact = q.interact;
+    i.reload = q.reload;
+    i.switchTo = q.switchTo;
+    i.card = q.cards.length ? q.cards.shift() : -1;
+    i.command = q.command;
+    i.report = q.report;
+    i.buy = q.buys.length ? q.buys.shift() : null;
+    i.quiz = q.quiz ?? -1;
+    i.equip = q.equip;
+    i.door = q.door;
+    this.queue = { patch: [false, false, false, false], interact: false, reload: false, switchTo: null, cards: q.cards, command: null, report: false, buys: q.buys, quiz: -1, equip: null, door: null };
+    return i;
+  }
+}

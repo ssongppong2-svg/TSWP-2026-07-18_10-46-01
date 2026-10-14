@@ -1,0 +1,372 @@
+import { SLIDE } from './devices.js';
+import { LOAD, PLAYER, STAMINA, ULT } from './constants.js';
+import { ARMOR, LOADOUT_SLOTS, WEAPONS } from './data.js';
+import { EFFECT, GEAR, emptyGear } from './gear.js';
+
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// 새 총 한 자루의 탄 (탄창 가득 + 예비탄)
+export const freshAmmo = (id) => ({ mag: WEAPONS[id].magSize ?? 0, reserve: WEAPONS[id].reserve ?? 0 });
+
+// 포스 패치가 바꾸는 움직임: 무게 닻(느려짐) · 마찰 장갑(곧바로 멈춤) · 부력 풍선(떠오르는 속도 m/s)
+export const ANCHOR_SLOW = 0.75;
+export const ANCHOR_RECOIL = 0.6;
+export const GRIP_ACCEL = 2.6;
+export const BUOY_RISE_SPEED = 1.7;
+// 무중력 구역: 분사 가속(m/s²) · 최고 속도(m/s)
+export const ZERO_G_THRUST = 6;
+export const ZERO_G_MAX = 5;
+
+// 총을 손에 넣음: 같은 칸(주무기·보조무기)에 있던 총은 버림
+export function giveWeapon(a, id) {
+  const w = WEAPONS[id];
+  const old = a[w.slot];
+  if (old && old !== id) delete a.weapons[old];
+  a[w.slot] = id;
+  a.weapons[id] = freshAmmo(id);
+}
+
+// 들고 있는 장비의 질량 (kg): 총 + 방탄 + 투척·장비
+export function carriedMass(a) {
+  let m = 0;
+  for (const id in a.weapons ?? {}) m += WEAPONS[id]?.mass ?? 0;
+  if ((a.armor ?? 0) > 0) m += ARMOR[a.armorKind]?.mass ?? 0;
+  for (const id in a.gear ?? {}) m += (a.gear[id] ?? 0) * (GEAR[id]?.mass ?? 0);
+  return m;
+}
+
+// 질량에 따른 이동 배율 (속도, 가속)
+export function loadFactors(mass) {
+  const over = Math.max(0, mass - LOAD.base);
+  return { speed: Math.max(LOAD.minSpeed, 1 - over * LOAD.speedPerKg), accel: Math.max(LOAD.minAccel, 1 - over * LOAD.inertiaPerKg), over };
+}
+
+// 플레이어와 봇이 똑같이 쓰는 "요원" 데이터. 조종은 controller(사람 입력 / 봇 AI / 나중엔 네트워크)가 한다.
+// kit: 'full' 소총+권총으로 시작 (한 판짜리 규칙) / 'pistol' 권총만 (라운드제: 상점에서 삼)
+export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, loadout = [], kit = 'full' }) {
+  const pos = { x: spawn.x, y: 0, z: spawn.z };
+  const full = kit === 'full';
+  return {
+    id,
+    name,
+    team, // 지금 맡은 쪽 (해체/포스) — 전반이 끝나면 바뀜
+    squad: team, // 소속 분대 (끝까지 그대로, 점수·색은 이것으로)
+    isPlayer,
+    alive: true,
+    hp: PLAYER.maxHp,
+    pos,
+    prev: { ...pos },
+    vel: { x: 0, y: 0, z: 0 },
+    yaw,
+    pitch: 0,
+    onGround: true,
+    crouch: 0, // 0 서 있음 ~ 1 앉음
+    lean: 0, // -1 왼쪽 ~ 1 오른쪽
+    leanOffset: 0, // 벽에 막힌 것까지 반영한 실제 옆 이동(m)
+    ads: false,
+    adsT: 0,
+    weapons: full ? { rifle: freshAmmo('rifle'), pistol: freshAmmo('pistol'), knife: { mag: 0, reserve: 0 } } : { pistol: freshAmmo('pistol'), knife: { mag: 0, reserve: 0 } },
+    primary: full ? 'rifle' : null,
+    secondary: 'pistol',
+    weapon: full ? 'rifle' : 'pistol',
+    armor: 0, // 방탄 내구도 (ARMOR[armorKind].dur에서 닳아 감, 0이면 부서짐)
+    armorMax: 0,
+    armorKind: null, // 'light' | 'heavy' (등급·헬멧)
+    ammo: 'fmj', // 이번 라운드 탄종 (AMMO)
+    gear: emptyGear(), // 투척·폭발 장비 개수 (gear.js)
+    equip: null, // 손에 든 장비 { kind: 'throw', id } · { kind: 'c4' } · { kind: 'det' } (총 대신)
+    stunT: 0, // 이명 남은 시간
+    flashT: 0, // 섬광 눈부심 남은 시간
+    gasT: 0, // 최루 가스 안에 있음 (나가면 곧 사라짐)
+    stamina: STAMINA.max, // 지구력 (달리기·점프)
+    tired: false, // 지구력이 바닥나 지친 상태
+    restT: 0,
+    credits: 0,
+    fireCd: 0,
+    reloadT: 0,
+    swapT: 0,
+    bloom: 0,
+    recoil: 0,
+    recoilYaw: 0,
+    sprayIndex: 0,
+    burstLeft: 0, // 점사 총: 이번 점사에서 남은 발 수
+    suppress: 0, // 제압 (0~1): 적 총알이 바로 옆을 스치면 쌓임
+    suppressHold: 0,
+    punch: 0, // 피격 시 조준이 튀는 양
+    tagT: 0, // 피격 시 잠깐 느려지는 시간
+    sinceShot: 99,
+    triggerLatch: false,
+    adsLatch: false,
+    meleeCd: 0,
+    patches: LOADOUT_SLOTS.map((_, i) => (loadout[i] ? { id: loadout[i], cd: 0, activeT: 0 } : null)),
+    ult: ULT.start,
+    ampT: 0,
+    bounceT: 0,
+    anchorT: 0, // 무게 닻 (무게 ×3)
+    gripT: 0, // 마찰 장갑
+    buoyT: 0, // 부력 풍선 (떠 있는 남은 시간) · buoyTop = 떠오를 높이
+    markT: 0, // 합력 표적에 찍힘 · markTeam = 찍은 팀 · markBy = 맞힌 아군 id
+    slippery: false,
+    mired: false,
+    held: null,
+    lockpick: null,
+    revealedUntil: -99,
+    lastHurtT: -99,
+    lastHurtBy: null,
+    deadT: 0,
+    spottedT: -99,
+    stats: { kills: 0, deaths: 0, damage: 0, defuses: 0, patchUses: 0, headshots: 0, assists: 0 },
+    round: { kills: 0, damage: 0, by: {} }, // 이번 라운드 기록 (by: 나에게 피해를 준 요원별 피해량)
+  };
+}
+
+export function emptyIntent(agent) {
+  return {
+    moveX: 0,
+    moveZ: 0,
+    walk: false,
+    jump: false,
+    crouch: false,
+    lean: 0,
+    ads: false,
+    yaw: agent.yaw,
+    pitch: agent.pitch,
+    fire: false,
+    reload: false,
+    switchTo: null,
+    equip: null, // 장비 손에 들기: 'throw' (4: 투척물, 다시 누르면 다음 것) · 'gadget' (5: C4 · 기폭기)
+    useGear: null, // 봇 전용: { id, mode } 지금 조준한 방향으로 바로 던짐
+    equipKind: null, // 봇 전용: 이 장비를 바로 손에 ('pulse' 등)
+    buy: null, // 상점: 무기 id 또는 'light'·'heavy' (같은 것을 다시 사면 이번 구매 시간 안에서 환불)
+    patch: [false, false, false, false],
+    interact: false,
+    card: -1,
+    quiz: -1, // 구매 시간 개념 점검: 고른 보기 번호
+    command: null, // 지휘 명령 { type } (분대장만)
+    report: false, // 적 보고: 조준한 곳을 무전으로 알림
+    door: null, // 문 행동: 'crack' 살짝 열기 · 'kick' 발차기 · 'mirror' 문 밑 카메라 · 'charge' 문에 C4 (F는 interact)
+  };
+}
+
+// 눈(=머리 중심) 위치: 앉기·기울이기 반영
+export function eyePos(a) {
+  const off = a.leanOffset ?? 0;
+  return {
+    x: a.pos.x + Math.cos(a.yaw) * off,
+    y: a.pos.y + lerp(PLAYER.eyeStand, PLAYER.eyeCrouch, a.crouch ?? 0) - Math.abs(off) * 0.12,
+    z: a.pos.z - Math.sin(a.yaw) * off,
+  };
+}
+
+export const chestPos = (a) => ({ x: a.pos.x, y: a.pos.y + lerp(PLAYER.chestStand, PLAYER.chestCrouch, a.crouch ?? 0), z: a.pos.z });
+// 머리 끝까지의 키 (천장·벽 충돌용)
+export const bodyHeight = (a) => lerp(PLAYER.heightStand, PLAYER.heightCrouch, a.crouch ?? 0);
+export const bodyTop = (a) => lerp(PLAYER.bodyTopStand, PLAYER.bodyTopCrouch, a.crouch ?? 0);
+
+export function moveSpeed(a, intent) {
+  const P = PLAYER;
+  const w = WEAPONS[a.weapon];
+  let s = intent.walk ? P.walkSpeed : P.runSpeed;
+  if (a.crouch > 0.5) s = Math.min(s, P.crouchSpeed);
+  if (a.adsT > 0.5) s *= w?.adsMoveMult ?? P.adsSpeedMult;
+  if (a.weapon === 'knife') s *= P.knifeSpeedMult;
+  else s *= w?.moveMult ?? 1;
+  if (Math.abs(a.lean) > 0.3) s *= P.leanSpeedMult;
+  if (a.tagT > 0) s *= P.tagSlow;
+  if (a.mired && !(a.gripT > 0)) s *= P.miredMult; // 마찰 장갑: 마찰 폭풍 무시
+  if ((a.anchorT ?? 0) > 0) s *= ANCHOR_SLOW; // 무게 닻: 무거워 느림
+  if ((a.stunT ?? 0) > 0) s *= EFFECT.stunSlow;
+  if ((a.gasT ?? 0) > 0) s *= EFFECT.gasSlow;
+  // 무거운 장비 · 지침
+  s *= loadFactors(carriedMass(a)).speed;
+  if (a.tired) s *= STAMINA.tiredSpeed;
+  return s;
+}
+
+// 지구력: 달리면 줄고(무거울수록 빨리), 걷거나 멈추면 잠시 뒤 다시 참
+function stepStamina(agent, intent, dt, over) {
+  const S = STAMINA;
+  const hs = Math.hypot(agent.vel.x, agent.vel.z);
+  const running = agent.onGround && hs > PLAYER.quietSpeed && !intent.walk;
+  if (running) {
+    agent.stamina = Math.max(0, agent.stamina - S.runDrain * (1 + over * S.perKg) * dt);
+    agent.restT = 0;
+  } else {
+    agent.restT = (agent.restT ?? 0) + dt;
+    if (agent.restT > S.regenDelay) agent.stamina = Math.min(S.max, agent.stamina + S.regen * dt);
+  }
+  if (agent.stamina <= 0) agent.tired = true;
+  else if (agent.tired && agent.stamina >= S.recover) agent.tired = false;
+}
+
+// 이동 물리: 관성 있는 가속·감속, 앉기·기울이기, 중력, 벽 충돌
+export function stepMovement(agent, intent, map, dt, canMove) {
+  const P = PLAYER;
+  const vel = agent.vel;
+  agent.prev.x = agent.pos.x;
+  agent.prev.y = agent.pos.y;
+  agent.prev.z = agent.pos.z;
+
+  // 앉기
+  const crouchTarget = intent.crouch && !agent.held && agent.alive ? 1 : 0;
+  const cr = P.crouchRate * dt;
+  agent.crouch += Math.max(-cr, Math.min(cr, crouchTarget - agent.crouch));
+
+  // 기울이기 (공중·구속 중에는 불가). 벽에 막히면 그만큼만 기울어짐.
+  const leanTarget = canMove && agent.onGround && !agent.held ? Math.max(-1, Math.min(1, intent.lean || 0)) : 0;
+  const lr = P.leanRate * dt;
+  agent.lean += Math.max(-lr, Math.min(lr, leanTarget - agent.lean));
+  agent.leanOffset = 0;
+  if (Math.abs(agent.lean) > 0.01) {
+    const want = agent.lean * P.leanOffset;
+    const y = agent.pos.y + P.eyeStand - (P.eyeStand - P.eyeCrouch) * agent.crouch;
+    const from = { x: agent.pos.x, y, z: agent.pos.z };
+    const to = { x: from.x + Math.cos(agent.yaw) * (want + Math.sign(want) * 0.15), y, z: from.z - Math.sin(agent.yaw) * (want + Math.sign(want) * 0.15) };
+    const hit = map.raycast(from, to);
+    const reach = hit ? Math.max(0, hit.t * (Math.abs(want) + 0.15) - 0.15) : Math.abs(want);
+    agent.leanOffset = Math.sign(want) * Math.min(Math.abs(want), reach);
+  }
+
+  if (agent.held) {
+    // 중력 붕괴·탄성 그물에 붙잡힘: 붙잡힌 지점으로 끌려가 떠 있음
+    const h = agent.held;
+    const dx = h.x - agent.pos.x, dy = h.y - agent.pos.y, dz = h.z - agent.pos.z;
+    const d = Math.hypot(dx, dy, dz);
+    const speed = Math.min(14, d * 7);
+    if (d > 0.02) {
+      vel.x = (dx / d) * speed;
+      vel.y = (dy / d) * speed;
+      vel.z = (dz / d) * speed;
+    } else {
+      vel.x = vel.y = vel.z = 0;
+    }
+    agent.pos.x += vel.x * dt;
+    agent.pos.z += vel.z * dt;
+    map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel, bodyHeight(agent));
+    agent.pos.y += vel.y * dt;
+    const g = map.groundHeight(agent.pos.x, agent.pos.z, P.radius * 0.95, agent.prev.y + P.stepHeight);
+    if (agent.pos.y < g) agent.pos.y = g;
+    const ceil = map.ceilingHeight(agent.pos.x, agent.pos.z, P.radius * 0.9, agent.prev.y + 0.5);
+    if (agent.pos.y + bodyHeight(agent) > ceil) agent.pos.y = Math.max(g, ceil - bodyHeight(agent));
+    agent.onGround = false;
+    return;
+  }
+
+  let mx = canMove ? intent.moveX : 0;
+  let mz = canMove ? intent.moveZ : 0;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1) {
+    mx /= ml;
+    mz /= ml;
+  }
+  const sin = Math.sin(agent.yaw), cos = Math.cos(agent.yaw);
+  const wx = -sin * mz + cos * mx;
+  const wz = -cos * mz - sin * mx;
+  // 밀려는 방향 (상자 밀기에 씀)
+  agent.wish = { x: wx, z: wz };
+  const speed = moveSpeed(agent, intent);
+  // 관성: 무거울수록 빨라지는 데도, 멈추는 데도 오래 걸림
+  const load = loadFactors(carriedMass(agent));
+  const gHere = map.gravityAt?.(agent.pos.x, agent.pos.z) ?? 1; // 중력 배율 (달 1/6 · 무중력 0)
+
+  const slide = agent.onGround ? map.slideAt?.(agent.pos.x, agent.pos.z) : null;
+  if (slide) {
+    // 마찰 미끄럼틀: 마찰력이 거의 없어 내려가는 쪽으로 계속 빨라지고, 거슬러 오를 수 없음 (옆으로만 조금 조종)
+    const along = vel.x * slide.x + vel.z * slide.z;
+    const side = { x: -slide.z, z: slide.x };
+    const sideIn = wx * side.x + wz * side.z;
+    const sideV = vel.x * side.x + vel.z * side.z;
+    const down = Math.min(SLIDE.maxSpeed, Math.max(0, along) + SLIDE.accel * dt);
+    const lateral = sideV + (sideIn * SLIDE.control - sideV) * Math.min(1, dt * 6);
+    vel.x = slide.x * down + side.x * lateral;
+    vel.z = slide.z * down + side.z * lateral;
+  } else if (agent.onGround) {
+    if (agent.slippery && !(agent.gripT > 0)) {
+      vel.x += wx * P.slipAccel * dt;
+      vel.z += wz * P.slipAccel * dt;
+      const hs = Math.hypot(vel.x, vel.z);
+      if (hs > P.slipMaxSpeed) {
+        vel.x *= P.slipMaxSpeed / hs;
+        vel.z *= P.slipMaxSpeed / hs;
+      }
+    } else {
+      // 원하는 속도로 다가가되, 빨라질 때는 accel, 느려질 때는 decel 비율 (관성)
+      const tx = wx * speed, tz = wz * speed;
+      const speeding = tx * vel.x + tz * vel.z > 0 && Math.hypot(tx, tz) >= Math.hypot(vel.x, vel.z);
+      // 마찰 장갑: 마찰력이 커서 곧바로 멈추고 방향을 바꿈
+      const grip = (agent.gripT ?? 0) > 0 ? GRIP_ACCEL : 1;
+      const k = 1 - Math.exp(-(speeding ? P.accel : P.decel) * load.accel * grip * dt);
+      vel.x += (tx - vel.x) * k;
+      vel.z += (tz - vel.z) * k;
+    }
+    if (canMove && intent.jump && agent.crouch < 0.5 && (!agent.mired || agent.gripT > 0) && !agent.tired && !(agent.anchorT > 0)) {
+      // 무중력 구역: 바닥을 차고 천천히 떠오름 · 달: 같은 힘으로 뛰어도 더 높이·오래
+      vel.y = gHere > 0 ? P.jumpSpeed * map.jumpMult : P.jumpSpeed * 0.45;
+      agent.onGround = false;
+      agent.stamina = Math.max(0, (agent.stamina ?? STAMINA.max) - STAMINA.jumpCost * (1 + load.over * STAMINA.perKg));
+      agent.restT = 0;
+    }
+  } else if (gHere === 0 && agent.alive) {
+    // 무중력: 발이 떨어지면 반작용 추진(분사)으로 바라보는 방향(위아래 포함)으로 천천히 나아감 · 마찰이 없어 관성대로 계속 움직임
+    const cp = Math.cos(agent.pitch ?? 0), sp = Math.sin(agent.pitch ?? 0);
+    const tx = -sin * cp * mz + cos * mx, ty = sp * mz + (intent.jump ? 1 : 0) - (intent.crouch ? 1 : 0), tz = -cos * cp * mz - sin * mx;
+    vel.x += tx * ZERO_G_THRUST * dt;
+    vel.y += ty * ZERO_G_THRUST * dt;
+    vel.z += tz * ZERO_G_THRUST * dt;
+    const v = Math.hypot(vel.x, vel.y, vel.z);
+    if (v > ZERO_G_MAX) {
+      vel.x *= ZERO_G_MAX / v;
+      vel.y *= ZERO_G_MAX / v;
+      vel.z *= ZERO_G_MAX / v;
+    }
+  } else if ((agent.buoyT ?? 0) > 0) {
+    // 부력 풍선에 매달림: 공기 저항 때문에 천천히 떠다니며 조종 (걷는 속도의 절반쯤)
+    const k = 1 - Math.exp(-3 * dt);
+    vel.x += (wx * speed * 0.45 - vel.x) * k;
+    vel.z += (wz * speed * 0.45 - vel.z) * k;
+  } else if (ml > 0.01) {
+    // 공중: 원하는 방향으로 약간만 조종. 탄성판으로 얻은 빠른 속도는 유지.
+    const before = Math.hypot(vel.x, vel.z);
+    vel.x += wx * P.airAccel * dt;
+    vel.z += wz * P.airAccel * dt;
+    const after = Math.hypot(vel.x, vel.z);
+    const cap = Math.max(before, speed);
+    if (after > cap) {
+      vel.x *= cap / after;
+      vel.z *= cap / after;
+    }
+  }
+
+  if (agent.alive) stepStamina(agent, intent, dt, load.over);
+  if ((agent.buoyT ?? 0) > 0 && agent.alive) {
+    // 부력 풍선: 부력 > 중력이면 떠오르고, 정해진 높이에서는 부력 = 중력 (떠 있음)
+    const want = agent.pos.y < (agent.buoyTop ?? agent.pos.y) - 0.05 ? BUOY_RISE_SPEED : 0;
+    vel.y += (want - vel.y) * Math.min(1, dt * 4);
+  } else vel.y -= P.gravity * gHere * dt;
+
+  agent.pos.x += vel.x * dt;
+  agent.pos.z += vel.z * dt;
+  const bodyH = bodyHeight(agent);
+  map.collideCircle(agent.pos, P.radius, agent.pos.y, P.stepHeight, vel, bodyH);
+
+  agent.pos.y += vel.y * dt;
+  // 천장(2층 바닥판 아래·문틀)에 머리가 닿으면 더 오르지 못함
+  if (vel.y > 0) {
+    const ceil = map.ceilingHeight(agent.pos.x, agent.pos.z, P.radius * 0.9, agent.prev.y + 0.5);
+    if (agent.pos.y + bodyH > ceil) {
+      agent.pos.y = Math.max(agent.prev.y, ceil - bodyH);
+      vel.y = 0;
+    }
+  }
+  const ground = map.groundHeight(agent.pos.x, agent.pos.z, P.radius * 0.95, agent.prev.y + P.stepHeight);
+  if (agent.pos.y <= ground) {
+    agent.pos.y = ground;
+    if (vel.y < 0) vel.y = 0;
+    agent.onGround = true;
+  } else if (agent.onGround && vel.y <= 0 && agent.pos.y - ground < 0.15) {
+    agent.pos.y = ground;
+    vel.y = 0;
+  } else {
+    agent.onGround = false;
+  }
+}
