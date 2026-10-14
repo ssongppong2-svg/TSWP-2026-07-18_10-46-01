@@ -12,6 +12,7 @@ export const LAB_ANNEX = {
   code: 'LA-04',
   desc: '무장 용의자가 점거한 응용역학 연구 별관. 좁은 복도와 문으로 나뉜 방 7개.',
   weather: 'rain',
+  light: 'opRain', // 비 오는 밤: 등 + 달빛·하늘빛 채움광 (CQB가 너무 어둡지 않게)
   mood: '야간 · 비',
   cqb: true, // CQB 작전 전용 (5대5 맵 목록에는 없음)
   decor: { labProps: true, interior: 'lab' },

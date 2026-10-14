@@ -59,6 +59,16 @@ const WEATHER = {
     fog: ['#e3ddd0', 60, 200], top: '#7aa9de', horizon: '#efe8da', glow: '#fff0cc', overcast: 0, moon: 2.4, hemi: 1.7,
     sun: '#fff3e2', sky: '#fff7ec', ground: '#a08f78', exposure: 1.0, env: 0.6, lamps: 0.45, sunDir: [0.3, 0.9, -0.3],
   },
+  // CQB 작전 밤: 천장 등은 그대로 두고, 하늘빛(채움광)·노출을 올리고 안개를 옅게 → 어둡지만 답답하지 않게 (방 안·구석의 적이 보임)
+  opNight: {
+    fog: ['#1b212b', 34, 150], top: '#0b1220', horizon: '#26303f', glow: '#47392c', overcast: 0, moon: 0.9, hemi: 1.35,
+    sun: '#a9bfe6', sky: '#a3b2ca', ground: '#4f463a', exposure: 1.32, env: 0.32, lamps: 1.15,
+  },
+  // CQB 작전 비 오는 밤: 바깥 골목은 달빛·하늘빛으로 윤곽이 보이게, 실내는 등 + 채움광
+  opRain: {
+    fog: ['#1d242e', 18, 96], top: '#0d1219', horizon: '#2c3440', glow: '#3d3329', overcast: 1, moon: 1.15, hemi: 1.25,
+    sun: '#a7b8d6', sky: '#94a6c3', ground: '#40392f', exposure: 1.32, env: 0.3, lamps: 1.15,
+  },
 };
 WEATHER.clear = WEATHER.night;
 

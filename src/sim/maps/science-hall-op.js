@@ -31,7 +31,7 @@ export const SCIENCE_HALL_OP = {
   code: 'SH-OP',
   desc: '폐관한 과학관. 불 꺼진 전시관과 2층 회랑, 문으로 나뉜 실험실·강당.',
   mood: '야간 · 폐관',
-  light: undefined, // 밤 (천장 조명만)
+  light: 'opNight', // 밤: 천장 등 + 옅은 채움광 (CQB가 너무 어둡지 않게)
   cqb: true,
   doorMat: 'wood',
   layout: patch(SCIENCE_HALL.layout),
