@@ -52,8 +52,8 @@ test('빠른 매칭: 대기열은 온 순서 · 출발한 사람과 출발 명�
 });
 
 test('빠른 매칭: 맵은 가장 많이 고른 것 · 같으면 그중 하나 · 표가 없으면 아무 맵', () => {
-  assert.equal(pickMap(['moon-base', 'moon-base', 'giant-nest', null]), 'moon-base');
-  for (let i = 0; i < 20; i++) assert.ok(['moon-base', 'giant-nest'].includes(pickMap(['moon-base', 'giant-nest'])));
+  assert.equal(pickMap(['moon-base', 'moon-base', 'giant-city', null]), 'moon-base');
+  for (let i = 0; i < 20; i++) assert.ok(['moon-base', 'giant-city'].includes(pickMap(['moon-base', 'giant-city'])));
   const seen = new Set();
   for (let i = 0; i < 200; i++) seen.add(pickMap([null, 'nowhere']));
   for (const m of seen) assert.ok(MAP_ORDER.includes(m));
@@ -77,8 +77,8 @@ test('빠른 매칭: 2명부터 카운트다운 → 진행자가 방을 열고 �
   await b.start();
   clock += 10;
   await c.start();
-  b.setVote('giant-nest');
-  c.setVote('giant-nest');
+  b.setVote('giant-city');
+  c.setVote('giant-city');
   for (const m of [a, b, c]) m.update();
   assert.ok(a.isLeader && !b.isLeader, '먼저 온 사람이 진행');
   assert.equal(a.countdown, MM_COUNTDOWN);
@@ -89,7 +89,7 @@ test('빠른 매칭: 2명부터 카운트다운 → 진행자가 방을 열고 �
   assert.equal(gos.length, 3);
   const host = gos.find((g) => g.host);
   assert.equal(host.name, '가');
-  assert.ok(gos.every((g) => g.code === host.code && g.map === 'giant-nest'));
+  assert.ok(gos.every((g) => g.code === host.code && g.map === 'giant-city'));
   assert.deepEqual(gos.map((g) => g.team).sort(), ['defuse', 'defuse', 'force']);
   await new Promise((r) => setTimeout(r, 20));
 });

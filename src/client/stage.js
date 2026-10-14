@@ -81,11 +81,11 @@ const WEATHER = {
     sun: '#cfe4ff', sky: '#9ab4d8', ground: '#3a4250', exposure: 1.18, env: 0.45, lamps: 1.2, sunDir: [-0.4, 0.6, 0.7],
     sunCol: '#dfefff', sunSize: 0.0007,
   },
-  // 거대한 새의 둥지: 구름 위 맑은 한낮 (공기가 맑아 멀리까지 보임)
-  nest: {
-    fog: ['#cfe3f5', 90, 380], top: '#2f78d4', horizon: '#d8ebfa', glow: '#fff1cc', overcast: 0, moon: 2.9, hemi: 1.55,
-    sun: '#fff3dc', sky: '#d2e6ff', ground: '#7a6a50', exposure: 1.08, env: 0.55, lamps: 0.12, sunDir: [-0.35, 0.85, 0.4],
-    sunCol: '#fff6e6', cloudLit: '#ffffff', cloudShade: '#b4c2d4', clouds: 0.32,
+  // 거대한 세상: 거인 도시의 맑은 낮 (높은 해 · 건물 사이로 밝은 하늘빛)
+  giant: {
+    fog: ['#c8d8e8', 120, 520], top: '#3a7ad0', horizon: '#d8e6f4', glow: '#ffe8c0', overcast: 0, moon: 2.8, hemi: 1.5,
+    sun: '#fff2da', sky: '#d4e4fa', ground: '#8a8478', exposure: 1.08, env: 0.55, lamps: 0.3, sunDir: [0.4, 0.82, 0.35],
+    sunCol: '#fff4e2', cloudLit: '#ffffff', cloudShade: '#b0bccc', clouds: 0.35,
   },
 };
 WEATHER.clear = WEATHER.night;

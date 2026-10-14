@@ -11,7 +11,7 @@ import { buildStructure, shadeFn } from './structure.js';
 import { themeTextures } from './theme-textures.js';
 import { buildThemeBackdrop } from './theme-backdrop.js';
 import { buildZeroGDecor } from './zero-g-view.js';
-import { buildLandmarks, landmarkCells, buildNestTwigs } from './landmarks.js';
+import { buildLandmarks, landmarkCells, buildFloorPaint } from './landmarks.js';
 
 // 새 맵 테마 (달 기지 · 우주 화물선 · 거대한 새의 둥지): 표면 색·거칠기와 소품 모양
 //   (질감은 theme-textures.js, 하늘·원경은 theme-backdrop.js)
@@ -24,9 +24,11 @@ const THEME_STYLE = {
     floor: '#a3acb8', wall: '#c2ccd8', wallTop: '#6a737e', ceil: 'deck', floorRough: 0.5, floorMetal: 0.55, wallRough: 0.45, wallMetal: 0.45,
     crate: '#e6ebf0', rail: '#3b4046', railTop: '#d9b23a', chute: '#5e6874', trim: '#d9b23a', roofTop: '#3a4048', props: true,
   },
-  nest: {
-    floor: '#e2c8a2', wall: '#c9a27a', wallTop: '#8a6a44', ceil: 'bark', floorRough: 0.98, wallRough: 0.95, wallMetal: 0,
-    crate: '#f2e6d4', rail: '#6b4c2e', railTop: '#8a6a44', chute: '#a07a4e', trim: '#7a5a38', roofTop: '#6b4c2e', props: false, eggs: true,
+  // 거대한 세상: 질감에 색이 다 들어 있음 (흰색 = 질감 그대로) · 상자는 거인 물건 모양으로
+  giant: {
+    floor: '#ffffff', wall: '#ffffff', wallTop: '#9a958e', ceil: 'lining', floorRough: 0.92, wallRough: 0.85, wallMetal: 0,
+    crate: '#ffffff', rail: '#4a5a52', railTop: '#e8b830', chute: '#d84a3a', trim: '#e8b830', roofTop: '#7a8a96', props: false,
+    shapes: { bigCrate: 'can', crate: 'cap', barrier: 'pencil' },
   },
 };
 
@@ -105,25 +107,25 @@ export function buildWorld(map, baseTex) {
     wall: wallMat,
     inner: labInside ? new THREE.MeshStandardMaterial({ ...V, map: plasterTexture(), roughness: 0.86, metalness: 0, color: '#d9d9d4' }) : null,
     wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: style ? style.wallTop : day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
-    ceil: style?.ceil === 'bark'
-      ? new THREE.MeshStandardMaterial({ ...V, map: tex.wall, color: '#9a7a54', roughness: 0.95 })
+    ceil: style?.ceil === 'lining'
+      ? new THREE.MeshStandardMaterial({ ...V, color: '#d9d3c6', roughness: 0.95 }) // 운동화 안감 · 도시락 뚜껑 안쪽
       : museum || labInside || style?.ceil === 'tile'
         ? new THREE.MeshStandardMaterial({ ...V, map: ceilingTileTexture(), color: style ? '#eceff2' : '#d8d2c6', roughness: 0.92 })
         : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: style ? '#7f8894' : day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
     clad: museum || style ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
     slabTop: new THREE.MeshStandardMaterial({ ...V, map: slabTex, bumpMap: worldTex(tex.floorBump), bumpScale: museum ? 0.6 : 1.2, roughness: museum ? 0.4 : 0.9, metalness: 0.02, color: floorCol }),
-    // 2층 철제 다리 바닥 (둥지: 둥지를 가로지르는 큰 가지 → 나무껍질)
-    grate: style?.ceil === 'bark'
-      ? new THREE.MeshStandardMaterial({ ...V, map: tex.crate, roughness: 0.95, metalness: 0, color: '#b08a60' })
+    // 2층 철제 다리 바닥 (거대한 세상: 쓰러진 신호등 기둥의 칠한 윗면)
+    grate: tex.pole
+      ? new THREE.MeshStandardMaterial({ ...V, map: tex.pole, roughness: 0.55, metalness: 0.35 })
       : new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
     edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: style ? style.wall : museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
     edgeSteel: new THREE.MeshStandardMaterial({ ...V, color: '#4b5157', roughness: 0.5, metalness: 0.7 }),
     rail: museum
       ? new THREE.MeshStandardMaterial({ color: '#8f7442', roughness: 0.35, metalness: 0.8 })
-      : new THREE.MeshStandardMaterial({ color: style?.rail ?? '#3b4046', roughness: 0.55, metalness: style?.ceil === 'bark' ? 0 : 0.6 }),
+      : new THREE.MeshStandardMaterial({ color: style?.rail ?? '#3b4046', roughness: 0.55, metalness: 0.6 }),
     railTop: museum
       ? new THREE.MeshStandardMaterial({ color: '#7a5f45', roughness: 0.45 })
-      : new THREE.MeshStandardMaterial({ color: style?.railTop ?? '#d0a62a', roughness: 0.45, metalness: style?.ceil === 'bark' ? 0 : 0.35 }),
+      : new THREE.MeshStandardMaterial({ color: style?.railTop ?? '#d0a62a', roughness: 0.45, metalness: 0.35 }),
     railGlass: new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2, depthWrite: false }),
     roofTop: new THREE.MeshStandardMaterial({ ...V, color: style?.roofTop ?? '#3d4044', roughness: 0.95 }),
     tread: new THREE.MeshStandardMaterial({ ...V, map: slabTex, roughness: museum ? 0.35 : 0.85, color: museum ? bright(1.08, 1.06, 1.02) : floorCol }),
@@ -137,7 +139,15 @@ export function buildWorld(map, baseTex) {
       ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85 })
       : new THREE.MeshStandardMaterial({ ...V, color: style?.trim ?? '#d0a62a', roughness: 0.6, metalness: 0.1 }),
   };
-  group.add(buildStructure(map, mats, { museum, inner: indoor }));
+  // 벽 재질 구역 (decor.wallZones): 구역마다 다른 질감 (먼저 적힌 구역이 우선)
+  const zones = map.def.decor?.wallZones ?? [];
+  for (const z of new Set(zones.map((q) => q.style))) {
+    const zt = tex.zones?.[z];
+    if (!zt) continue;
+    mats[`z_${z}`] = new THREE.MeshStandardMaterial({ ...V, map: zt, roughness: z === 'lunchbox' ? 0.35 : 0.85, metalness: 0 });
+  }
+  const zoneOf = zones.length ? (c, r) => zones.find((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1)?.style ?? null : null;
+  group.add(buildStructure(map, mats, { museum, inner: indoor, zoneOf }));
   // 천장 등 (아트리움 광천장 자리는 따로 꾸밈)
   const ac = map.def.decor?.atriumCeiling;
   //   달 기지 모듈(타일 천장)은 매립 조명판, 우주선은 띠 조명
@@ -172,22 +182,20 @@ export function buildWorld(map, baseTex) {
     const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`) && !inLandmark(p.c, p.r)).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
-    // 둥지: 큰 상자 → 커다란 알 · 작은 상자 → 잘린 가지 토막 · 낮은 방벽 → 둥근 깃털 더미 (부딪히는 모양은 그대로 상자)
-    const egg = theme?.eggs && kind === 'bigCrate', log = theme?.eggs && kind === 'crate', heap = theme?.eggs && kind === 'barrier';
-    const geo = egg ? new THREE.SphereGeometry(1, 24, 18) : log ? new THREE.CylinderGeometry(0.55, 0.62, h, 14) : heap ? new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2) : new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
-    if (egg) geo.scale(0.98, h / 2, 0.98);
-    if (heap) geo.scale(1.12, h, 1.12).translate(0, -h / 2, 0); // 반구 밑면이 바닥 (아래에서 h/2 올림)
-    geo.translate(0, h / 2, 0);
+    // 거대한 세상: 큰 상자 → 콜라 캔 · 작은 상자 → 병뚜껑 · 낮은 방벽 → 몽당연필 (부딪히는 모양은 그대로 상자, 칸 안에 들어가게)
+    const shape = theme?.shapes?.[kind] ?? 'box';
+    const SHAPE = giantPropShape(shape, h, CELL * style.inset);
+    const geo = SHAPE?.geo ?? new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset).translate(0, h / 2, 0);
     const rough = wet ? style.rough * 0.6 : style.rough;
-    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: egg ? 0.55 : rough, metalness: egg || log ? 0 : style.metal, color: theme ? theme.crate : day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
-    const top = new THREE.MeshStandardMaterial({ color: log ? '#c49a62' : style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
-    // 원기둥(가지 토막)의 면 순서: 옆 · 윗면 · 아랫면
-    const mesh = new THREE.InstancedMesh(geo, egg || heap ? side : log ? [side, top, top] : [side, side, top, top, side, side], cells.length);
+    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: SHAPE?.rough ?? rough, metalness: SHAPE?.metal ?? style.metal, color: theme ? theme.crate : day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
+    const top = new THREE.MeshStandardMaterial({ color: SHAPE?.top ?? style.top, roughness: wet ? 0.25 : SHAPE?.rough ?? style.rough, metalness: SHAPE?.metal ?? style.metal });
+    // 원기둥 면 순서: 옆 · 윗면 · 아랫면 / 상자: 6면 (옆 4 · 위 · 아래)
+    const mesh = new THREE.InstancedMesh(geo, SHAPE ? [side, top, top] : [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     cells.forEach(([c, r, y], i) => {
       const rot = ((c * 7 + r * 13) % 4) * (Math.PI / 2);
-      m.makeRotationY(kind === 'bigCrate' ? 0 : rot);
+      m.makeRotationY(kind === 'bigCrate' && !SHAPE ? 0 : rot);
       m.setPosition(map.cellX(c), y, map.cellZ(r));
       mesh.setMatrixAt(i, m);
       // 실내(지붕·2층 바닥 아래)의 상자는 조금 어둡게
@@ -214,10 +222,10 @@ export function buildWorld(map, baseTex) {
   const lamps = addLamps(group, map);
   addDecor(group, map, museum);
   // 맵 밖 원경 (완전한 실내 맵은 밖이 보이지 않으므로 만들지 않음) · 새 테마는 별·지구·행성·거대한 새
-  if (style) group.add(buildThemeBackdrop(map, map.def.theme));
-  else if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
+  const backdrop = style ? buildThemeBackdrop(map, map.def.theme) : null;
+  if (!style && !map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
   // 무중력 구역(경계 선·입구 표지·떠도는 화물·먼지) · 랜드마크(원자로·셔틀): 움직이는 장식은 전시물 tick에 이어 붙임
-  const extras = [map.zeroG?.length ? buildZeroGDecor(map) : null, map.def.decor?.landmarks ? buildLandmarks(map) : null, map.def.theme === 'nest' ? buildNestTwigs(map) : null];
+  const extras = [backdrop, map.zeroG?.length ? buildZeroGDecor(map) : null, map.def.decor?.landmarks ? buildLandmarks(map) : null, map.def.decor?.floorPaint ? buildFloorPaint(map) : null];
   for (const x of extras) {
     if (!x) continue;
     group.add(x);
@@ -226,6 +234,28 @@ export function buildWorld(map, baseTex) {
   }
   group.userData.lamps = lamps;
   return group;
+}
+
+// 거인 물건 모양 (원기둥: 면 순서 옆·윗면·아랫면) — 높이 h, 칸 안쪽 폭 w에 맞춤
+//   can: 콜라 캔 (위아래가 살짝 좁아지는 은색 테) · cap: 병뚜껑 (주름 옆면, 아래가 넓음) · pencil: 몽당연필 (눕힌 육각 기둥)
+function giantPropShape(shape, h, w) {
+  if (shape === 'can') {
+    const g = new THREE.CylinderGeometry(w * 0.42, w * 0.42, h, 36, 1);
+    g.translate(0, h / 2, 0);
+    return { geo: g, rough: 0.35, metal: 0.55, top: '#c8ccd0' };
+  }
+  if (shape === 'cap') {
+    const g = new THREE.CylinderGeometry(w * 0.4, w * 0.44, h, 40, 1);
+    g.translate(0, h / 2, 0);
+    return { geo: g, rough: 0.4, metal: 0.6, top: '#d8dde2' };
+  }
+  if (shape === 'pencil') {
+    const g = new THREE.CylinderGeometry(h / 2, h / 2, w, 6, 1);
+    g.rotateZ(Math.PI / 2);
+    g.translate(0, h / 2, 0);
+    return { geo: g, rough: 0.6, metal: 0, top: '#e8c79a' };
+  }
+  return null;
 }
 
 // 바닥 페인트 선 (구역 경계는 노란색, 진영은 흰색) — 닳은 느낌

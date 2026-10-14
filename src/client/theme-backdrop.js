@@ -1,4 +1,4 @@
-// 새 맵 테마의 하늘·원경 (맵 밖): 달 기지 · 우주 화물선 · 거대한 새의 둥지
+// 새 맵 테마의 하늘·원경 (맵 밖): 달 기지 · 우주 화물선 · 거대한 세상 (움직이는 원경은 userData.tick)
 //   맵 가운데를 기준으로 멀리 둘러 놓음. 안개를 받지 않게(fog: false) 해서 멀어도 또렷
 import * as THREE from 'three';
 
@@ -16,10 +16,10 @@ export function buildThemeBackdrop(map, theme) {
     g.add(stars(3200, 520, 23));
     g.add(nebula(560));
     g.add(planet({ radius: 120, dir: [0.62, -0.18, -0.76], dist: 480, kind: 'giant' }));
-  } else if (theme === 'nest') {
-    g.add(cloudSea(R));
-    g.add(treeBranches(map));
-    g.add(giantBird(map));
+  } else if (theme === 'giant') {
+    const city = giantCity(map);
+    g.add(city);
+    g.userData.tick = city.userData.tick;
   }
   return g;
 }
@@ -234,107 +234,357 @@ function moonProps(map) {
   return g;
 }
 
-// 둥지 아래·주변의 구름 바다 (둥지는 아주 높은 나무 꼭대기)
-function cloudSea(R) {
+// ───────────────────────── 거대한 세상 (거인들의 도시) ─────────────────────────
+// 거인 크기 ×25: 건물 한 층이 75 m, 자동차 바퀴가 16 m, 사람 키가 40 m
+
+// 거인 건물 벽면: 층마다 큰 유리창(하늘이 비침) · 콘크리트 테 · 몇 개는 불 켜짐
+function facadeTexture(seed, tint) {
   const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  c.width = 256;
+  c.height = 512;
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0)';
-  g.fillRect(0, 0, 256, 256);
-  let s = 5;
+  g.fillStyle = tint;
+  g.fillRect(0, 0, 256, 512);
+  let s = seed;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 90; i++) {
-    const x = rnd() * 256, y = rnd() * 256, rad = 10 + rnd() * 34;
-    const grd = g.createRadialGradient(x, y, 0, x, y, rad);
-    grd.addColorStop(0, 'rgba(255,255,255,0.85)');
-    grd.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grd;
-    g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  // 콘크리트 결 · 층 띠
+  for (let i = 0; i < 400; i++) {
+    g.fillStyle = `rgba(${rnd() < 0.5 ? 0 : 255},${rnd() < 0.5 ? 0 : 255},${rnd() < 0.5 ? 0 : 255},0.03)`;
+    g.fillRect(rnd() * 256, rnd() * 512, 2 + rnd() * 10, 1 + rnd() * 4);
   }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(6, 6);
-  const sea = new THREE.Mesh(new THREE.CircleGeometry(R * 6, 48), new THREE.MeshBasicMaterial({ map: tex, color: '#f4f8ff', transparent: true, opacity: 0.9, depthWrite: false }));
-  sea.rotation.x = -Math.PI / 2;
-  sea.position.y = -40;
-  const under = new THREE.Mesh(new THREE.CircleGeometry(R * 6, 48), new THREE.MeshBasicMaterial({ color: '#cfe2f4' }));
-  under.rotation.x = -Math.PI / 2;
-  under.position.y = -46;
-  const grp = new THREE.Group();
-  grp.add(under, sea);
-  return grp;
-}
-
-// 둥지를 받친 거대한 나무: 둥지 밖으로 뻗은 굵은 가지 + 아래로 내려가는 줄기
-function treeBranches(map) {
-  const g = new THREE.Group();
-  const bark = new THREE.MeshStandardMaterial({ color: '#5e4430', roughness: 0.95 });
-  const leaf = new THREE.MeshStandardMaterial({ color: '#4f7a3a', roughness: 0.9, flatShading: true });
-  const R = Math.max(map.width, map.depth) * 0.5;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.35, R * 0.55, 60, 16), bark);
-  trunk.position.y = -32;
-  g.add(trunk);
-  let s = 9;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + rnd() * 0.3;
-    const len = R * (0.9 + rnd() * 0.9);
-    const br = new THREE.Mesh(new THREE.CylinderGeometry(1.6 + rnd() * 1.5, 3 + rnd() * 2, len, 10), bark);
-    br.position.set(Math.cos(a) * (R * 0.75 + len / 2), -3 - rnd() * 10, Math.sin(a) * (R * 0.75 + len / 2));
-    br.rotation.set(0, -a, Math.PI / 2 - 0.12 - rnd() * 0.3);
-    g.add(br);
-    // 가지 끝 잎 덩어리
-    const tuft = new THREE.Mesh(new THREE.IcosahedronGeometry(6 + rnd() * 6, 1), leaf);
-    tuft.position.set(Math.cos(a) * (R * 0.75 + len), -2 - rnd() * 8, Math.sin(a) * (R * 0.75 + len));
-    g.add(tuft);
-  }
-  return g;
-}
-
-// 거대한 새: 둥지 북쪽 너머에서 둥지를 내려다보는 머리·목·날개 (몸통은 둥지 밖)
-function giantBird(map) {
-  const g = new THREE.Group();
-  const feather = new THREE.MeshStandardMaterial({ color: '#3d4a66', roughness: 0.75, flatShading: true });
-  const featherLight = new THREE.MeshStandardMaterial({ color: '#e9e4d8', roughness: 0.8, flatShading: true });
-  const beakM = new THREE.MeshStandardMaterial({ color: '#e0a23a', roughness: 0.45 });
-  const eyeM = new THREE.MeshStandardMaterial({ color: '#111216', roughness: 0.1, metalness: 0.2 });
-  const irisM = new THREE.MeshBasicMaterial({ color: '#f2c14a' });
-  const D = map.depth / 2 + 46;
-  // 몸통 (둥지 북쪽 밖, 아래쪽으로 묻힘)
-  const body = new THREE.Mesh(new THREE.SphereGeometry(34, 24, 18), feather);
-  body.scale.set(1.3, 0.9, 1);
-  body.position.set(0, 6, -D - 18);
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(26, 20, 14), featherLight);
-  chest.position.set(0, 10, -D + 6);
-  // 목과 머리 (둥지를 내려다봄)
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(9, 14, 30, 14), feather);
-  neck.position.set(0, 34, -D + 2);
-  neck.rotation.x = 0.35;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(13, 20, 14), feather);
-  head.position.set(0, 50, -D + 10);
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(5, 18, 12), beakM);
-  beak.position.set(0, 47, -D + 26);
-  beak.rotation.x = Math.PI / 2 + 0.45;
-  const eyes = [];
-  for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(2.6, 14, 10), eyeM);
-    eye.position.set(sx * 9.5, 53, -D + 17);
-    const iris = new THREE.Mesh(new THREE.RingGeometry(2.7, 3.4, 20), irisM);
-    iris.position.copy(eye.position);
-    iris.lookAt(eye.position.x * 3, eye.position.y, eye.position.z + 20);
-    eyes.push(eye, iris);
-  }
-  // 날개 (양옆으로 반쯤 편 깃털 판)
-  for (const sx of [-1, 1]) {
-    const wing = new THREE.Group();
-    for (let k = 0; k < 9; k++) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(46 - k * 2.5, 1.2, 7), k % 3 ? feather : featherLight);
-      f.position.set(sx * (24 + k * 1.5), 30 - k * 4.2, -D - 10 + k * 1.2);
-      f.rotation.set(0.1, sx * 0.25, sx * (0.35 + k * 0.05));
-      wing.add(f);
+  for (let y = 0; y < 512; y += 128) {
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(0, y + 118, 256, 10);
+    for (let x = 0; x < 256; x += 128) {
+      const lit = rnd() < 0.12;
+      // 유리: 위는 하늘빛, 아래는 짙게 (반사) · 창틀 · 가로 창살
+      const grd = g.createLinearGradient(x, y, x + 40, y + 110);
+      grd.addColorStop(0, lit ? '#fbe8bc' : '#bcd8ee');
+      grd.addColorStop(0.55, lit ? '#e6c88a' : '#6a90b4');
+      grd.addColorStop(1, lit ? '#c8a060' : '#2c4462');
+      g.fillStyle = '#4a4e54';
+      g.fillRect(x + 10, y + 12, 108, 100);
+      g.fillStyle = grd;
+      g.fillRect(x + 14, y + 16, 100, 92);
+      g.fillStyle = '#4a4e54';
+      g.fillRect(x + 62, y + 16, 4, 92);
+      g.fillRect(x + 14, y + 58, 100, 3);
+      g.fillStyle = 'rgba(255,255,255,0.22)';
+      g.beginPath();
+      g.moveTo(x + 14, y + 16);
+      g.lineTo(x + 50, y + 16);
+      g.lineTo(x + 14, y + 70);
+      g.fill();
+      // 창 아래 빗물 자국
+      g.fillStyle = 'rgba(40,36,30,0.12)';
+      g.fillRect(x + 20, y + 112, 6, 14);
+      g.fillRect(x + 92, y + 112, 6, 10);
     }
-    g.add(wing);
   }
-  g.add(body, chest, neck, head, beak, ...eyes);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+function giantCity(map) {
+  const g = new THREE.Group();
+  const R = Math.max(map.width, map.depth) * 0.62 + 40;
+  let s = 77;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const tints = ['#b8b0a4', '#8e959c', '#c4b49a', '#a0a8b0', '#b49a8a'];
+  const mats = tints.map((t, i) => new THREE.MeshStandardMaterial({ map: facadeTexture(500 + i, t), roughness: 0.6, metalness: 0.1 }));
+  // 둘레의 거인 건물 (한 변 50~110 m · 높이 180~420 m)
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + rnd() * 0.15;
+    const d = R + 95 + rnd() * 80; // 건물은 바깥 고리 (거인이 걷는 길 바깥)
+    const w = 50 + rnd() * 60, dd = 50 + rnd() * 60, h = 180 + rnd() * 240;
+    const geo = new THREE.BoxGeometry(w, h, dd);
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * (w / 75), uv.getY(k) * (h / 150));
+    const b = new THREE.Mesh(geo, mats[i % mats.length]);
+    b.position.set(Math.cos(a) * d, h / 2, Math.sin(a) * d);
+    b.rotation.y = -a;
+    g.add(b);
+  }
+  // 서쪽에 세워 둔 거인 자동차 (맵 쪽으로 옆면): 바퀴 넷 · 문·손잡이·창문이 그려진 차체 · 유리 지붕칸
+  const car = giantCar();
+  car.position.set(-(R - 18), 0, 8); // 맵 서쪽 벽 바로 너머 (거인이 걷는 길보다 안쪽)
+  g.add(car);
+  // 북동쪽 거인 신호등 (초록·빨강이 번갈아)
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 90, 16), new THREE.MeshStandardMaterial({ color: '#4a5a52', roughness: 0.5, metalness: 0.4 }));
+  pole.position.set(R * 0.7, 45, -R * 0.7);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(8, 18, 6), new THREE.MeshStandardMaterial({ color: '#202428', roughness: 0.5 }));
+  head.position.set(R * 0.7 - 6, 82, -R * 0.7);
+  const red = new THREE.MeshBasicMaterial({ color: '#ff3a2a', toneMapped: false });
+  const green = new THREE.MeshBasicMaterial({ color: '#2aff8a', toneMapped: false });
+  const lampR = new THREE.Mesh(new THREE.CircleGeometry(2.4, 20), red);
+  const lampG = new THREE.Mesh(new THREE.CircleGeometry(2.4, 20), green);
+  lampR.position.set(R * 0.7 - 6, 86, -R * 0.7 + 3.05);
+  lampG.position.set(R * 0.7 - 6, 78, -R * 0.7 + 3.05);
+  g.add(pole, head, lampR, lampG);
+  // 걸어 다니는 거인 셋: 맵 둘레를 따라 천천히 (다리·팔이 번갈아 흔들림)
+  const giants = [
+    { radius: R + 22, speed: 0.022, phase: 0.4, shirt: '#c84a3a', pants: '#2c3e64', skin: '#e2b896' },
+    { radius: R + 62, speed: -0.016, phase: 2.6, shirt: '#3a8a5a', pants: '#3c3c44', skin: '#8a5a3a' },
+    { radius: R + 42, speed: 0.012, phase: 4.4, shirt: '#e0c050', pants: '#6a4a3a', skin: '#c49270' },
+  ].map((o) => ({ ...o, rig: giantPerson(o) }));
+  for (const gi of giants) g.add(gi.rig.root);
+  g.userData.tick = (t) => {
+    lampR.visible = Math.floor(t / 12) % 2 === 0;
+    lampG.visible = !lampR.visible;
+    for (const gi of giants) {
+      const a = gi.phase + t * gi.speed;
+      gi.rig.root.position.set(Math.cos(a) * gi.radius, 0, Math.sin(a) * gi.radius);
+      gi.rig.root.rotation.y = -a + (gi.speed > 0 ? 0 : Math.PI); // 얼굴·발끝(+z)이 걷는 쪽으로
+      const w = t * Math.abs(gi.speed) * gi.radius * 0.12; // 걸음 주기 (보폭에 맞춤)
+      gi.rig.walk(w);
+    }
+  };
   return g;
+}
+
+// 거인 자동차 한 대 (길이 112 m): 옆면 그림(문 틈·손잡이·바퀴 집·문턱) · 앞뒤(전조등·미등·번호판) · 유리 지붕칸
+function giantCar() {
+  const car = new THREE.Group();
+  const paint = '#2a5ab8';
+  const side = carSideTexture(paint);
+  const ends = [carEndTexture(paint, true), carEndTexture(paint, false)];
+  const bodyM = (map) => new THREE.MeshStandardMaterial({ map, color: map ? '#ffffff' : paint, roughness: 0.28, metalness: 0.55 });
+  const under = new THREE.MeshStandardMaterial({ color: '#202226', roughness: 0.9 });
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(40, 22, 112), [bodyM(side), bodyM(side), bodyM(null), under, bodyM(ends[0]), bodyM(ends[1])]);
+  shell.position.set(0, 22.4, 0);
+  const glass = new THREE.MeshStandardMaterial({ map: carGlassTexture(), roughness: 0.08, metalness: 0.7 });
+  const roofM = bodyM(null);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(34, 17, 60), [glass, glass, roofM, under, glass, glass]);
+  cabin.position.set(0, 33.4 + 8.5, -6);
+  car.add(shell, cabin);
+  const tire = new THREE.MeshStandardMaterial({ color: '#1c1d20', roughness: 0.92 });
+  const rim = new THREE.MeshStandardMaterial({ color: '#c8ced4', roughness: 0.25, metalness: 0.9 });
+  for (const z of [-36, 36]) {
+    for (const x of [-16, 16]) {
+      const t = new THREE.Mesh(new THREE.TorusGeometry(6.2, 2.8, 14, 36), tire);
+      t.position.set(x, 9, z);
+      t.rotation.y = Math.PI / 2;
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 4.2, 20), rim);
+      w.position.set(x, 9, z);
+      w.rotation.z = Math.PI / 2;
+      car.add(t, w);
+    }
+  }
+  // 옆 거울
+  const mirror = new THREE.Mesh(new THREE.BoxGeometry(5, 3.4, 2.4), bodyM(null));
+  mirror.position.set(21.5, 36, 22);
+  car.add(mirror);
+  car.traverse((m) => m.isMesh && (m.castShadow = false));
+  return car;
+}
+
+function carSideTexture(paint) {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 200;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 200);
+  grad.addColorStop(0, '#5a8ae0');
+  grad.addColorStop(0.35, paint);
+  grad.addColorStop(1, '#173a80');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 1024, 200);
+  // 허리선 반사
+  g.fillStyle = 'rgba(255,255,255,0.28)';
+  g.fillRect(0, 46, 1024, 6);
+  // 바퀴 집 (아래쪽 반원) — 바퀴 z = ±36 → u = (56 ∓ 36) / 112
+  g.fillStyle = '#121418';
+  for (const u of [20 / 112, 92 / 112]) {
+    g.beginPath();
+    g.arc(u * 1024, 200, 92, Math.PI, 0);
+    g.fill();
+  }
+  // 문 틈 · 손잡이
+  g.strokeStyle = 'rgba(10,20,40,0.85)';
+  g.lineWidth = 4;
+  for (const x of [330, 520, 700]) {
+    g.beginPath();
+    g.moveTo(x, 6);
+    g.lineTo(x - 8, 196);
+    g.stroke();
+  }
+  g.fillStyle = '#c8d0dc';
+  for (const x of [470, 650]) g.fillRect(x, 70, 40, 10);
+  // 문턱 (검은 띠)
+  g.fillStyle = '#1a1d22';
+  g.fillRect(250, 180, 520, 20);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function carEndTexture(paint, front) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 300;
+  const g = c.getContext('2d');
+  g.fillStyle = paint;
+  g.fillRect(0, 0, 512, 300);
+  g.fillStyle = '#16181c';
+  g.fillRect(0, 210, 512, 90); // 범퍼 아래
+  const lamp = front ? '#fff6d8' : '#ff3020';
+  g.fillStyle = lamp;
+  g.shadowColor = lamp;
+  g.shadowBlur = 24;
+  g.fillRect(24, 70, 120, 46);
+  g.fillRect(368, 70, 120, 46);
+  g.shadowBlur = 0;
+  if (front) {
+    g.fillStyle = '#1a1c20';
+    g.fillRect(180, 80, 152, 70); // 그릴
+    g.strokeStyle = '#8a9098';
+    g.lineWidth = 4;
+    for (let y = 92; y < 150; y += 14) {
+      g.beginPath();
+      g.moveTo(184, y);
+      g.lineTo(328, y);
+      g.stroke();
+    }
+  }
+  g.fillStyle = '#f2f2ea';
+  g.fillRect(196, 170, 120, 34); // 번호판
+  g.fillStyle = '#1a1c22';
+  g.font = 'bold 26px sans-serif';
+  g.textAlign = 'center';
+  g.fillText('거인 12가 3456', 256, 196);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function carGlassTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 160;
+  const g = c.getContext('2d');
+  g.fillStyle = '#2a5ab8';
+  g.fillRect(0, 0, 512, 160);
+  const glass = g.createLinearGradient(0, 0, 0, 160);
+  glass.addColorStop(0, '#9ab8d8');
+  glass.addColorStop(0.5, '#3a4a5e');
+  glass.addColorStop(1, '#1a2230');
+  g.fillStyle = glass;
+  g.fillRect(16, 16, 230, 136);
+  g.fillRect(266, 16, 230, 136);
+  g.fillStyle = 'rgba(255,255,255,0.22)'; // 비친 하늘 줄무늬
+  for (const x of [60, 320]) {
+    g.beginPath();
+    g.moveTo(x, 16);
+    g.lineTo(x + 50, 16);
+    g.lineTo(x - 10, 152);
+    g.lineTo(x - 60, 152);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// 거인 한 명 (모형 키 약 46 m × 1.6배): 엉덩이에서 다리·발, 어깨에서 팔이 흔들림
+function giantPerson({ shirt, pants, skin }) {
+  const root = new THREE.Group();
+  const M = (c, r = 0.85) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
+  const pantsM = M(pants), shirtM = M(shirt), skinM = M(skin, 0.7), shoeM = M('#efefea', 0.6), soleM = M('#2a2a2a', 0.9);
+  const limb = (r1, r2, len, mat) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, 14), mat);
+    m.position.y = -len / 2;
+    const pivot = new THREE.Group();
+    pivot.add(m);
+    return pivot;
+  };
+  const hipY = 20;
+  const legs = [];
+  for (const sx of [-1, 1]) {
+    const thigh = limb(3.2, 2.6, 10, pantsM);
+    thigh.position.set(sx * 3.4, hipY, 0);
+    const shin = limb(2.5, 2.1, 10, pantsM);
+    shin.position.y = -10;
+    thigh.add(shin);
+    const shoe = new THREE.Group();
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(4.6, 2.6, 9.5), shoeM);
+    upper.position.set(0, -0.6, 1.6);
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.8, 10), soleM);
+    sole.position.set(0, -2.1, 1.6);
+    shoe.add(upper, sole);
+    shoe.position.y = -10;
+    shin.add(shoe);
+    root.add(thigh);
+    legs.push({ thigh, shin });
+  }
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(13, 16, 7), shirtM);
+  torso.position.y = hipY + 8;
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(11.5, 4, 6.5), pantsM);
+  hips.position.y = hipY + 1;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 2.4, 12), skinM);
+  neck.position.y = hipY + 17;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(4.2, 20, 16), skinM);
+  head.scale.set(0.9, 1.08, 0.95);
+  head.position.y = hipY + 21.5;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(4.35, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), M('#2a2018', 0.9));
+  hair.position.copy(head.position);
+  // 얼굴 (걷는 쪽 = +z): 눈·코·입 · 귀
+  const dark = M('#1c1814', 0.6);
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), dark);
+    eye.position.set(sx * 1.4, hipY + 22.2, 3.7);
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), skinM);
+    ear.scale.set(0.5, 1, 0.8);
+    ear.position.set(sx * 3.8, hipY + 21.6, 0);
+    root.add(eye, ear);
+  }
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.6, 8), skinM);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, hipY + 21.2, 4.2);
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, 0.3), M('#8a3a30', 0.7));
+  mouth.position.set(0, hipY + 19.9, 3.75);
+  // 둥근 어깨 · 깃 · 허리띠
+  const shoulders = [-1, 1].map((sx) => {
+    const sh = new THREE.Mesh(new THREE.SphereGeometry(2.6, 14, 10), shirtM);
+    sh.position.set(sx * 6.2, hipY + 14.6, 0);
+    return sh;
+  });
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.6, 8, 20), M('#f0ece4', 0.8));
+  collar.rotation.x = Math.PI / 2;
+  collar.position.y = hipY + 16.2;
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(11.8, 1.1, 6.8), M('#3a2a1e', 0.6));
+  belt.position.y = hipY + 2.6;
+  root.add(torso, hips, neck, head, hair, nose, mouth, collar, belt, ...shoulders);
+  const arms = [];
+  for (const sx of [-1, 1]) {
+    const upper = limb(1.7, 1.5, 9, shirtM);
+    upper.position.set(sx * 7.6, hipY + 15, 0);
+    const fore = limb(1.4, 1.2, 8, skinM);
+    fore.position.y = -9;
+    upper.add(fore);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(1.5, 12, 10), skinM);
+    hand.position.y = -8.6;
+    fore.add(hand);
+    root.add(upper);
+    arms.push({ upper, fore });
+  }
+  root.traverse((m) => m.isMesh && (m.castShadow = false));
+  root.scale.setScalar(1.6); // 키 약 74 m — 4.8 m 담 너머로도 거인임이 한눈에 보이게
+  return {
+    root,
+    walk(w) {
+      const sw = Math.sin(w);
+      legs[0].thigh.rotation.x = sw * 0.45;
+      legs[1].thigh.rotation.x = -sw * 0.45;
+      legs[0].shin.rotation.x = Math.max(0, -Math.cos(w)) * 0.6;
+      legs[1].shin.rotation.x = Math.max(0, Math.cos(w)) * 0.6;
+      arms[0].upper.rotation.x = -sw * 0.35;
+      arms[1].upper.rotation.x = sw * 0.35;
+      arms[0].fore.rotation.x = arms[1].fore.rotation.x = -0.25;
+      root.position.y = Math.abs(Math.cos(w)) * 1.3; // 걸을 때 몸이 살짝 오르내림
+    },
+  };
 }

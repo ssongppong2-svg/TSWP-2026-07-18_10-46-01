@@ -1,10 +1,10 @@
-// 맵 랜드마크 모형: 칸(충돌) 위에 덮어씌우는 큰 장식 — 원자로 노심 · 화물 셔틀 · 거대한 알
+// 맵 랜드마크 모형: 칸(충돌) 위에 덮어씌우는 큰 장식 — 원자로 노심 · 화물 셔틀 · 거대한 소화전
 //   충돌은 맵 글자 그대로 (원자로 = 천장까지 닿는 벽 기둥 '#', 셔틀 = 2.2 m 큰 상자 'C')이고, 모형은 그 둘레를 감쌈
-//   decor.landmarks: [{ type: 'reactor' | 'shuttle' | 'egg', r0, r1, c0, c1, dir? }]
+//   decor.landmarks: [{ type: 'reactor' | 'shuttle' | 'hydrant', r0, r1, c0, c1, dir? }]
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
-import { ROOF, WALL } from '../sim/map.js';
+import { ROOF } from '../sim/map.js';
 
 const STEEL = () => new THREE.MeshStandardMaterial({ color: '#4a525c', roughness: 0.42, metalness: 0.75 });
 const DARK = () => new THREE.MeshStandardMaterial({ color: '#23282f', roughness: 0.5, metalness: 0.7 });
@@ -189,74 +189,71 @@ function shuttle(map, q) {
   return g;
 }
 
-// 거대한 알: 얼룩무늬 알(위가 조금 뾰족) + 밑동을 받친 가지 고리·잔가지·깃털 (충돌은 벽 기둥)
-function speckleTexture() {
+// 거대한 소화전: 빨간 몸통(팔각 기둥 모서리를 덮는 원기둥) · 아래 받침 테·볼트 · 옆 배출구 마개 2개 · 둥근 머리 · 꼭대기 너트
+//   충돌은 2×2 칸 벽 기둥(2층 벽까지 7.2 m) — 모형 높이도 그에 맞춤
+function hydrant(map, q) {
+  const g = new THREE.Group();
+  g.position.set(map.originX + ((q.c0 + q.c1 + 1) / 2) * CELL, 0, map.originZ + ((q.r0 + q.r1 + 1) / 2) * CELL);
+  const half = ((q.c1 - q.c0 + 1) * CELL) / 2;
+  const R = half * Math.SQRT2 + 0.06; // 기둥 모서리를 덮는 반지름
+  const paint = new THREE.MeshStandardMaterial({ map: chippedPaint('#c8221c', 41), roughness: 0.5, metalness: 0.25 });
+  const dark = new THREE.MeshStandardMaterial({ color: '#5a1410', roughness: 0.6, metalness: 0.3 });
+  const steel = new THREE.MeshStandardMaterial({ color: '#8a9096', roughness: 0.35, metalness: 0.8 });
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  add(new THREE.CylinderGeometry(R + 0.45, R + 0.6, 0.5, 40), dark, 0, 0.25, 0); // 받침 테
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    add(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 8), steel, Math.cos(a) * (R + 0.3), 0.58, Math.sin(a) * (R + 0.3));
+  }
+  add(new THREE.CylinderGeometry(R, R + 0.08, 4.7, 40), paint, 0, 0.5 + 2.35, 0); // 몸통
+  add(new THREE.CylinderGeometry(R + 0.22, R + 0.22, 0.35, 40), paint, 0, 5.2, 0); // 위 테
+  add(new THREE.SphereGeometry(R * 0.92, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), paint, 0, 5.35, 0); // 둥근 머리
+  add(new THREE.CylinderGeometry(0.55, 0.75, 0.55, 5), steel, 0, 5.35 + R * 0.92 + 0.12, 0); // 꼭대기 너트 (오각형)
+  // 옆 배출구 2개 (서로 반대쪽) + 사슬 고리
+  for (const s of [-1, 1]) {
+    add(new THREE.CylinderGeometry(0.75, 0.85, 0.9, 24), paint, s * (R + 0.35), 3.4, 0, 0, 0, Math.PI / 2);
+    add(new THREE.CylinderGeometry(0.8, 0.8, 0.28, 6), steel, s * (R + 0.85), 3.4, 0, 0, 0, Math.PI / 2);
+  }
+  // 앞쪽 큰 배출구
+  add(new THREE.CylinderGeometry(1.0, 1.1, 0.9, 24), paint, 0, 2.8, R + 0.35, Math.PI / 2, 0, 0);
+  add(new THREE.CylinderGeometry(1.05, 1.05, 0.3, 6), steel, 0, 2.8, R + 0.85, Math.PI / 2, 0, 0);
+  return g;
+}
+
+// 칠이 벗겨진 금속 (바탕색 + 녹 · 긁힘 · 흰 줄무늬 반사띠)
+function chippedPaint(color, seed) {
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = 512;
+  c.height = 512;
   const g = c.getContext('2d');
-  g.fillStyle = '#efe7d6';
+  g.fillStyle = color;
   g.fillRect(0, 0, 512, 512);
-  let s = 41;
+  let s = seed;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 520; i++) {
-    const x = rnd() * 512, y = rnd() * 512, r = 1.5 + rnd() ** 2.2 * 16;
-    g.fillStyle = `rgba(${90 + rnd() * 40},${70 + rnd() * 30},${50 + rnd() * 20},${0.35 + rnd() * 0.5})`;
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = `rgba(${90 + rnd() * 40},${50 + rnd() * 20},${30},${0.3 + rnd() * 0.5})`;
     g.beginPath();
-    g.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * 3, 0, Math.PI * 2);
+    g.ellipse(rnd() * 512, rnd() * 512, 3 + rnd() * 16, 2 + rnd() * 8, rnd() * 3, 0, Math.PI * 2);
     g.fill();
   }
+  g.fillStyle = 'rgba(245,245,245,0.85)';
+  g.fillRect(0, 300, 512, 26);
+  const shade = g.createLinearGradient(0, 0, 0, 512);
+  shade.addColorStop(0, 'rgba(255,255,255,0.08)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.25)');
+  g.fillStyle = shade;
+  g.fillRect(0, 0, 512, 512);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(2, 1);
   return t;
-}
-
-function giantEgg(map, q) {
-  const g = new THREE.Group();
-  g.position.set(map.originX + ((q.c0 + q.c1 + 1) / 2) * CELL, 0, map.originZ + ((q.r0 + q.r1 + 1) / 2) * CELL);
-  const pts = [];
-  for (let i = 0; i <= 40; i++) {
-    const y = -1 + (2 * i) / 40;
-    pts.push(new THREE.Vector2(Math.sqrt(Math.max(0, 1 - y * y)) * (1 - 0.13 * y), y));
-  }
-  const eggGeo = new THREE.LatheGeometry(pts, 56);
-  eggGeo.scale(3.15, 4.2, 3.15);
-  eggGeo.translate(0, 3.3, 0);
-  const egg = new THREE.Mesh(eggGeo, new THREE.MeshStandardMaterial({ map: speckleTexture(), roughness: 0.55, metalness: 0 }));
-  egg.castShadow = egg.receiveShadow = true;
-  g.add(egg);
-  const bark = new THREE.MeshStandardMaterial({ color: '#6e5034', roughness: 0.95 });
-  const barkLight = new THREE.MeshStandardMaterial({ color: '#8d6a46', roughness: 0.95 });
-  // 밑동 가지 고리 두 겹 (기둥 모서리를 가림)
-  for (const [y, R, t, m] of [[0.45, 3.05, 0.48, bark], [1.15, 2.95, 0.4, barkLight]]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(R, t, 10, 40), m);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = y;
-    ring.castShadow = ring.receiveShadow = true;
-    g.add(ring);
-  }
-  // 엇갈린 잔가지 · 꽂힌 깃털
-  let s = 77;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 22; i++) {
-    const a = (i / 22) * Math.PI * 2 + rnd() * 0.2;
-    const len = 1.6 + rnd() * 1.6;
-    const twig = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, len, 6), rnd() < 0.5 ? bark : barkLight);
-    twig.position.set(Math.sin(a) * 3.35, 0.5 + rnd() * 0.9, Math.cos(a) * 3.35);
-    twig.rotation.set(rnd() * 0.6 - 0.3, a, Math.PI / 2 - 0.4 + rnd() * 0.8);
-    twig.castShadow = true;
-    g.add(twig);
-  }
-  const featherMat = new THREE.MeshStandardMaterial({ color: '#e9e4d8', roughness: 0.8, side: THREE.DoubleSide });
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 + 0.4;
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.2), featherMat);
-    f.position.set(Math.sin(a) * 3.3, 1.6, Math.cos(a) * 3.3);
-    f.rotation.set(0.3, a, 0.25 * (i % 2 ? 1 : -1));
-    g.add(f);
-  }
-  return g;
 }
 
 // 같은 재질끼리 한 덩어리로 합침 (부품 수십 개 → 그리기 몇 번) · 움직이지 않는 모형에만
@@ -294,7 +291,7 @@ export function buildLandmarks(map) {
   group.name = 'landmarks';
   const ticks = [];
   for (const q of map.def.decor?.landmarks ?? []) {
-    const raw = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : q.type === 'egg' ? giantEgg(map, q) : null;
+    const raw = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : q.type === 'hydrant' ? hydrant(map, q) : null;
     if (!raw) continue;
     const m = bakeGroup(raw);
     group.add(m);
@@ -310,48 +307,134 @@ export function landmarkCells(map) {
   return (c, r) => list.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1);
 }
 
-// 둥지 가지 벽 위: 마구 얹힌 가지 (각진 벽 윗면을 들쭉날쭉하게 — 바닥 쪽으로 조금 삐져나옴)
-export function buildNestTwigs(map) {
+// 바닥 무늬 (decor.floorPaint): 횡단보도 흰 띠 · 인도 보도블록 · 맨홀 뚜껑 · 바닥에 떨어진 거인의 휴대폰 화면
+//   바닥 바로 위 얇은 판 (충돌 없음) · 같은 종류끼리 한 덩어리
+export function buildFloorPaint(map) {
   const group = new THREE.Group();
-  group.name = 'nestTwigs';
-  const spots = [];
-  let s = 913;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  const open = (c, r) => map.inBounds(c, r) && map.walkable(c, r);
-  for (let r = 0; r < map.rows; r++) {
-    for (let c = 0; c < map.cols; c++) {
-      if (map.charAt(c, r) !== '#' || !' .'.includes(map.upperAt(c, r))) continue;
-      const roofed = map.roofs.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1);
-      if (roofed) continue;
-      const toward = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dc, dr]) => open(c + dc, r + dr));
-      if (!toward.length) continue;
-      const cx = map.cellX(c), cz = map.cellZ(r);
-      for (let k = 0; k < 3; k++) {
-        const [dc, dr] = toward[k % toward.length];
-        const len = 1.6 + rnd() * 1.8;
-        const out = (rnd() * 0.9 - 0.2) * CELL * 0.5; // 바닥 쪽으로 삐져나옴
-        spots.push({
-          x: cx + dc * out + (rnd() - 0.5) * 1.2, z: cz + dr * out + (rnd() - 0.5) * 1.2,
-          y: WALL + 0.08 + rnd() * 0.25, len, rad: 0.07 + rnd() * 0.09,
-          yaw: rnd() * Math.PI, tilt: (rnd() - 0.5) * 0.5, dark: rnd() < 0.5,
-        });
-      }
+  group.name = 'floorPaint';
+  const geos = { crosswalk: [], sidewalk: [], manhole: [], phone: [] };
+  const rect = (q, y) => {
+    const x0 = map.originX + q.c0 * CELL, x1 = map.originX + (q.c1 + 1) * CELL;
+    const z0 = map.originZ + q.r0 * CELL, z1 = map.originZ + (q.r1 + 1) * CELL;
+    const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2).translate((x0 + x1) / 2, y, (z0 + z1) / 2);
+    // 세계 좌표로 UV (무늬 크기가 판 크기와 상관없이 같게): 4 m = 1
+    const uv = g.attributes.uv, pos = g.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 4, -pos.getZ(i) / 4);
+    return g;
+  };
+  for (const q of map.def.decor?.floorPaint ?? []) {
+    if (q.kind === 'crosswalk') geos.crosswalk.push(rect(q, 0.018));
+    else if (q.kind === 'sidewalk') geos.sidewalk.push(rect(q, 0.012));
+    else if (q.kind === 'manhole') geos.manhole.push(new THREE.CircleGeometry(2.6, 40).rotateX(-Math.PI / 2).translate(map.cellX(q.c), 0.022, map.cellZ(q.r)));
+    else if (q.kind === 'phone') {
+      const g = rect(q, 0.025);
+      const uv = g.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, i % 2, i < 2 ? 1 : 0); // 화면 한 장
+      geos.phone.push(g);
     }
   }
-  const geo = new THREE.CylinderGeometry(1, 1.15, 1, 6);
-  geo.rotateZ(Math.PI / 2); // 눕힌 가지 (길이 = x)
-  const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
-  for (const dark of [true, false]) {
-    const list = spots.filter((p) => p.dark === dark);
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: dark ? '#5a412a' : '#86643f', roughness: 0.95, flatShading: true }), list.length);
-    list.forEach((p, i) => {
-      q.setFromEuler(e.set(0, p.yaw, p.tilt));
-      M.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(p.len, p.rad, p.rad));
-      mesh.setMatrixAt(i, M);
-    });
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
+  const decal = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 };
+  const mats = {
+    crosswalk: () => new THREE.MeshStandardMaterial({ map: paintTexture('crosswalk'), roughness: 0.8, ...decal }),
+    sidewalk: () => new THREE.MeshStandardMaterial({ map: paintTexture('sidewalk'), roughness: 0.9, ...decal }),
+    manhole: () => new THREE.MeshStandardMaterial({ map: paintTexture('manhole'), roughness: 0.45, metalness: 0.6, ...decal }),
+    phone: () => new THREE.MeshStandardMaterial({ map: paintTexture('phone'), emissiveMap: paintTexture('phone'), emissive: '#ffffff', emissiveIntensity: 0.8, roughness: 0.15, ...decal }),
+  };
+  for (const [k, list] of Object.entries(geos)) {
+    if (!list.length) continue;
+    const m = new THREE.Mesh(mergeGeometries(list), mats[k]());
+    m.receiveShadow = true;
+    m.renderOrder = k === 'sidewalk' ? 1 : 2;
+    group.add(m);
   }
   return group;
+}
+
+function paintTexture(kind) {
+  const c = document.createElement('canvas');
+  const S = kind === 'phone' ? 512 : 256;
+  c.width = S;
+  c.height = kind === 'phone' ? 256 : S;
+  const g = c.getContext('2d');
+  let s = { crosswalk: 3, sidewalk: 5, manhole: 7, phone: 9 }[kind];
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  if (kind === 'crosswalk') {
+    // 4 m마다 흰 띠 (가운데 2 m) · 닳은 자국
+    g.fillStyle = 'rgba(236,236,228,0.92)';
+    g.fillRect(S * 0.25, 0, S * 0.5, S);
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 160; i++) {
+      g.fillStyle = `rgba(0,0,0,${0.3 + rnd() * 0.6})`;
+      g.beginPath();
+      g.ellipse(S * 0.25 + rnd() * S * 0.5, rnd() * S, 2 + rnd() * 10, 1 + rnd() * 5, rnd() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else if (kind === 'sidewalk') {
+    // 4 m 보도블록 두 장 (밝은 회색 · 이음매 · 얼룩)
+    g.fillStyle = 'rgba(176,172,164,0.96)';
+    g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 900; i++) {
+      const v = 120 + rnd() * 90;
+      g.fillStyle = `rgba(${v},${v},${v - 6},0.35)`;
+      g.fillRect(rnd() * S, rnd() * S, 2, 2);
+    }
+    g.fillStyle = 'rgba(70,68,64,0.9)';
+    g.fillRect(0, 0, S, 4);
+    g.fillRect(0, 0, 4, S);
+    g.fillRect(0, S / 2, S, 3);
+  } else if (kind === 'manhole') {
+    const R = S / 2;
+    g.fillStyle = '#3a3c40';
+    g.beginPath();
+    g.arc(R, R, R - 2, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#25272a';
+    g.lineWidth = 10;
+    g.stroke();
+    g.strokeStyle = 'rgba(120,124,130,0.8)';
+    g.lineWidth = 4;
+    for (let r = 30; r < R - 10; r += 22) {
+      g.beginPath();
+      g.arc(R, R, r, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(200,204,210,0.85)';
+    g.font = '800 26px "Rajdhani", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('거인시 하수도', R, R + 9);
+  } else {
+    // 휴대폰 화면: 검은 테두리 · 밝은 잠금 화면 · 시계 · 알림
+    g.fillStyle = '#0c0e12';
+    g.fillRect(0, 0, 512, 256);
+    const grd = g.createLinearGradient(0, 0, 512, 256);
+    grd.addColorStop(0, '#3a6ad8');
+    grd.addColorStop(1, '#8a4ad8');
+    g.fillStyle = grd;
+    g.fillRect(18, 18, 476, 220);
+    g.fillStyle = '#ffffff';
+    g.font = '700 70px "Rajdhani", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('12:07', 256, 110);
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    roundRectPath(g, 120, 140, 272, 70, 14);
+    g.fill();
+    g.fillStyle = '#20242c';
+    g.font = '700 22px "Pretendard", "Noto Sans KR", sans-serif';
+    g.fillText('알림 · 발밑에 작은 요원이 있어요', 256, 182);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+function roundRectPath(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
 }

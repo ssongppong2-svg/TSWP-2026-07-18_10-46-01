@@ -131,7 +131,8 @@ function buildDoorFrames(map, q, shade, inner = null) {
 
 // map: GameMap, mats: { wall, wallTop, ceil, slabTop, grate, edge, edgeSteel, rail, roofTop, tread, nosing }
 // inner(c, r): 실내 칸 — 그 칸에서 보이는 벽 면은 실내 벽 재질(mats.inner)로
-export function buildStructure(map, mats, { museum = false, inner = null } = {}) {
+// zoneOf(c, r): 벽 재질 구역 이름 — 그 벽 칸의 옆면은 mats['z_' + 이름] 재질로 (거대한 세상: 운동화 천·도시락·연석)
+export function buildStructure(map, mats, { museum = false, inner = null, zoneOf = null } = {}) {
   const group = new THREE.Group();
   group.name = 'structure';
   const shade = shadeFn(map, museum);
@@ -178,7 +179,8 @@ export function buildStructure(map, mats, { museum = false, inner = null } = {})
           for (const [ya, yb] of vis) {
             let name, uvv;
             if (isWall || kind === KIND.roof) {
-              name = cladding && inRoof(c, r) && !inRoof(nc, nr) ? 'clad' : mats.inner && inner?.(nc, nr) ? 'inner' : 'wall';
+              const zone = zoneOf?.(c, r);
+              name = zone && mats[`z_${zone}`] ? `z_${zone}` : cladding && inRoof(c, r) && !inRoof(nc, nr) ? 'clad' : mats.inner && inner?.(nc, nr) ? 'inner' : 'wall';
               // 벽 무늬 높이: 2층 바닥이 보이는 쪽은 1층·2층을 따로, 2층 없는 높은 벽은 한 장을 늘여서
               if (viewerUp) uvv = (y) => (y0 >= STORY - SLAB - EPS ? (y - STORY) / 4.8 : y / 4.8);
               else if (tallWall) uvv = (y) => y / ROOF;
@@ -223,7 +225,7 @@ export function buildStructure(map, mats, { museum = false, inner = null } = {})
   buildDoorFrames(map, q, shade, mats.inner ? inner : null);
 
   // 재질별 메쉬
-  const order = ['wall', 'inner', 'clad', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip'];
+  const order = ['wall', 'inner', 'clad', 'wallTop', 'ceil', 'slabTop', 'grate', 'grateUnder', 'edge', 'edgeSteel', 'roofTop', 'tread', 'nosing', 'chute', 'chuteLip', ...Object.keys(Q).filter((n) => n.startsWith('z_'))];
   const alias = { grateUnder: 'grate' };
   for (const name of order) {
     const b = Q[name];
