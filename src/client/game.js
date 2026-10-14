@@ -21,7 +21,7 @@ import { Match } from '../sim/match.js';
 import { Hud } from '../ui/hud.js';
 import { Shop } from '../ui/shop.js';
 import { LockpickUI } from '../ui/lockpick-ui.js';
-import { AgentView } from './agent-view.js';
+import { AgentView, updateRevealTime } from './agent-view.js';
 import { Effects } from './effects.js';
 import { COMMANDS, DOOR_ACTIONS, Input, PlayerController } from './input.js';
 import { ViewModel } from './viewmodel.js';
@@ -926,8 +926,12 @@ export class GameClient {
     AgentView.eye.copy(this.stage.camera.position);
     // 참가자 화면: 다른 요원이 끌려가는 정도는 이 화면에서 계산 (방장 위치를 따라 움직이므로)
     if (m.holes.length && this.clientSync) for (const x of m.agents) if (x !== this.player && !x.absorbed) x.pulled = pullAmount(x.pos, m.holes, m.time);
+    updateRevealTime(time);
     for (const v of this.views.values()) {
       v.update(dt, alpha, time);
+      // 표시된 적(드론·카메라·경보·문 밑 카메라·무게 감지기 등): 윤곽선이 우리 팀 모두에게 벽 너머로 보임
+      const ag = v.agent;
+      v.setRevealed?.(ag.alive && !ag.absorbed && ag.team !== this.team && ag.revealedUntil > m.time);
       // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임) · 블랙홀에 빨려 들면 사라짐
       v.root.visible = !v.agent.absorbed && !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView && !this.camViewing);
     }

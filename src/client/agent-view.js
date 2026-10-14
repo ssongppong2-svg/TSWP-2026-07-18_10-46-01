@@ -1450,6 +1450,51 @@ function skinGeometry(team, level, builds) {
   return out;
 }
 
+// 표시된 적의 윤곽선: 벽 너머로도 보이는 붉은 실루엣 (가장자리가 밝아 윤곽선처럼) — 같은 팀 모두에게
+let revealMat = null;
+function revealMaterial() {
+  if (revealMat) return revealMat;
+  revealMat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color('#ff4655') }, uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      #include <common>
+      #include <skinning_pars_vertex>
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        #include <skinbase_vertex>
+        #include <begin_vertex>
+        #include <beginnormal_vertex>
+        #include <skinnormal_vertex>
+        #include <skinning_vertex>
+        vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+        vN = normalize(normalMatrix * objectNormal);
+        vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uTime;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        float rim = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+        float edge = smoothstep(0.45, 0.95, rim);
+        float pulse = 0.85 + 0.15 * sin(uTime * 6.0);
+        gl_FragColor = vec4(uColor * (0.5 + edge * 1.6) * pulse, (0.12 + edge * 0.78) * pulse);
+      }`,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+  return revealMat;
+}
+export function updateRevealTime(t) {
+  if (revealMat) revealMat.uniforms.uTime.value = t;
+}
+
 export class AgentView {
   // 카메라 위치 (가까운 요원만 정밀 모델로 그림) — 게임이 매 프레임 갱신
   static eye = new THREE.Vector3(0, 1.6, 0);
@@ -1628,6 +1673,26 @@ export class AgentView {
       });
     });
     this.far = false;
+    // 표시된 적 윤곽선 (단순 모형을 같은 뼈대에 묶어 맨 위에 그림)
+    this.revealMeshes = Object.entries(skinGeometry(this.team, 0, this.builds)).map(([cls, geo]) => {
+      const m = new THREE.SkinnedMesh(geo, revealMaterial());
+      m.name = `reveal:${cls}`;
+      m.bind(this.skeleton, IDENTITY);
+      m.boundingSphere = new THREE.Sphere(new V3(0, 0.9, 0), 1.7);
+      m.frustumCulled = false;
+      m.renderOrder = 25;
+      m.visible = false;
+      this.root.add(m);
+      return m;
+    });
+    this.revealed = false;
+  }
+
+  // 표시된 적: 윤곽선이 벽 너머로도 보임
+  setRevealed(on) {
+    if (on === this.revealed) return;
+    this.revealed = on;
+    for (const m of this.revealMeshes) m.visible = on;
   }
 
   setWeapon(id) {
@@ -1669,6 +1734,11 @@ export class AgentView {
         if (geos[cls]) m.geometry = geos[cls];
       }
     });
+    const simple = skinGeometry(this.team, 0, this.builds);
+    for (const m of this.revealMeshes ?? []) {
+      const cls = m.name.slice(7);
+      if (simple[cls]) m.geometry = simple[cls];
+    }
     this.weaponShown = null;
   }
 
