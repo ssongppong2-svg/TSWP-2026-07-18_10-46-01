@@ -6,6 +6,7 @@ import { KIND, ROOF, SLAB } from '../sim/map.js';
 // 천장 조명: 지붕·2층 바닥판 아래 천장마다 등을 단다 (실제 광원이 아니라 빛나는 면 + 바닥의 은은한 빛 웅덩이).
 //   과학관: 천장에 매립한 사각 조명판 (3칸마다)
 //   공장:   높은 지붕 아래는 매달린 고천장 등, 낮은 2층 바닥판 아래는 형광등 막대
+//   우주선: 천장에 붙은 긴 띠 조명 (차가운 흰빛 + 양끝 푸른 표시등)
 // 실제 점광원은 벽 등(addLamps)이 맡고, 이것은 실내가 "불 켜진 건물"로 보이게 하는 장식이다.
 
 const PROP = new Set([KIND.crate, KIND.bigCrate, KIND.barrier, KIND.rail]);
@@ -37,10 +38,10 @@ function poolTexture() {
   return t;
 }
 
-export function buildCeilingFixtures(map, { museum = false, skip = null } = {}) {
+export function buildCeilingFixtures(map, { museum = false, ship = false, skip = null } = {}) {
   const group = new THREE.Group();
   group.name = 'ceilingFixtures';
-  const glow = [], frame = [], pools = [];
+  const glow = [], frame = [], pools = [], accent = [];
   const M = new THREE.Matrix4();
   const at = (geo, x, y, z, rx = 0) => {
     M.makeRotationX(rx).setPosition(x, y, z);
@@ -55,10 +56,17 @@ export function buildCeilingFixtures(map, { museum = false, skip = null } = {}) 
         const [y, kind] = ceil;
         const high = kind === KIND.roof && y - s > 4.5;
         // 등 간격: 매립 조명판·고천장 등은 3칸마다, 낮은 형광등은 2칸마다 (칸 줄이 엇갈리게)
-        const step = museum || high ? 3 : 2;
+        const step = museum || (high && !ship) ? 3 : 2;
         if ((c + (s > 1 ? 1 : 0)) % step !== 1 || r % step !== 1) continue;
         const x = map.cellX(c), z = map.cellZ(r);
-        if (museum) {
+        if (ship) {
+          // 우주선 띠 조명: 천장에 붙은 긴 판 (높은 천장은 두 줄)
+          const len = high ? 3.4 : 1.7;
+          frame.push(at(new THREE.BoxGeometry(0.5, 0.08, len + 0.2), x, y - 0.04, z));
+          glow.push(at(new THREE.BoxGeometry(0.3, 0.02, len), x, y - 0.09, z));
+          for (const e of [-1, 1]) accent.push(at(new THREE.BoxGeometry(0.42, 0.02, 0.06), x, y - 0.09, z + e * (len / 2 + 0.04)));
+          pools.push({ x, y: s + 0.03, z, size: high ? 7 : 5, k: high ? 0.13 : 0.12 });
+        } else if (museum) {
           frame.push(at(new THREE.BoxGeometry(1.5, 0.04, 1.5), x, y - 0.02, z));
           glow.push(at(new THREE.PlaneGeometry(1.32, 1.32), x, y - 0.045, z, Math.PI / 2));
           pools.push({ x, y: s + 0.03, z, size: 6.5, k: 0.1 });
@@ -107,15 +115,20 @@ export function buildCeilingFixtures(map, { museum = false, skip = null } = {}) 
     }
   }
   if (frame.length) {
-    const m = new THREE.Mesh(mergeGeometries(frame.map((g) => (g.index ? g.toNonIndexed() : g))), new THREE.MeshStandardMaterial({ color: museum ? '#d7d2c8' : '#2a2d31', roughness: 0.55, metalness: museum ? 0.1 : 0.6, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(mergeGeometries(frame.map((g) => (g.index ? g.toNonIndexed() : g))), new THREE.MeshStandardMaterial({ color: museum ? '#d7d2c8' : ship ? '#3a414b' : '#2a2d31', roughness: 0.55, metalness: museum ? 0.1 : 0.6, side: THREE.DoubleSide }));
     group.add(m);
   }
   if (glow.length) {
     const m = new THREE.Mesh(
       mergeGeometries(glow.map((g) => (g.index ? g.toNonIndexed() : g))),
-      new THREE.MeshBasicMaterial({ color: museum ? '#fff6e6' : '#f4f1e6', side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ color: ship ? '#eef6ff' : museum ? '#fff6e6' : '#f4f1e6', side: THREE.DoubleSide }),
     );
     m.name = 'ceilingGlow';
+    group.add(m);
+  }
+  if (accent.length) {
+    const m = new THREE.Mesh(mergeGeometries(accent.map((g) => (g.index ? g.toNonIndexed() : g))), new THREE.MeshBasicMaterial({ color: '#4fd8ff', toneMapped: false }));
+    m.name = 'ceilingAccent';
     group.add(m);
   }
   if (pools.length) {
@@ -129,7 +142,7 @@ export function buildCeilingFixtures(map, { museum = false, skip = null } = {}) 
     });
     const m = new THREE.Mesh(
       mergeGeometries(geos),
-      new THREE.MeshBasicMaterial({ map: poolTexture(), color: museum ? '#fff1d8' : '#ffe7c4', vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3 }),
+      new THREE.MeshBasicMaterial({ map: poolTexture(), color: ship ? '#dcecff' : museum ? '#fff1d8' : '#ffe7c4', vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3 }),
     );
     m.name = 'ceilingPools';
     m.renderOrder = 1;

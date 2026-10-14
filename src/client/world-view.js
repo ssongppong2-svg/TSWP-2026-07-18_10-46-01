@@ -10,6 +10,8 @@ import { coverHeights, puddleRoughness } from './weather.js';
 import { buildStructure, shadeFn } from './structure.js';
 import { themeTextures } from './theme-textures.js';
 import { buildThemeBackdrop } from './theme-backdrop.js';
+import { buildZeroGDecor } from './zero-g-view.js';
+import { buildLandmarks, landmarkCells } from './landmarks.js';
 
 // 새 맵 테마 (달 기지 · 우주 화물선 · 거대한 새의 둥지): 표면 색·거칠기와 소품 모양
 //   (질감은 theme-textures.js, 하늘·원경은 theme-backdrop.js)
@@ -135,9 +137,11 @@ export function buildWorld(map, baseTex) {
   group.add(buildStructure(map, mats, { museum, inner: indoor }));
   // 천장 등 (아트리움 광천장 자리는 따로 꾸밈)
   const ac = map.def.decor?.atriumCeiling;
-  if (style?.props !== false) group.add(buildCeilingFixtures(map, { museum, skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
+  //   달 기지 모듈(타일 천장)은 매립 조명판, 우주선은 띠 조명
+  if (style?.props !== false) group.add(buildCeilingFixtures(map, { museum: museum || style?.ceil === 'tile', ship: map.def.theme === 'ship', skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
   // 벽에 붙은 소품 (배관·배전함·환풍구·소화기·표지 / 과학관: 소화전함·설명판·안내 화면·비상구) — 둥지에는 없음
-  if (style?.props !== false) group.add(buildWallProps(map, { museum }));
+  const inLandmark = landmarkCells(map);
+  if (style?.props !== false) group.add(buildWallProps(map, { museum, skip: inLandmark }));
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
   //   연구동 별관(decor.interior 'lab'): 지붕 아래 상자 칸은 방에 맞는 가구로 (실험대·흄 후드·서버 랙·책상·선반·데스크)
@@ -162,7 +166,7 @@ export function buildWorld(map, baseTex) {
   const theme = style;
   for (const [kind, style] of Object.entries(kinds)) {
     // 1층·2층 바닥 위의 상자 (map.props: 칸·높이)
-    const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`)).map(({ c, r, y }) => [c, r, y]);
+    const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`) && !inLandmark(p.c, p.r)).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
     // 둥지: 큰 상자 → 커다란 알 · 작은 상자 → 잘린 가지 토막 (부딪히는 모양은 그대로 상자)
@@ -207,6 +211,14 @@ export function buildWorld(map, baseTex) {
   // 맵 밖 원경 (완전한 실내 맵은 밖이 보이지 않으므로 만들지 않음) · 새 테마는 별·지구·행성·거대한 새
   if (style) group.add(buildThemeBackdrop(map, map.def.theme));
   else if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
+  // 무중력 구역(경계 선·입구 표지·떠도는 화물·먼지) · 랜드마크(원자로·셔틀): 움직이는 장식은 전시물 tick에 이어 붙임
+  const extras = [map.zeroG?.length ? buildZeroGDecor(map) : null, map.def.decor?.landmarks ? buildLandmarks(map) : null];
+  for (const x of extras) {
+    if (!x) continue;
+    group.add(x);
+    const prev = group.userData.tick, own = x.userData.tick;
+    if (own) group.userData.tick = prev ? (t) => (prev(t), own(t)) : own;
+  }
   group.userData.lamps = lamps;
   return group;
 }

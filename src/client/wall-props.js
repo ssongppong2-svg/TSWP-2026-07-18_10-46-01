@@ -143,7 +143,7 @@ function signPlane(i, w, h) {
   return g;
 }
 
-export function buildWallProps(map, { museum = false } = {}) {
+export function buildWallProps(map, { museum = false, skip = null } = {}) {
   const group = new THREE.Group();
   group.name = 'wallProps';
   const solid = [], signs = [], lit = [];
@@ -162,7 +162,7 @@ export function buildWallProps(map, { museum = false } = {}) {
       for (const s of map.surfaces(c, r)) {
         DIRS.forEach(([dc, dr], k) => {
           const nc = c + dc, nr = r + dr;
-          if (!map.inBounds(nc, nr) || !covers(map, nc, nr, s + 0.2, s + 2.2)) return;
+          if (!map.inBounds(nc, nr) || !covers(map, nc, nr, s + 0.2, s + 2.2) || skip?.(nc, nr)) return; // skip: 랜드마크가 덮는 벽
           const fx = map.cellX(c) + (dc * CELL) / 2, fz = map.cellZ(r) + (dr * CELL) / 2;
           // 축: 벽을 따라 (−dr, dc) · 위 · 방 쪽 (−dc, −dr)
           basis.makeBasis(new THREE.Vector3(-dr, 0, dc), new THREE.Vector3(0, 1, 0), new THREE.Vector3(-dc, 0, -dr)).setPosition(fx, s, fz);

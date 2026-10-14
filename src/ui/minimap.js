@@ -52,6 +52,18 @@ export class TacticalMap {
         b.fillRect(c * S, r * S, S, S);
       }
     }
+    // 무중력 구역: 옅은 하늘색 + 점선 테두리
+    for (const q of map.zeroG ?? []) {
+      const x = q.c0 * S, y = q.r0 * S, w = (q.c1 - q.c0 + 1) * S, h = (q.r1 - q.r0 + 1) * S;
+      b.fillStyle = 'rgba(79,216,255,0.13)';
+      b.fillRect(x, y, w, h);
+      b.save();
+      b.setLineDash([3, 2]);
+      b.strokeStyle = 'rgba(79,216,255,0.85)';
+      b.lineWidth = 1.2;
+      b.strokeRect(x + 0.6, y + 0.6, w - 1.2, h - 1.2);
+      b.restore();
+    }
     // 2층을 볼 때는 1층을 어둡게 눌러 둠
     if (up) {
       b.fillStyle = 'rgba(6,8,10,0.55)';

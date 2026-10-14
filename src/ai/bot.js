@@ -409,6 +409,11 @@ export class BotBrain {
 
     // ── 끼임 방지
     if (wish && !engaging && live) this.unstick(match, a, intent, dt);
+    // 무중력 구역에서 몸이 떴으면(폭발·탄성 발판에 밀림): 아래로 분사해 바닥으로 돌아감 (길찾기는 바닥 위)
+    if (!a.onGround && a.alive && match.map.gravityAt(a.pos.x, a.pos.z) === 0) {
+      intent.crouch = true;
+      intent.jump = false;
+    }
     return intent;
   }
 

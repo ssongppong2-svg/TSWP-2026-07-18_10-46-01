@@ -115,3 +115,25 @@ test('무중력 구역에서는 중력 낙하(1톤 추)를 쓸 수 없음 — �
   assert.ok(Math.abs(z.g - 9.8 / 6) < 1e-9);
   assert.ok(Math.abs(z.fall - Math.sqrt((2 * (z.top - z.y)) / z.g)) < 1e-9);
 });
+
+test('우주 화물선: 가운데 화물칸만 무중력 · 몸이 뜬 봇은 아래로 분사해 바닥으로 돌아옴', async () => {
+  const { attachBots } = await import('../src/ai/bot.js');
+  const m = new Match({ mapId: 'star-freighter', seed: 2 });
+  attachBots(m, 'normal');
+  const map = m.map;
+  assert.equal(map.gravityAt(map.cellX(19), map.cellZ(12)), 0, '화물칸 = 무중력');
+  assert.equal(map.gravityAt(map.cellX(6), map.cellZ(13)), 1, '엔진실 = 보통 중력');
+  for (let i = 0; i < 60 * 12 && m.phase !== 'live'; i++) m.tick(DT);
+  const bot = m.agents.find((a) => a.alive);
+  bot.pos.x = bot.prev.x = map.cellX(19);
+  bot.pos.z = bot.prev.z = map.cellZ(13);
+  bot.pos.y = bot.prev.y = 2.5;
+  bot.vel.x = bot.vel.y = bot.vel.z = 0;
+  bot.onGround = false;
+  let landed = false;
+  for (let i = 0; i < 60 * 3 && !landed; i++) {
+    m.tick(DT);
+    landed = bot.onGround && bot.pos.y < 0.05;
+  }
+  assert.ok(landed, `바닥으로 돌아옴 (y=${bot.pos.y.toFixed(2)})`);
+});

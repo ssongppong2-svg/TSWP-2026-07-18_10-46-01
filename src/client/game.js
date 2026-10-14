@@ -990,6 +990,7 @@ export class GameClient {
     }
     this.liveForces();
     this.forceArrows.update(dt);
+    this.zeroGNotice();
     this.updateDroneSounds();
     {
       const va0 = this.viewAgent ?? this.player;
@@ -1336,6 +1337,17 @@ export class GameClient {
   }
 
   // 계속 작용하는 힘: 상자를 미는 합력 · 블랙홀이 끌어당기는 중력
+  // 무중력 구역에 들어서면 한 번 알려 줌 (다시 들어오면 20초 뒤부터 또)
+  zeroGNotice() {
+    const p = this.player;
+    const inZero = !!p?.alive && this.match.map.gravityAt(p.pos.x, p.pos.z) === 0;
+    if (inZero && !this.inZeroG && this.match.time >= (this.zeroGNoticeAt ?? 0)) {
+      this.hud.banner('무중력 구역 — 무게 0 N', `${K('jump')} 떠오르기 · ${K('crouch')} 내려가기 · 이동 = 바라보는 쪽으로 분사(작용·반작용) · 멈추려면 반대로 분사(관성)`, 'small');
+      this.zeroGNoticeAt = this.match.time + 20;
+    }
+    this.inZeroG = inZero;
+  }
+
   liveForces() {
     const m = this.match;
     if (!this.forceArrows.enabled) return;
