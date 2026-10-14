@@ -9,6 +9,7 @@ import { AMMO, ARMOR, PATCHES, WEAPONS, falloffAt } from './data.js';
 import { hitArmor } from './ballistics.js';
 import { BAT_KEY, DRONE, EFFECT, GEAR, RC, emptyGear, exposure, nextThrowable, placeTarget, remoteEye, remoteHitSphere, stepDrone, stepRC, stepThrown, throwVelocity } from './gear.js';
 import { Gadgets, PULSE } from './gadgets.js';
+import { BLACKHOLE, makeHoles, pullAgent } from './blackhole.js';
 import { CONCEPTS, CONCEPT_BY_ID, PATCH_CONCEPT } from './concepts.js';
 import { CARD_COUNT, PUZZLE_INFO, generatePuzzle, isSolved } from './lockpick.js';
 import { GameMap, STORY } from './map.js';
@@ -93,6 +94,7 @@ export class Match {
     this.shields = [];
     this.throwables = []; // 날아가거나 바닥에 있는 투척물 (gear.js)
     this.drones = []; // 날고 있는 정찰 드론 · 달리는 RC카 (kind: 'drone' | 'rc')
+    this.holes = []; // 폭탄이 터진 뒤 생긴 블랙홀 (라운드 끝 연출)
     this.gadgets = new Gadgets(this); // 경보 센서 · 던지는 카메라 · 심장 박동 센서 · EMP
     this.noises = []; // 최근 소리 (봇의 청각·무게 감지기·무전 보고에 사용)
     this.scans = []; // 작동 중인 무게 감지기
@@ -240,6 +242,7 @@ export class Match {
   // 새 라운드 준비: 모두 되살려 시작 구역에, 살아남았던 요원은 총·방탄 유지, 포스 패치는 다시 충전
   startRound() {
     this.forceWiped = false;
+    this.holes = [];
     this.projectiles = [];
     this.veils = [];
     this.zones = [];
@@ -287,6 +290,8 @@ export class Match {
       a.kickT = 0;
       a.stunT = a.flashT = a.gasT = 0;
       a.alive = true;
+      a.absorbed = false;
+      a.pulled = 0;
       a.hp = PLAYER.maxHp;
       a.deadT = 0;
       a.held = null;
@@ -538,6 +543,7 @@ export class Match {
     this.time += dt;
     if (this.phase === 'ended') {
       this.endT += dt;
+      if (this.holes.length) this.stepHoles(dt);
       this.updateVeils(dt);
       this.updateShields(dt);
       this.updateProjectiles(dt);
@@ -565,7 +571,9 @@ export class Match {
     this.updateZones(dt);
     this.devices.update(dt);
     this.doors.update(dt);
-    for (const a of this.agents) {
+    // 폭탄이 터진 뒤: 모두 블랙홀로 끌려감 (조종·이동 없음)
+    if (this.holes.length) this.stepHoles(dt);
+    else for (const a of this.agents) {
       if (!a.alive) {
         a.deadT += dt;
         stepMovement(a, emptyIntent(a), this.map, dt, false);
@@ -577,7 +585,7 @@ export class Match {
       if (intent.quiz >= 0) this.answerQuiz(a, intent.quiz);
       this.stepAgent(a, intent, dt, live, mobile);
     }
-    this.separateAgents();
+    if (!this.holes.length) this.separateAgents();
     this.op?.update(dt);
     this.updateConcepts();
     this.updateVeils(dt);
@@ -1028,7 +1036,10 @@ export class Match {
     this.doors.update(dt);
     const a = this.localAgent;
     const myDrone = a?.drone ? this.drones.find((d) => d.id === a.drone) : null;
-    if (a?.alive && myDrone && this.phase !== 'ended') {
+    if (this.holes.length) {
+      // 블랙홀: 내 요원은 이 화면에서 미리 끌려감 (다른 요원은 방장 위치를 따름)
+      if (a && !a.absorbed && pullAgent(a, this.holes, this.time, dt)) a.alive = false;
+    } else if (a?.alive && myDrone && this.phase !== 'ended') {
       // 내 드론: 방장 결과를 기다리지 않고 이 화면에서 미리 날림 (몸은 그대로)
       const ctrl = this.controllers.get(a.id);
       const intent = ctrl ? ctrl.getIntent(this, a, dt) : emptyIntent(a);
@@ -2317,10 +2328,29 @@ export class Match {
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       for (const b of this.bombs) if (b.state === 'armed') b.state = 'exploded';
-      this.emit('explode', { bombs: this.bombs.filter((b) => b.state === 'exploded') });
-      return done(TEAMS.FORCE, '제한 시간 종료 — 폭탄 폭발');
+      const exploded = this.bombs.filter((b) => b.state === 'exploded');
+      // 5 대 5: 터진 폭탄마다 거대한 블랙홀 → 맵의 모두를 빨아들임 (결과 화면은 다 빨려 든 뒤)
+      if (this.rounds) this.holes = makeHoles(exploded, this.time);
+      this.emit('explode', { bombs: exploded });
+      const side = done(TEAMS.FORCE, '제한 시간 종료 — 폭탄 폭발');
+      if (this.holes.length && this.phase === 'roundEnd') this.phaseT = Math.max(this.phaseT, BLACKHOLE.time + 2.4);
+      return side;
     }
     return null;
+  }
+
+  // 블랙홀이 모든 요원을 끌어당김 · 지평선을 넘으면 흡수 (처치·사망 기록과 무관)
+  stepHoles(dt) {
+    for (const a of this.agents) {
+      if (a.absorbed) continue;
+      if (a.lockpick) this.cancelLockpick(a, 'end');
+      a.held = null;
+      a.ads = false;
+      if (pullAgent(a, this.holes, this.time, dt)) {
+        a.alive = false;
+        this.emit('absorbed', { agent: a });
+      }
+    }
   }
 
   end(winner, reason) {

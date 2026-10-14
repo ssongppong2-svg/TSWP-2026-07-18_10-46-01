@@ -137,6 +137,9 @@ export const BodycamShader = {
     rain: { value: 0 },
     supp: { value: 0 },
     glitch: { value: 0 },
+    bh0: { value: new THREE.Vector4(0, 0, 0, 0) },
+    bh1: { value: new THREE.Vector4(0, 0, 0, 0) },
+    voidFade: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -144,7 +147,8 @@ export const BodycamShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp, glitch;
+    uniform float time, aspect, distortion, chroma, vignette, grain, damage, pulse, flash, blur, rain, supp, glitch, voidFade;
+    uniform vec4 bh0, bh1;
     varying vec2 vUv;
     float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
     vec2 lens(vec2 uv) {
@@ -181,8 +185,22 @@ export const BodycamShader = {
       rim = smoothstep(r * 0.55, r, dist) * m;
       return -dd / (7.0 * vec2(aspect, 1.0)) * m * 0.9;
     }
+    // 블랙홀 렌즈: 뒤쪽 풍경을 블랙홀 쪽으로 끌어와 그림 (둘레가 부풀어 보이는 고리) · bh = (화면 x, y, 반지름, 세기)
+    vec2 gravLens(vec2 uv, vec4 bh, inout float ring, inout float hole) {
+      if (bh.w <= 0.0) return uv;
+      vec2 d = (uv - bh.xy) * vec2(aspect, 1.0);
+      float r = max(length(d), 1e-4);
+      float R = bh.z;
+      hole = max(hole, bh.w * smoothstep(R * 0.98, R * 0.86, r)); // 지평선 안쪽은 빛이 못 나옴 (반대편이 비쳐 보이지 않게)
+      float bend = bh.w * R * R * 0.42 / max(r, R) * smoothstep(R * 7.0, R * 1.05, r);
+      ring += bh.w * exp(-pow((r - R * 1.55) / (R * 0.16 + 0.002), 2.0));
+      return uv - (d / r) * bend / vec2(aspect, 1.0);
+    }
     void main() {
       vec2 uv = lens(vUv);
+      float ring = 0.0, hole = 0.0;
+      uv = gravLens(uv, bh0, ring, hole);
+      uv = gravLens(uv, bh1, ring, hole);
       // EMP: 바디캠 신호가 튐 — 가로 띠가 옆으로 밀리고 지지직
       if (glitch > 0.001) {
         float band = floor(vUv.y * 36.0) + floor(time * 13.0) * 7.0;
@@ -217,6 +235,10 @@ export const BodycamShader = {
       float g = rand(vUv * vec2(1931.0, 1087.0) + fract(time * 17.0)) - 0.5;
       col += g * grain * (1.0 + damage * 1.5) + g * glitch * 0.055;
       col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))) * vec3(0.85, 0.93, 1.08), glitch * 0.25);
+      // 블랙홀 둘레의 빛 고리 · 빨려 들면 화면이 어둠으로
+      col += vec3(1.0, 0.72, 0.42) * ring * 0.35;
+      col *= 1.0 - hole;
+      col = mix(col, vec3(0.0), clamp(voidFade, 0.0, 1.0));
       // 섬광
       col = mix(col, vec3(1.0, 0.98, 0.94), clamp(flash, 0.0, 1.0));
       gl_FragColor = vec4(col, 1.0);
@@ -464,6 +486,13 @@ export class Stage {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio) * this.renderScale);
     const c = new EffectComposer(this.renderer);
     c.addPass(new RenderPass(this.scene, this.camera));
+    // 블랙홀: 맵 위에 따로 그림 (벽·천장에 가리지 않게 — 건물 안에서 터져도 보임) · 블랙홀끼리는 앞뒤가 맞게
+    this.holeScene ??= new THREE.Scene();
+    this.holePass = new RenderPass(this.holeScene, this.camera);
+    this.holePass.clear = false;
+    this.holePass.clearDepth = true;
+    this.holePass.enabled = this.holeScene.children.some((o) => o.children.length);
+    c.addPass(this.holePass);
     this.overlayPass = new RenderPass(new THREE.Scene(), new THREE.PerspectiveCamera());
     this.overlayPass.clear = false;
     this.overlayPass.clearDepth = true;
@@ -543,7 +572,7 @@ export class Stage {
   }
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
-  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0 } = {}) {
+  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0, holes = [], voidFade = 0 } = {}) {
     const u = this.bodycam.uniforms;
     const on = !!this.settings.bodycam;
     // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
@@ -557,6 +586,13 @@ export class Stage {
     u.blur.value = blur;
     u.supp.value = supp;
     u.glitch.value = glitch;
+    // 블랙홀 렌즈 (화면에 보이는 것 최대 2개)
+    for (const [i, key] of ['bh0', 'bh1'].entries()) {
+      const h = holes[i];
+      if (h) u[key].value.set(h.x, h.y, h.r, h.k);
+      else u[key].value.set(0, 0, 0, 0);
+    }
+    u.voidFade.value = voidFade;
     u.rain.value = on && this.map?.weather === 'rain' ? this.lensWet ?? 1 : 0;
   }
 

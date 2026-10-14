@@ -4,6 +4,7 @@ import { Match } from '../src/sim/match.js';
 import { attachBots } from '../src/ai/bot.js';
 import { BOT_NAMES, DT, ECON, ROUNDS, TEAMS } from '../src/sim/constants.js';
 import { emptyIntent } from '../src/sim/agent.js';
+import { BLACKHOLE } from '../src/sim/blackhole.js';
 import { AMMO, ARMOR, WEAPONS } from '../src/sim/data.js';
 import { TeamDraft } from '../src/sim/draft.js';
 import { createRng } from '../src/core/rng.js';
@@ -330,4 +331,81 @@ test('해체 필수: 포스팀이 모두 쓰러져도 폭탄을 해체하지 못
   assert.equal(m.phase, 'roundEnd');
   assert.equal(m.roundWinner, TEAMS.FORCE);
   assert.equal(m.roundReason, '제한 시간 종료 — 폭탄 폭발');
+});
+
+test('폭탄 폭발 → 블랙홀: 모든 요원(쓰러진 몸 포함)이 끌려가 흡수 · 사망 기록은 그대로 · 결과 화면은 다 빨려 든 뒤 · 다음 라운드엔 되살아남', () => {
+  const m = roundsMatch(14);
+  attachBots(m, 'normal');
+  m.phase = 'live';
+  const victim = m.agents.find((a) => a.team === TEAMS.FORCE);
+  m.kill(victim, null); // 쓰러진 몸도 빨려 듦
+  const deaths = m.agents.map((a) => a.stats.deaths);
+  const absorbed = [];
+  m.events.on('absorbed', (e) => absorbed.push(e.agent.id));
+  m.timeLeft = 0;
+  m.checkEnd();
+  assert.equal(m.roundReason, '제한 시간 종료 — 폭탄 폭발');
+  assert.equal(m.holes.length, 2, '터진 폭탄마다 블랙홀');
+  assert.ok(m.phaseT >= BLACKHOLE.time + 2, '다 빨려 든 뒤에 다음 라운드');
+  const far = m.agents.reduce((best, a) => Math.max(best, Math.min(...m.holes.map((h) => Math.hypot(h.x - a.pos.x, h.z - a.pos.z)))), 0);
+  assert.ok(far > 20, `맵 반대편 요원도 있음 (${far.toFixed(0)} m)`);
+  // 1.5초 뒤: 모두 블랙홀 쪽으로 다가감
+  const d0 = m.agents.map((a) => Math.min(...m.holes.map((h) => Math.hypot(h.x - a.pos.x, h.z - a.pos.z))));
+  for (let k = 0; k < 90; k++) m.tick(1 / 60);
+  const d1 = m.agents.map((a) => Math.min(...m.holes.map((h) => Math.hypot(h.x - a.pos.x, h.z - a.pos.z))));
+  assert.ok(d1.every((d, i) => m.agents[i].absorbed || d < d0[i] - 0.5), '모두 끌려감');
+  for (let k = 0; k < 60 * BLACKHOLE.time; k++) m.tick(1 / 60);
+  assert.ok(m.agents.every((a) => a.absorbed && !a.alive), '모두 흡수');
+  assert.equal(new Set(absorbed).size, m.agents.length);
+  assert.deepEqual(m.agents.map((a) => a.stats.deaths), deaths, '흡수는 사망 기록에 안 들어감');
+  assert.equal(m.phase, 'roundEnd');
+  for (let k = 0; k < 60 * 3; k++) m.tick(1 / 60);
+  assert.equal(m.phase, 'buy');
+  assert.equal(m.holes.length, 0);
+  assert.ok(m.agents.every((a) => a.alive && !a.absorbed), '다음 라운드엔 모두 되살아남');
+});
+
+test('온라인 블랙홀: 참가자 화면에도 같은 자리에 블랙홀 · 내 요원은 미리 끌려가고 모두 흡수 · 다음 라운드에 되살아남', () => {
+  const players = [
+    { key: 'host', name: '방장', team: TEAMS.DEFUSE, load: [] },
+    { key: 'p2', name: '참가자', team: TEAMS.FORCE, load: [] },
+  ];
+  const plan = planMatch(players, { botNames: BOT_NAMES, draft: TeamDraft, rng: createRng(5) });
+  const loadouts = new Map(plan.loadouts);
+  const host = new Match({ seed: 5, roster: rosterFor(plan, 'host'), loadouts, rules: 'rounds' });
+  attachBots(host, 'normal');
+  const client = new Match({ seed: 5, roster: rosterFor(plan, 'p2'), loadouts, rules: 'rounds', client: true });
+  const hs = new HostSync(host);
+  const myId = host.agents.find((a) => a.team === TEAMS.FORCE && a.human)?.id ?? 'force-0';
+  const me = client.agentById(myId);
+  client.localAgent = me;
+  const cs = new ClientSync(client, myId);
+  const rec = new InputRecorder({ getIntent: (mm, a) => emptyIntent(a) });
+  client.setController(me.id, rec);
+  host.setController(myId, new RemoteController(() => rec.latest, (s) => (hs.acks[myId] = s)));
+  host.setController('defuse-0', { getIntent: (mm, a) => emptyIntent(a) });
+  let k = 0;
+  const sync = () => {
+    client.tick(DT);
+    host.tick(DT);
+    if (k % 3 === 0) cs.apply(JSON.parse(JSON.stringify(hs.snapshot())), k * DT);
+    k++;
+  };
+  for (let i = 0; i < 10; i++) sync();
+  host.phase = 'live';
+  host.timeLeft = 0;
+  host.checkEnd();
+  for (let i = 0; i < 10; i++) sync();
+  assert.equal(client.holes.length, 2, '참가자 화면에도 블랙홀 2개');
+  for (const [i, h] of host.holes.entries()) assert.ok(Math.hypot(h.x - client.holes[i].x, h.z - client.holes[i].z) < 0.01, '같은 자리');
+  const start = Math.min(...client.holes.map((h) => Math.hypot(h.x - me.pos.x, h.z - me.pos.z)));
+  for (let i = 0; i < 60; i++) sync();
+  const mid = Math.min(...client.holes.map((h) => Math.hypot(h.x - me.pos.x, h.z - me.pos.z)));
+  assert.ok(me.absorbed || mid < start - 1, `내 요원이 끌려감 (${start.toFixed(1)} → ${mid.toFixed(1)} m)`);
+  for (let i = 0; i < 60 * BLACKHOLE.time; i++) sync();
+  assert.ok(client.agents.every((a) => a.absorbed && !a.alive), '참가자 화면에서도 모두 흡수');
+  for (let i = 0; i < 60 * 4; i++) sync();
+  assert.equal(client.phase, 'buy');
+  assert.equal(client.holes.length, 0);
+  assert.ok(client.agents.every((a) => a.alive && !a.absorbed), '다음 라운드엔 되살아남');
 });

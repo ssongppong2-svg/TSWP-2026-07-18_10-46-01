@@ -1076,6 +1076,26 @@ const SOUNDS = {
     a.tone(o, t, 1.8, { type: 'sine', freq: 55, to: 20, gain: 1 });
     for (let i = 0; i < 6; i++) a.noise(o, t + 0.4 + Math.random() * 1.6, 0.05, { type: 'bandpass', freq: 1500 + Math.random() * 2000, q: 3, gain: 0.2 }); // 떨어지는 파편
   },
+  // 폭탄 폭발 → 블랙홀: 깊게 꺼지는 쿵 → 점점 커지며 높아지는 웅웅·빨려 드는 바람 → 모두 삼키는 순간 '훅' 끊김
+  blackHole(a, t, pos, vol) {
+    const o = a.out(null, 1.0 * vol, 7, 0.9, 0.6);
+    a.noise(o, t, 0.1, { type: 'highpass', freq: 1300, gain: 0.8, attack: 0.002 });
+    a.noise(o, t, 1.4, { type: 'lowpass', freq: 2200, sweepTo: 70, gain: 0.8, attack: 0.004 });
+    a.tone(o, t, 2.6, { type: 'sine', freq: 72, to: 21, gain: 1, attack: 0.004 });
+    a.tone(o, t + 0.35, 4.2, { type: 'sawtooth', freq: 27, to: 64, gain: 0.2, attack: 3.6 });
+    a.tone(o, t + 0.35, 4.2, { type: 'sine', freq: 41, to: 88, gain: 0.5, attack: 3.4, vibrato: 5 });
+    a.noise(o, t + 0.35, 4.2, { type: 'bandpass', freq: 160, sweepTo: 2600, q: 1.1, gain: 0.55, attack: 3.7 });
+    a.noise(o, t + 0.35, 4.2, { type: 'lowpass', freq: 95, gain: 0.7, attack: 2.8, buf: a.brownBuf });
+    const end = t + 4.55;
+    a.tone(o, end, 2.2, { type: 'sine', freq: 95, to: 17, gain: 1, attack: 0.003 });
+    a.noise(o, end, 0.6, { type: 'lowpass', freq: 700, sweepTo: 35, gain: 0.9, attack: 0.003 });
+  },
+  // 내가 빨려 듦: 귀가 꽉 막히는 낮은 '우웅'
+  absorbed(a, t) {
+    const o = a.out(null, 0.7, 1.6, 0.3);
+    a.tone(o, t, 1.4, { type: 'sine', freq: 140, to: 30, gain: 0.8, attack: 0.01 });
+    a.noise(o, t, 0.8, { type: 'lowpass', freq: 500, sweepTo: 40, gain: 0.6, attack: 0.02, buf: a.brownBuf });
+  },
   // ───────── 투척·폭발 장비 ─────────
   // 안전핀 뽑기: 고리 딸깍 + 손잡이 스프링 '팅'
   pinPull(a, t, pos, vol) {

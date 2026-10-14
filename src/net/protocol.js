@@ -9,6 +9,7 @@ import { CONCEPTS } from '../sim/concepts.js';
 import { PROJECTILE } from '../sim/constants.js';
 import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
+import { makeHoles } from '../sim/blackhole.js';
 
 export const PROTOCOL = 10;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
@@ -585,11 +586,20 @@ export class ClientSync {
         const e = this.dec(p[2]) ?? {};
         if (PREDICTED.has(type) && mine(e.agent)) return;
         if (type === 'kill' && e.victim) e.victim.alive = false;
+        // 폭탄 폭발 → 블랙홀 (참가자 화면에서도 같은 자리에 · 내 요원은 미리 끌려감)
+        if (type === 'explode' && m.rounds && !m.op) m.holes = makeHoles((e.bombs ?? []).filter(Boolean), m.time);
+        if (type === 'absorbed' && e.agent) {
+          e.agent.absorbed = true;
+          e.agent.alive = false;
+        }
         if (type === 'roundPrep') {
           // 새 라운드: 남아 있던 총알 궤적 등 지우고, 모두 살아남 (위치는 다음 스냅숏이 맞춰 줌)
           m.projectiles = [];
+          m.holes = [];
           for (const a of m.agents) {
             a.alive = true;
+            a.absorbed = false;
+            a.pulled = 0;
             a.deadT = 0;
             a.lockpick = null;
           }

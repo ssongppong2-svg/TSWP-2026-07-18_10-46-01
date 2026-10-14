@@ -37,6 +37,8 @@ import { DRONE, GEAR, RC } from '../sim/gear.js';
 import { camLimits } from '../sim/gadgets.js';
 import { DeathLog, weaponName } from '../sim/death-report.js';
 import { KILLCAM, KillcamPlayback, KillcamRecorder } from './killcam.js';
+import { BlackHoleView } from './blackhole-view.js';
+import { BLACKHOLE, pullAmount } from '../sim/blackhole.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 import { conceptCardTexture, labelTexture } from './textures.js';
@@ -133,6 +135,7 @@ export class GameClient {
     stage.overlay = this.viewmodel;
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
+    this.holesView = new BlackHoleView(stage, stage.lightRig);
     this.gearView = new GearView(stage.scene, this.match, this.effects, stage.lightRig);
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
@@ -679,8 +682,15 @@ export class GameClient {
     });
     ev.on('explode', () => {
       this.effects.onExplode(this.stage.camera.position);
-      A.play('explosion');
+      if (this.match.holes.length) {
+        // 블랙홀: 킬캠·분석표는 접고 모두가 빨려 드는 장면을 봄
+        this.endKillcam(true);
+        A.play('blackHole');
+      } else A.play('explosion');
       if (this.effects.flash > 0.3) A.play('ring');
+    });
+    ev.on('absorbed', (e) => {
+      if (e.agent === this.player) A.play('absorbed');
     });
     ev.on('timeWarning', (e) => {
       A.play('tick');
@@ -723,6 +733,12 @@ export class GameClient {
     // 새 라운드: 시작 구역에서 다시 (시점도 시작 방향으로)
     ev.on('roundPrep', (e) => {
       this.endKillcam(true);
+      this.absorbedSeen = false;
+      this.voidT = 0;
+      this.holeCam = null;
+      this.holeRoll = 0;
+      this.pendingRoundBanner = null;
+      if (this.roofsHidden) this.setRoofs(true);
       this.controller.syncFrom(this.player);
       this.doorsView.clearDebris();
       this.camYaw = this.player.yaw;
@@ -745,8 +761,13 @@ export class GameClient {
       const theirs = Object.entries(e.score).find(([k]) => k !== this.player.squad)?.[1] ?? 0;
       this.shop.close();
       this.lockpickUI.update(null);
-      A.play(win ? 'roundWin' : 'roundLose');
-      this.hud.roundBanner(`라운드 ${e.round} · ${mine} : ${theirs}`, win ? '라운드 승리' : '라운드 패배', e.halftime ? `${e.reason} · 전반 종료` : e.reason, win ? 'win' : 'lose', 3.6);
+      const show = () => {
+        A.play(win ? 'roundWin' : 'roundLose');
+        this.hud.roundBanner(`라운드 ${e.round} · ${mine} : ${theirs}`, win ? '라운드 승리' : '라운드 패배', e.halftime ? `${e.reason} · 전반 종료` : e.reason, win ? 'win' : 'lose', 3.6);
+      };
+      // 블랙홀이 모두 삼킨 뒤에 결과 (가운데 큰 알림이 장면을 가리지 않게)
+      if (this.match.holes.length) this.pendingRoundBanner = { at: this.match.time + BLACKHOLE.time - 0.2, show };
+      else show();
     });
     ev.on('buy', (e) => isMe(e.agent) && A.play(e.sold ? 'sell' : 'buy'));
     ev.on('buyDenied', (e) => {
@@ -807,7 +828,7 @@ export class GameClient {
         if (this.disposed) return;
         this.input.exitLock();
         this.hooks.onEnd?.(this.result());
-      }, 3200);
+      }, this.match.holes.length ? (BLACKHOLE.time + 2.2) * 1000 : 3200);
     });
   }
 
@@ -915,6 +936,8 @@ export class GameClient {
     AgentView.eye.copy(this.stage.camera.position);
     const kc = this.killcam;
     this.kcMark.visible = !!kc;
+    // 참가자 화면: 다른 요원이 끌려가는 정도는 이 화면에서 계산 (방장 위치를 따라 움직이므로)
+    if (m.holes.length && this.clientSync) for (const x of m.agents) if (x !== this.player && !x.absorbed) x.pulled = pullAmount(x.pos, m.holes, m.time);
     for (const v of this.views.values()) {
       if (kc) {
         // 킬캠: 기록된 모습으로 그림 (상대 눈 안이므로 상대 몸은 숨김)
@@ -930,10 +953,16 @@ export class GameClient {
         continue;
       }
       v.update(dt, alpha, time);
-      // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임)
-      v.root.visible = !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView && !this.camViewing);
+      // 내 몸은 숨김 (드론·문 밑 카메라로 보는 동안에는 앉아 있는 내 몸이 보임) · 블랙홀에 빨려 들면 사라짐
+      v.root.visible = !v.agent.absorbed && !(v.agent.id === this.viewAgent?.id && v.agent.alive && !this.droneView && !this.mirrorView && !this.camViewing);
     }
     this.effects.update(dt, alpha, this.team);
+    this.holesView.sync(m.holes);
+    this.holesView.update(m.time, this.stage.camera, time);
+    if (this.pendingRoundBanner && m.time >= this.pendingRoundBanner.at) {
+      this.pendingRoundBanner.show();
+      this.pendingRoundBanner = null;
+    }
     {
       // 심장 박동 표시는 내 센서 결과만 (관전 중이면 보고 있는 요원)
       const va0 = this.viewAgent ?? this.player;
@@ -995,7 +1024,11 @@ export class GameClient {
     // 제압: 화면 가장자리가 어두워지고 흐려짐 (빠르게 들어오고 천천히 빠짐)
     const suppT = va.alive ? va.suppress ?? 0 : 0;
     this.suppVis = (this.suppVis ?? 0) + (suppT - (this.suppVis ?? 0)) * Math.min(1, dt * (suppT > (this.suppVis ?? 0) ? 14 : 3));
-    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0 });
+    // 블랙홀에 빨려 드는 순간 화면이 잠깐 어둠으로 덮였다가 바깥에서 보는 장면으로
+    this.voidT = Math.max(0, (this.voidT ?? 0) - dt);
+    const vt = this.voidT;
+    const voidFade = vt <= 0 ? 0 : vt > 1.15 ? (1.4 - vt) / 0.25 : Math.min(1, vt / 0.75);
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0, holes: this.holesView.screen, voidFade });
     this.blastDeaf = Math.max(0, (this.blastDeaf ?? 0) - dt * 0.6);
     this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85, this.blastDeaf));
     if (gassed && this.started && !this.paused) {
@@ -1065,6 +1098,8 @@ export class GameClient {
       this.audio.setListener(cam.position, { x: -Math.sin(e.yaw), y: 0, z: -Math.cos(e.yaw) });
       return;
     }
+    if (m.holes.length && (!this.player.alive || this.player.absorbed)) return this.holeCamera(dt);
+    this.holeCam = null;
     let a = this.player;
     if (!a.alive) {
       const mates = m.agents.filter((x) => x.alive && x.team === this.team);
@@ -1201,12 +1236,77 @@ export class GameClient {
     cam.rotation.y = this.camYaw + swayX + this.kickCam.x * shakeScale + (Math.random() - 0.5) * s;
     cam.rotation.x = this.camPitch + swayY + this.kickCam.y * shakeScale + (Math.random() - 0.5) * s;
     cam.rotation.z = this.roll + this.rollKick * shakeScale;
+    // 블랙홀에 끌려가는 중: 시선이 블랙홀로 끌리고, 화면이 돌며 넓어짐
+    const pulled = m.holes.length && a === this.player ? a.pulled ?? 0 : 0;
+    if (pulled > 0) {
+      const h = this.nearestHole(cam.position);
+      const dx = h.x - cam.position.x, dy = h.y - cam.position.y, dz = h.z - cam.position.z;
+      const k = Math.min(1, pulled * 1.5);
+      const yawTo = Math.atan2(-dx, -dz), pitchTo = Math.atan2(dy, Math.hypot(dx, dz));
+      cam.rotation.y += Math.atan2(Math.sin(yawTo - cam.rotation.y), Math.cos(yawTo - cam.rotation.y)) * k;
+      cam.rotation.x += (pitchTo - cam.rotation.x) * k;
+      this.holeRoll = (this.holeRoll ?? 0) + dt * pulled * pulled * 5;
+      cam.rotation.z += this.holeRoll;
+      this.effects.shake = Math.max(this.effects.shake, pulled * 1.3);
+    } else this.holeRoll = 0;
     // 정조준 확대 (부드럽게 당겨짐: 처음과 끝이 느림)
-    const zoom = adsZoomAt(a);
+    const zoom = adsZoomAt(a) * (1 - 0.32 * pulled);
     this.stage.setZoom(zoom);
     const fwd = { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) };
     this.audio.setListener(cam.position, fwd);
     this.audio.setShelter(this.stage.underCover(cam.position));
+  }
+
+  setRoofs(visible) {
+    this.stage.world?.traverse((o) => {
+      if (o.name === 'roofTop' || o.name === 'ceilingFixtures') o.visible = visible;
+    });
+    this.roofsHidden = !visible;
+  }
+
+  nearestHole(p) {
+    let best = this.match.holes[0], bd = Infinity;
+    for (const h of this.match.holes) {
+      const d = Math.hypot(h.x - p.x, h.y - p.y, h.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  // 블랙홀 장면 카메라: 내가 쓰러졌거나 빨려 든 뒤에는 가까운 블랙홀을 천천히 돌며 바라봄 (벽 안으로 들어가지 않게)
+  holeCamera(dt) {
+    const m = this.match;
+    const cam = this.stage.camera;
+    const h = this.nearestHole(this.player.pos);
+    if (this.player.absorbed && !this.absorbedSeen) {
+      this.absorbedSeen = true;
+      this.voidT = 1.4;
+    }
+    // 위에서 내려다보므로 지붕·천장 조명을 걷어 건물 안이 보이게 (다음 라운드에 되돌림)
+    if (!this.roofsHidden) this.setRoofs(false);
+    if (!this.holeCam || this.holeCam.hole !== h) this.holeCam = { hole: h, ang: Math.atan2(cam.position.x - h.x, cam.position.z - h.z), t: 0 };
+    const hc = this.holeCam;
+    hc.t += dt;
+    hc.ang += dt * 0.22;
+    // 블랙홀은 벽 위에 그려지므로 벽 너머에서도 보임 → 원반이 다 보이는 거리에서 천천히 다가감
+    const d = 34 - Math.min(10, hc.t * 2);
+    const dir = { x: Math.sin(hc.ang), y: 0.3, z: Math.cos(hc.ang) };
+    const n = Math.hypot(dir.x, dir.y, dir.z);
+    const c = { x: h.x, y: h.y, z: h.z };
+    cam.position.set(c.x + (dir.x / n) * d, c.y + (dir.y / n) * d, c.z + (dir.z / n) * d);
+    cam.lookAt(c.x, c.y, c.z);
+    const shake = 0.004 + Math.min(1, (m.time - h.t0) / BLACKHOLE.time) * 0.01;
+    cam.rotation.x += (Math.random() - 0.5) * shake;
+    cam.rotation.y += (Math.random() - 0.5) * shake;
+    this.camYaw = cam.rotation.y;
+    this.camPitch = cam.rotation.x;
+    this.viewAgent = this.player;
+    this.droneView = this.mirrorView = this.camViewing = null;
+    this.stage.setZoom(0.86);
+    this.audio.setListener(cam.position, { x: -Math.sin(this.camYaw), y: 0, z: -Math.cos(this.camYaw) });
   }
 
   // 킬캠 진행: 쓰러지고 잠시 뒤 시작 → 끝나면(또는 건너뛰면) 분석표

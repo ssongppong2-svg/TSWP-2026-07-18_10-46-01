@@ -1678,6 +1678,13 @@ export class AgentView {
       for (const m of this.lods[1]) m.visible = far;
     }
     r.rotation.set(0, a.yaw, 0);
+    // 블랙홀에 끌려감: 위아래로 길게 늘어나고 가늘어지며 빙글빙글 (조석력으로 '스파게티'처럼)
+    const pl = a.pulled ?? 0;
+    if (pl > 0.01) {
+      r.scale.set(1 - pl * 0.7, 1 + pl * pl * 2.2, 1 - pl * 0.7);
+      r.rotation.y += time * pl * pl * 9;
+      r.rotation.z = Math.sin(time * 3 + this.agent.id.length) * pl * 0.6;
+    } else if (r.scale.y !== 1) r.scale.set(1, 1, 1);
     if ((a.primary && a.primary !== this.loadout.primary) || (a.secondary && a.secondary !== this.loadout.secondary)) this.refreshLoadout();
     if (this.weaponShown !== a.weapon || this.slungShown !== !!a.primary) {
       this.slungShown = !!a.primary;
