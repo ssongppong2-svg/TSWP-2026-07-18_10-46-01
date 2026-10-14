@@ -1,9 +1,9 @@
-// 맵 랜드마크 모형: 칸(충돌) 위에 덮어씌우는 큰 장식 — 원자로 노심 · 화물 셔틀
+// 맵 랜드마크 모형: 칸(충돌) 위에 덮어씌우는 큰 장식 — 원자로 노심 · 화물 셔틀 · 거대한 알
 //   충돌은 맵 글자 그대로 (원자로 = 천장까지 닿는 벽 기둥 '#', 셔틀 = 2.2 m 큰 상자 'C')이고, 모형은 그 둘레를 감쌈
-//   decor.landmarks: [{ type: 'reactor' | 'shuttle', r0, r1, c0, c1, dir? }]
+//   decor.landmarks: [{ type: 'reactor' | 'shuttle' | 'egg', r0, r1, c0, c1, dir? }]
 import * as THREE from 'three';
 import { CELL } from '../sim/constants.js';
-import { ROOF } from '../sim/map.js';
+import { ROOF, WALL } from '../sim/map.js';
 
 const STEEL = () => new THREE.MeshStandardMaterial({ color: '#4a525c', roughness: 0.42, metalness: 0.75 });
 const DARK = () => new THREE.MeshStandardMaterial({ color: '#23282f', roughness: 0.5, metalness: 0.7 });
@@ -188,12 +188,82 @@ function shuttle(map, q) {
   return g;
 }
 
+// 거대한 알: 얼룩무늬 알(위가 조금 뾰족) + 밑동을 받친 가지 고리·잔가지·깃털 (충돌은 벽 기둥)
+function speckleTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#efe7d6';
+  g.fillRect(0, 0, 512, 512);
+  let s = 41;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 520; i++) {
+    const x = rnd() * 512, y = rnd() * 512, r = 1.5 + rnd() ** 2.2 * 16;
+    g.fillStyle = `rgba(${90 + rnd() * 40},${70 + rnd() * 30},${50 + rnd() * 20},${0.35 + rnd() * 0.5})`;
+    g.beginPath();
+    g.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 1);
+  return t;
+}
+
+function giantEgg(map, q) {
+  const g = new THREE.Group();
+  g.position.set(map.originX + ((q.c0 + q.c1 + 1) / 2) * CELL, 0, map.originZ + ((q.r0 + q.r1 + 1) / 2) * CELL);
+  const pts = [];
+  for (let i = 0; i <= 40; i++) {
+    const y = -1 + (2 * i) / 40;
+    pts.push(new THREE.Vector2(Math.sqrt(Math.max(0, 1 - y * y)) * (1 - 0.13 * y), y));
+  }
+  const eggGeo = new THREE.LatheGeometry(pts, 56);
+  eggGeo.scale(3.15, 4.2, 3.15);
+  eggGeo.translate(0, 3.3, 0);
+  const egg = new THREE.Mesh(eggGeo, new THREE.MeshStandardMaterial({ map: speckleTexture(), roughness: 0.55, metalness: 0 }));
+  egg.castShadow = egg.receiveShadow = true;
+  g.add(egg);
+  const bark = new THREE.MeshStandardMaterial({ color: '#6e5034', roughness: 0.95 });
+  const barkLight = new THREE.MeshStandardMaterial({ color: '#8d6a46', roughness: 0.95 });
+  // 밑동 가지 고리 두 겹 (기둥 모서리를 가림)
+  for (const [y, R, t, m] of [[0.45, 3.05, 0.48, bark], [1.15, 2.95, 0.4, barkLight]]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R, t, 10, 40), m);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = y;
+    ring.castShadow = ring.receiveShadow = true;
+    g.add(ring);
+  }
+  // 엇갈린 잔가지 · 꽂힌 깃털
+  let s = 77;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2 + rnd() * 0.2;
+    const len = 1.6 + rnd() * 1.6;
+    const twig = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, len, 6), rnd() < 0.5 ? bark : barkLight);
+    twig.position.set(Math.sin(a) * 3.35, 0.5 + rnd() * 0.9, Math.cos(a) * 3.35);
+    twig.rotation.set(rnd() * 0.6 - 0.3, a, Math.PI / 2 - 0.4 + rnd() * 0.8);
+    twig.castShadow = true;
+    g.add(twig);
+  }
+  const featherMat = new THREE.MeshStandardMaterial({ color: '#e9e4d8', roughness: 0.8, side: THREE.DoubleSide });
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.4;
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.2), featherMat);
+    f.position.set(Math.sin(a) * 3.3, 1.6, Math.cos(a) * 3.3);
+    f.rotation.set(0.3, a, 0.25 * (i % 2 ? 1 : -1));
+    g.add(f);
+  }
+  return g;
+}
+
 export function buildLandmarks(map) {
   const group = new THREE.Group();
   group.name = 'landmarks';
   const ticks = [];
   for (const q of map.def.decor?.landmarks ?? []) {
-    const m = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : null;
+    const m = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : q.type === 'egg' ? giantEgg(map, q) : null;
     if (!m) continue;
     group.add(m);
     if (m.userData.tick) ticks.push(m.userData.tick);
@@ -206,4 +276,50 @@ export function buildLandmarks(map) {
 export function landmarkCells(map) {
   const list = map.def.decor?.landmarks ?? [];
   return (c, r) => list.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1);
+}
+
+// 둥지 가지 벽 위: 마구 얹힌 가지 (각진 벽 윗면을 들쭉날쭉하게 — 바닥 쪽으로 조금 삐져나옴)
+export function buildNestTwigs(map) {
+  const group = new THREE.Group();
+  group.name = 'nestTwigs';
+  const spots = [];
+  let s = 913;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const open = (c, r) => map.inBounds(c, r) && map.walkable(c, r);
+  for (let r = 0; r < map.rows; r++) {
+    for (let c = 0; c < map.cols; c++) {
+      if (map.charAt(c, r) !== '#' || !' .'.includes(map.upperAt(c, r))) continue;
+      const roofed = map.roofs.some((q) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1);
+      if (roofed) continue;
+      const toward = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dc, dr]) => open(c + dc, r + dr));
+      if (!toward.length) continue;
+      const cx = map.cellX(c), cz = map.cellZ(r);
+      for (let k = 0; k < 3; k++) {
+        const [dc, dr] = toward[k % toward.length];
+        const len = 1.6 + rnd() * 1.8;
+        const out = (rnd() * 0.9 - 0.2) * CELL * 0.5; // 바닥 쪽으로 삐져나옴
+        spots.push({
+          x: cx + dc * out + (rnd() - 0.5) * 1.2, z: cz + dr * out + (rnd() - 0.5) * 1.2,
+          y: WALL + 0.08 + rnd() * 0.25, len, rad: 0.07 + rnd() * 0.09,
+          yaw: rnd() * Math.PI, tilt: (rnd() - 0.5) * 0.5, dark: rnd() < 0.5,
+        });
+      }
+    }
+  }
+  const geo = new THREE.CylinderGeometry(1, 1.15, 1, 6);
+  geo.rotateZ(Math.PI / 2); // 눕힌 가지 (길이 = x)
+  const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  for (const dark of [true, false]) {
+    const list = spots.filter((p) => p.dark === dark);
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: dark ? '#5a412a' : '#86643f', roughness: 0.95, flatShading: true }), list.length);
+    list.forEach((p, i) => {
+      q.setFromEuler(e.set(0, p.yaw, p.tilt));
+      M.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(p.len, p.rad, p.rad));
+      mesh.setMatrixAt(i, M);
+    });
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return group;
 }

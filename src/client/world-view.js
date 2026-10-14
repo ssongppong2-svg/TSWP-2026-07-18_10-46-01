@@ -11,7 +11,7 @@ import { buildStructure, shadeFn } from './structure.js';
 import { themeTextures } from './theme-textures.js';
 import { buildThemeBackdrop } from './theme-backdrop.js';
 import { buildZeroGDecor } from './zero-g-view.js';
-import { buildLandmarks, landmarkCells } from './landmarks.js';
+import { buildLandmarks, landmarkCells, buildNestTwigs } from './landmarks.js';
 
 // 새 맵 테마 (달 기지 · 우주 화물선 · 거대한 새의 둥지): 표면 색·거칠기와 소품 모양
 //   (질감은 theme-textures.js, 하늘·원경은 theme-backdrop.js)
@@ -112,7 +112,10 @@ export function buildWorld(map, baseTex) {
         : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: style ? '#7f8894' : day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
     clad: museum || style ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
     slabTop: new THREE.MeshStandardMaterial({ ...V, map: slabTex, bumpMap: worldTex(tex.floorBump), bumpScale: museum ? 0.6 : 1.2, roughness: museum ? 0.4 : 0.9, metalness: 0.02, color: floorCol }),
-    grate: new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
+    // 2층 철제 다리 바닥 (둥지: 둥지를 가로지르는 큰 가지 → 나무껍질)
+    grate: style?.ceil === 'bark'
+      ? new THREE.MeshStandardMaterial({ ...V, map: tex.crate, roughness: 0.95, metalness: 0, color: '#b08a60' })
+      : new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
     edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: style ? style.wall : museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
     edgeSteel: new THREE.MeshStandardMaterial({ ...V, color: '#4b5157', roughness: 0.5, metalness: 0.7 }),
     rail: museum
@@ -169,15 +172,17 @@ export function buildWorld(map, baseTex) {
     const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`) && !inLandmark(p.c, p.r)).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
-    // 둥지: 큰 상자 → 커다란 알 · 작은 상자 → 잘린 가지 토막 (부딪히는 모양은 그대로 상자)
-    const egg = theme?.eggs && kind === 'bigCrate', log = theme?.eggs && kind === 'crate';
-    const geo = egg ? new THREE.SphereGeometry(1, 24, 18) : log ? new THREE.CylinderGeometry(0.55, 0.62, h, 14) : new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
+    // 둥지: 큰 상자 → 커다란 알 · 작은 상자 → 잘린 가지 토막 · 낮은 방벽 → 둥근 깃털 더미 (부딪히는 모양은 그대로 상자)
+    const egg = theme?.eggs && kind === 'bigCrate', log = theme?.eggs && kind === 'crate', heap = theme?.eggs && kind === 'barrier';
+    const geo = egg ? new THREE.SphereGeometry(1, 24, 18) : log ? new THREE.CylinderGeometry(0.55, 0.62, h, 14) : heap ? new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2) : new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
     if (egg) geo.scale(0.98, h / 2, 0.98);
+    if (heap) geo.scale(1.12, h, 1.12).translate(0, -h / 2, 0); // 반구 밑면이 바닥 (아래에서 h/2 올림)
     geo.translate(0, h / 2, 0);
     const rough = wet ? style.rough * 0.6 : style.rough;
     const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: egg ? 0.55 : rough, metalness: egg || log ? 0 : style.metal, color: theme ? theme.crate : day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
     const top = new THREE.MeshStandardMaterial({ color: log ? '#c49a62' : style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
-    const mesh = new THREE.InstancedMesh(geo, egg ? side : [side, side, top, top, side, side], cells.length);
+    // 원기둥(가지 토막)의 면 순서: 옆 · 윗면 · 아랫면
+    const mesh = new THREE.InstancedMesh(geo, egg || heap ? side : log ? [side, top, top] : [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     cells.forEach(([c, r, y], i) => {
@@ -212,7 +217,7 @@ export function buildWorld(map, baseTex) {
   if (style) group.add(buildThemeBackdrop(map, map.def.theme));
   else if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
   // 무중력 구역(경계 선·입구 표지·떠도는 화물·먼지) · 랜드마크(원자로·셔틀): 움직이는 장식은 전시물 tick에 이어 붙임
-  const extras = [map.zeroG?.length ? buildZeroGDecor(map) : null, map.def.decor?.landmarks ? buildLandmarks(map) : null];
+  const extras = [map.zeroG?.length ? buildZeroGDecor(map) : null, map.def.decor?.landmarks ? buildLandmarks(map) : null, map.def.theme === 'nest' ? buildNestTwigs(map) : null];
   for (const x of extras) {
     if (!x) continue;
     group.add(x);
