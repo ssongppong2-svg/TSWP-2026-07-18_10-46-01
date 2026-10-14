@@ -572,14 +572,15 @@ export class Stage {
   }
 
   // 바디캠 효과 세기 (설정에서 끌 수 있음)
-  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0, holes = [], voidFade = 0 } = {}) {
+  // scope: 조준경으로 들여다보는 중 → 렌즈 왜곡·색 번짐·노이즈·빗방울을 끄고 또렷하게 (가장자리는 조준경 그늘이 맡음)
+  setLens({ damage = 0, pulse = 0, flash = 0, blur = 0, supp = 0, glitch = 0, holes = [], voidFade = 0, scope = false } = {}) {
     const u = this.bodycam.uniforms;
-    const on = !!this.settings.bodycam;
+    const on = !!this.settings.bodycam && !scope;
     // 바디캠 렌즈: 가운데(조준점)는 그대로, 가장자리만 살짝 휘고 번짐 — 보기 편한 정도로 약하게
     u.distortion.value = on ? 0.09 : 0;
     u.chroma.value = on ? 0.0015 : 0;
-    u.grain.value = on ? 0.025 : 0.01;
-    u.vignette.value = on ? 0.45 : 0.3;
+    u.grain.value = on ? 0.025 : scope ? 0.006 : 0.01;
+    u.vignette.value = on ? 0.45 : scope ? 0 : 0.3;
     u.damage.value = damage;
     u.pulse.value = pulse;
     u.flash.value = flash;

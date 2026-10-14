@@ -1007,7 +1007,7 @@ export class GameClient {
     this.voidT = Math.max(0, (this.voidT ?? 0) - dt);
     const vt = this.voidT;
     const voidFade = vt <= 0 ? 0 : vt > 1.15 ? (1.4 - vt) / 0.25 : Math.min(1, vt / 0.75);
-    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0, holes: this.holesView.screen, voidFade });
+    this.stage.setLens({ damage, pulse, flash: Math.max(this.effects.flash, flashed * 0.92), blur: this.blur + (va.held ? 0.4 : 0) + stunned * 0.35 + gassed * 0.25, supp: this.suppVis, glitch: va.alive && (va.empT ?? 0) > 0 ? 0.2 + 0.5 * Math.min(1, va.empT / GEAR.emp.time) : 0, holes: this.holesView.screen, voidFade, scope: scoped && va.alive && !this.droneView && !this.mirrorView && !this.camViewing });
     this.blastDeaf = Math.max(0, (this.blastDeaf ?? 0) - dt * 0.6);
     this.audio.setMuffle(Math.max(damage * 0.55, this.effects.flash * 0.9, flashed * 0.6, stunned * 0.85, this.blastDeaf));
     if (gassed && this.started && !this.paused) {

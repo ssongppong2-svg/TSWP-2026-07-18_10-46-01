@@ -156,7 +156,7 @@ function rail(P, y, z0, z1, mat = 'metal') {
 
 const RB = 0.045; // 소총 총열 높이
 // 재질별 주변광 반사 세기 (장면 환경맵을 그대로 쓰면 비스듬한 면이 허옇게 뜸)
-const ENV = { shell: 0.08, metal: 0.16, dark: 0.04, poly: 0.08, furn: 0.08, rubber: 0.03, glove: 0.05, gloveHard: 0.09, sleeve: 0.04, watch: 0.1, steel: 0.45, blade: 0.22, brass: 0.35, copper: 0.3, glass: 0.5, lensW: 0.3, accent: 0.04, core: 0.1 };
+const ENV = { shell: 0.08, metal: 0.16, dark: 0.04, poly: 0.08, furn: 0.08, rubber: 0.03, glove: 0.05, gloveHard: 0.09, sleeve: 0.04, watch: 0.1, steel: 0.45, blade: 0.22, brass: 0.35, copper: 0.3, glass: 0.32, lensW: 0.3, accent: 0.04, core: 0.1 };
 const OPTIC = { y: 0.1135, z: -0.068 };
 
 // AR 계열 공통: 하부 리시버(탄창 삽입구·방아쇠울·권총 손잡이) · 상부 리시버(배출구·전진기·장전 손잡이·윗레일)
@@ -474,6 +474,25 @@ function buildSniperMag() {
   P.add('poly', rbox(0.032, 0.062, 0.085, 0.005), [0, -0.031, 0]);
   P.add('brass', cylG(0.006, 0.006, 0.05, 10), [0, 0.004, 0.0], [Math.PI / 2, 0, 0]);
   return P;
+}
+
+// 조준점 빛 번짐 무늬 (가운데 밝고 바깥으로 흐려짐)
+let glowTex = null;
+function glowTexture() {
+  if (glowTex) return glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.18, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(c);
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  return glowTex;
 }
 
 // 들여다보는 원통 (조준경 경통): 양 끝이 뚫려 있고, 안쪽 벽은 뒤집은 원통으로 그림 · 뒤 끝에 테두리 고리
@@ -899,7 +918,7 @@ export class ViewModel {
       blade: std({ color: '#2a2c30', roughness: 0.42, metalness: 0.55 }),
       brass: std({ color: '#b58a3c', roughness: 0.32, metalness: 0.9 }),
       copper: std({ color: '#a86a42', roughness: 0.35, metalness: 0.85 }),
-      glass: std({ color: '#2c4450', roughness: 0.04, metalness: 0.4, transparent: true, opacity: 0.22, depthWrite: false }),
+      glass: std({ color: '#2c4450', roughness: 0.04, metalness: 0.4, transparent: true, opacity: 0.15, depthWrite: false }),
       lensW: std({ color: '#aab4bb', roughness: 0.1, metalness: 0.3, emissive: '#3a3f44', emissiveIntensity: 0.4 }),
       tritium: new THREE.MeshBasicMaterial({ color: '#7dff8a' }),
       accent: std({ color: accent, roughness: 0.6, emissive: accent, emissiveIntensity: 0.02 }),
@@ -921,8 +940,11 @@ export class ViewModel {
       screenR: new THREE.MeshBasicMaterial({ color: '#b8372d', toneMapped: false }),
       screenB: new THREE.MeshBasicMaterial({ color: '#6fb8ff', toneMapped: false }),
     };
-    // 조준선: 밝은 배경에서도 빨갛게 보이도록 덧셈 섞기 대신 불투명에 가깝게
-    this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff2a18', transparent: true, opacity: 0.92, depthWrite: false, toneMapped: false });
+    // 조준선: 밝은 배경에서도 빨갛게 보이도록 덧셈 섞기 대신 불투명 · 둘레에 옅은 빛 번짐(덧셈)
+    //   (투명 패스에 넣어 조준기 유리보다 나중에 그림 → 유리 반사에 묻히지 않음)
+    this.reticleMat = new THREE.MeshBasicMaterial({ color: '#ff2f1c', transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
+    this.reticleGlow = new THREE.MeshBasicMaterial({ color: '#ff4a2c', map: glowTexture(), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    this.reticleHalo = new THREE.MeshBasicMaterial({ color: '#ff4a2c', transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 
     // 손·총 부품은 총마다 스킨 메시 몇 개로 합쳐 그림 (그리기 호출 54 → 약 5)
     // 1인칭: 눈앞이라 무늬를 곱고 약하게 (천 장갑 짜임 · 폴리머 잔요철 · 금속 긁힘 · 손때)
@@ -1033,19 +1055,24 @@ export class ViewModel {
     const reticle = new THREE.Group();
     reticle.position.set(0, OPTIC.y, OPTIC.z);
     const D = 2.5;
-    const dot = new THREE.Mesh(new THREE.CircleGeometry(D * Math.tan(0.0026), 16), this.reticleMat);
+    const dot = new THREE.Mesh(new THREE.CircleGeometry(D * Math.tan(0.0034), 20), this.reticleMat);
     dot.position.z = -D;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(D * Math.tan(0.0235), D * Math.tan(0.0262), 48), this.reticleMat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(D * Math.tan(0.0232), D * Math.tan(0.0266), 64), this.reticleMat);
     ring.position.z = -D;
-    reticle.add(dot, ring);
+    // 빛 번짐: 점 둘레 · 고리 안팎
+    const dotGlow = new THREE.Mesh(new THREE.PlaneGeometry(D * 0.024, D * 0.024), this.reticleGlow);
+    dotGlow.position.z = -D;
+    const ringGlow = new THREE.Mesh(new THREE.RingGeometry(D * Math.tan(0.0212), D * Math.tan(0.0288), 64), this.reticleHalo);
+    ringGlow.position.z = -D;
+    reticle.add(ringGlow, dotGlow, dot, ring);
     for (let i = 0; i < 4; i++) {
-      const tick = new THREE.Mesh(new THREE.PlaneGeometry(D * 0.0026, D * 0.009), this.reticleMat);
+      const tick = new THREE.Mesh(new THREE.PlaneGeometry(D * 0.003, D * 0.0095), this.reticleMat);
       const a = (i * Math.PI) / 2;
-      tick.position.set(Math.sin(a) * D * 0.0295, Math.cos(a) * D * 0.0295, -D);
+      tick.position.set(Math.sin(a) * D * 0.0297, Math.cos(a) * D * 0.0297, -D);
       tick.rotation.z = -a;
       reticle.add(tick);
     }
-    for (const m of reticle.children) m.renderOrder = 5;
+    for (const m of reticle.children) m.renderOrder = m.material === this.reticleMat ? 6 : 5;
     reticle.visible = false;
     g.add(reticle);
     // 오른손: 권총 손잡이 (검지는 방아쇠에)
@@ -1212,19 +1239,24 @@ export class ViewModel {
       reticle = new THREE.Group();
       reticle.position.copy(dot);
       const D = 2.5;
-      const add = (geo, x = 0, y = 0, rz = 0) => {
-        const m = new THREE.Mesh(geo, this.reticleMat);
+      const add = (geo, x = 0, y = 0, rz = 0, mat = this.reticleMat) => {
+        const m = new THREE.Mesh(geo, mat);
         m.position.set(x, y, -D);
         m.rotation.z = rz;
-        m.renderOrder = 5;
+        m.renderOrder = mat === this.reticleMat ? 6 : 5;
         reticle.add(m);
       };
       if (reticleKind === 'chevron') {
-        // ^ 모양 꺾쇠: 꼭짓점이 조준점
-        const L = D * 0.016, W = D * 0.003;
+        // ^ 모양 꺾쇠: 꼭짓점이 조준점 · 아래 작은 점(먼 거리) · 둘레 빛 번짐
+        const L = D * 0.017, W = D * 0.0036;
+        add(new THREE.PlaneGeometry(D * 0.034, D * 0.034), 0, -L * 0.3, 0, this.reticleGlow);
         for (const sx of [-1, 1]) add(new THREE.PlaneGeometry(W, L), sx * L * 0.35, -L * 0.36, sx * 0.78);
-        add(new THREE.CircleGeometry(D * 0.0013, 10), 0, -D * 0.009);
-      } else add(new THREE.CircleGeometry(D * Math.tan(0.0032), 16));
+        add(new THREE.CircleGeometry(D * 0.0016, 12), 0, -D * 0.01);
+      } else {
+        // 도트: 또렷한 점 + 둘레 빛 번짐
+        add(new THREE.PlaneGeometry(D * 0.026, D * 0.026), 0, 0, 0, this.reticleGlow);
+        add(new THREE.CircleGeometry(D * Math.tan(0.0042), 20));
+      }
       reticle.visible = false;
       g.add(reticle);
     }

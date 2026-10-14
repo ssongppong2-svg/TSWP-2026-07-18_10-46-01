@@ -24,6 +24,47 @@ const fmtTime = (s) => {
 const pad = (n) => String(n).padStart(2, '0');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+// 조준경 조준선 (SVG · 가운데가 0,0 · 반지름 100 = 조준경 둥근 창 가장자리)
+//   선마다 밑에 옅은 밝은 테를 깔아 어두운 곳에서도 또렷하게 · 가운데 점·꺾쇠는 빛나는 붉은색
+const scopeLine = (x1, y1, x2, y2, w) =>
+  `<line class="sc-halo" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="${w + 0.7}"/><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="${w}"/>`;
+// 굵은 기둥: 가장자리에서 r0까지, 안쪽 끝은 살짝 가늘어짐 (dir: 0 오른쪽 · 1 아래 · 2 왼쪽 · 3 위)
+const scopePost = (dir, r0, w) => {
+  const pts = [[100, -w], [r0 + 4, -w], [r0, -w * 0.55], [r0, w * 0.55], [r0 + 4, w], [100, w]];
+  const rot = ([x, y]) => [[x, y], [-y, x], [-x, -y], [y, -x]][dir];
+  return `<polygon class="sc-post" points="${pts.map((p) => rot(p).map((v) => +v.toFixed(2)).join(',')).join(' ')}"/>`;
+};
+// 눈금: 가는 선 위 일정 간격 (10마다 긴 눈금)
+const scopeTicks = (from, to, step, axis) => {
+  let s = '';
+  for (let v = from; v <= to; v += step) {
+    if (!v) continue;
+    const L = Math.abs(v) % 10 === 0 ? 1.7 : 0.9;
+    s += axis === 'x' ? scopeLine(v, -L, v, L, 0.32) : scopeLine(-L, v, L, v, 0.32);
+  }
+  return s;
+};
+const SCOPE_LENS = `<circle class="sc-rim" r="99.4"/><path class="sc-glint" d="M-79,-58 A98,98 0 0 1 -30,-93"/>`;
+const SCOPE_SVG = `
+  <svg class="sc-ret sc-sniper" viewBox="-100 -100 200 200" aria-hidden="true">
+    ${SCOPE_LENS}
+    <g class="sc-lines">
+      ${scopePost(0, 30, 1.4)}${scopePost(1, 30, 1.4)}${scopePost(2, 30, 1.4)}${scopePost(3, 30, 1.4)}
+      ${scopeLine(-30, 0, 30, 0, 0.34)}${scopeLine(0, -30, 0, 30, 0.34)}
+      ${scopeTicks(-25, 25, 5, 'x')}${scopeTicks(-25, 25, 5, 'y')}
+    </g>
+    <circle class="sc-glow" r="3"/><circle class="sc-mark" r="1.05"/>
+  </svg>
+  <svg class="sc-ret sc-lpvo" viewBox="-100 -100 200 200" aria-hidden="true">
+    ${SCOPE_LENS}
+    <g class="sc-lines">
+      ${scopePost(0, 38, 1.3)}${scopePost(1, 38, 1.3)}${scopePost(2, 38, 1.3)}
+      ${scopeLine(-38, 0, -5, 0, 0.3)}${scopeLine(5, 0, 38, 0, 0.3)}${scopeLine(0, 5, 0, 38, 0.3)}
+      ${[[8, 5], [13, 4], [18, 3], [23, 2.2]].map(([y, w]) => scopeLine(-w, y, w, y, 0.3)).join('')}
+    </g>
+    <path class="sc-glow sc-chev" d="M-3.2,3.6 L0,0 L3.2,3.6"/><path class="sc-mark sc-chev" d="M-3.2,3.6 L0,0 L3.2,3.6"/>
+  </svg>`;
+
 const ORDER_NAME = { regroup: '집결', hold: '위치 사수', move: '지정 지점 이동', A: 'A 목표', B: 'B 목표' };
 const BOMB_STATE = { armed: '무장', picking: '해체 중', defused: '해체됨', exploded: '폭발' };
 
@@ -43,6 +84,7 @@ export class Hud {
 
     const sideName = match.op ? '진압팀' : TEAM_INFO[me.team]?.name ?? '';
     this.root.innerHTML = `
+      <div class="scope">${SCOPE_SVG}</div>
       <div class="cam">
         <div class="cam-rec"><i></i>REC <b class="cam-t">00:00</b></div>
         <div class="cam-id">${esc(match.map.def.code ?? 'LAB')} · ${esc(sideName)} · ${esc(me.name)}</div>
@@ -57,7 +99,6 @@ export class Hud {
           <div class="bomb-chip" data-bomb="B"><b>B</b><span>무장</span><i></i></div>
         </div>
       </div>
-      <div class="scope"><i class="sc-h"></i><i class="sc-v"></i><i class="sc-dot"></i></div>
       <div class="vh-minimap"><canvas></canvas></div>
       <div class="vh-feed"></div>
       <div class="crosshair"><i class="ch-dot"></i><i class="ch-l"></i><i class="ch-r"></i><i class="ch-t"></i><i class="ch-b"></i></div>

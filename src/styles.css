@@ -1895,90 +1895,97 @@ button.kb-row:hover {
   100% { opacity: 0; }
 }
 
-/* 저격총 조준경 */
+/* 저격총 조준경: 둥근 창 바깥은 완전히 가림 · 창 가장자리 그늘 · SVG 조준선 */
 .scope {
+  --sr: 34vh; /* 둥근 창 반지름 */
   position: absolute;
   inset: 0;
   display: none;
-  background: radial-gradient(circle at 50% 50%, transparent 0, transparent 34vh, rgba(0, 0, 0, 0.94) 34.4vh);
+  background: radial-gradient(circle at 50% 50%, transparent 0 calc(var(--sr) * 0.86), rgba(0, 0, 0, 0.18) calc(var(--sr) * 0.95), rgba(0, 0, 0, 0.62) calc(var(--sr) - 1px), #000 var(--sr));
 }
 
 .scope.show {
   display: block;
 }
 
-.scope i {
-  position: absolute;
-  background: rgba(0, 0, 0, 0.9);
-}
-
-.sc-h {
-  left: calc(50% - 34vh);
-  width: 68vh;
-  top: 50%;
-  height: 1px;
-}
-
-.sc-v {
-  top: 16vh;
-  height: 68vh;
-  left: 50%;
-  width: 1px;
-}
-
-.sc-dot {
-  left: calc(50% - 2px);
-  top: calc(50% - 2px);
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #ff3a26 !important;
-}
-
-/* 지정사수 저배율 조준경: 넓은 시야 · 굵은 바깥 기둥 + 가는 가운데 십자 · 빨간 꺾쇠 */
 .scope.lpvo {
-  background: radial-gradient(circle at 50% 50%, transparent 0, transparent 40vh, rgba(0, 0, 0, 0.55) 41vh, rgba(0, 0, 0, 0.96) 43vh);
+  --sr: 41vh;
 }
 
-.scope.lpvo .sc-h {
-  left: calc(50% - 41vh);
-  width: 82vh;
-}
-
-.scope.lpvo .sc-v {
-  top: 9vh;
-  height: 82vh;
-}
-
-.scope.lpvo::before,
-.scope.lpvo::after {
-  content: '';
+.sc-ret {
   position: absolute;
-  background: rgba(0, 0, 0, 0.92);
-}
-
-.scope.lpvo::before {
-  left: calc(50% - 41vh);
-  width: 82vh;
-  top: calc(50% - 2px);
-  height: 5px;
-  background: linear-gradient(90deg, rgba(0, 0, 0, 0.92) 0 35%, transparent 35% 65%, rgba(0, 0, 0, 0.92) 65% 100%);
-}
-
-.scope.lpvo::after {
-  left: calc(50% - 2px);
-  width: 5px;
-  top: calc(50% + 14vh);
-  height: 28vh;
-}
-
-.scope.lpvo .sc-dot {
-  left: calc(50% - 6px);
+  left: 50%;
   top: 50%;
-  width: 12px;
-  height: 8px;
-  border-radius: 0;
-  clip-path: polygon(50% 0, 100% 100%, 80% 100%, 50% 32%, 20% 100%, 0 100%);
+  width: calc(var(--sr) * 2);
+  height: calc(var(--sr) * 2);
+  transform: translate(-50%, -50%);
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.sc-lpvo,
+.scope.lpvo .sc-sniper {
+  display: none;
+}
+
+.scope.lpvo .sc-lpvo {
+  display: block;
+}
+
+/* 창 가장자리: 렌즈 코팅 테 + 위쪽 반사광 (안쪽 그늘은 .scope 배경) */
+.sc-rim {
+  fill: none;
+  stroke: rgba(120, 175, 255, 0.28);
+  stroke-width: 0.6;
+}
+
+.sc-glint {
+  fill: none;
+  stroke: rgba(190, 220, 255, 0.16);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+/* 조준선: 검은 선 + 밑에 옅은 밝은 테 (밝은 곳·어두운 곳 모두 또렷) */
+.sc-lines line {
+  stroke: #020304;
+  stroke-linecap: butt;
+}
+
+.sc-lines line.sc-halo {
+  stroke: rgba(225, 235, 245, 0.3);
+}
+
+.sc-post {
+  fill: #020304;
+  stroke: rgba(225, 235, 245, 0.3);
+  stroke-width: 0.35;
+}
+
+/* 빛나는 가운데 점·꺾쇠 */
+.sc-mark {
+  fill: #ff3b24;
+}
+
+.sc-glow {
+  fill: rgba(255, 70, 40, 0.42);
+  filter: blur(1.6px);
+}
+
+.sc-chev {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sc-mark.sc-chev {
+  stroke: #ff3b24;
+  stroke-width: 0.75;
+}
+
+.sc-glow.sc-chev {
+  stroke: rgba(255, 70, 40, 0.5);
+  stroke-width: 2.4;
 }
 
 /* 가운데 큰 알림: 라운드 시작·승리·패배 */
