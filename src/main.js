@@ -90,6 +90,10 @@ const openSettings = () =>
           audio.setLowPower(stage.qualityKey === 'low');
         }
         if (k === 'bodycam') stage.setLens({});
+        if (k === 'forceArrows' && game?.forceArrows) {
+          game.forceArrows.enabled = settings.forceArrows;
+          if (!settings.forceArrows) game.forceArrows.clear();
+        }
       },
     }),
   );

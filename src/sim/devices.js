@@ -21,8 +21,9 @@ export const LIFT = { speed: 1.25, wait: 2.6 };
 export const GATE = { moveTime: 0.7, cooldown: 2.5, leverRange: 1.9 };
 export const SLIDE = { accel: 11, maxSpeed: 12, control: 2.2 };
 // 미는 상자: 한 사람이 한 칸 미는 데 걸리는 시간(초) · 높이 · 미끄러져 옮겨 가는 시간
-export const CRATE = { pushTime: 1.4, h: 1.0, moveTime: 0.35 };
-const PAD_FLIGHT = 0.95; // 탄성 발판 비행 시간(초)
+//   personN: 한 사람이 미는 힘(N) — 힘 화살표에 '합력 = 사람 수 × personN'으로 표시
+export const CRATE = { pushTime: 1.4, h: 1.0, moveTime: 0.35, personN: 250 };
+export const PAD_FLIGHT = 0.95; // 탄성 발판 비행 시간(초)
 
 export class Devices {
   constructor(match) {
@@ -236,7 +237,7 @@ export class Devices {
       if (d.type === 'gate') return [st.closed ? 1 : 0, r2(st.t)];
       if (d.type === 'lift') return [r2(st.y), st.dir];
       if (d.type === 'pad') return [r2(Math.min(9, st.t))];
-      if (d.type === 'crate') return [st.r, st.c, st.fromR, st.fromC, r2(st.t), r2(st.push), st.pushers];
+      if (d.type === 'crate') return [st.r, st.c, st.fromR, st.fromC, r2(st.t), r2(st.push), st.pushers, st.force ?? 0, st.dir?.[0] ?? 0, st.dir?.[1] ?? 0];
       return 0;
     });
   }
@@ -262,6 +263,8 @@ export class Devices {
           this.map.setDynamic(v[1], v[0], [0, CRATE.h, KIND.push]);
         }
         [st.r, st.c, st.fromR, st.fromC, st.t, st.push, st.pushers] = v;
+        st.force = v[7] ?? 0;
+        st.dir = v[8] || v[9] ? [v[8], v[9]] : st.dir;
       }
     });
   }

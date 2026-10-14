@@ -7,6 +7,7 @@ import { COMMANDS } from '../client/input.js';
 import { ENTRY_NAME, ENTRY_PHASE } from '../sim/entry-orders.js';
 import { GEAR_ICONS, PATCH_ICONS, WEAPON_ICONS } from './icons.js';
 import { TacticalMap } from './minimap.js';
+import { FORCE_KIND, fmtN } from '../client/force-arrows.js';
 import { money } from './shop.js';
 import { K, kbd, kbds } from '../core/keys.js';
 
@@ -103,6 +104,7 @@ export class Hud {
       <div class="vh-feed"></div>
       <div class="crosshair"><i class="ch-dot"></i><i class="ch-l"></i><i class="ch-r"></i><i class="ch-t"></i><i class="ch-b"></i></div>
       <div class="hitmarker"><i></i><i></i><i></i><i></i></div>
+      <div class="force-toast"><i class="ft-arrow"><svg viewBox="0 0 24 24"><path d="M12 2 L20 12 H15 V22 H9 V12 H4 Z"/></svg></i><span><b class="ft-name"></b><small class="ft-val"></small></span></div>
       <div class="vh-dmg"></div>
       <div class="center-prompt"></div>
       <div class="exposed">위치 노출 · 적 무게 감지기</div>
@@ -166,6 +168,10 @@ export class Hud {
       feed: $('.vh-feed'),
       crosshair: $('.crosshair'),
       hitmarker: $('.hitmarker'),
+      forceToast: $('.force-toast'),
+      ftArrow: $('.ft-arrow'),
+      ftName: $('.ft-name'),
+      ftVal: $('.ft-val'),
       dmg: $('.vh-dmg'),
       prompt: $('.center-prompt'),
       exposed: $('.exposed'),
@@ -338,6 +344,31 @@ export class Hud {
   }
 
   // 작은 알림 (패치·경보 등)
+  // 내가 받은 힘: 화살표(내 시선 기준 방향) + 이름 · 크기 N · 방향 말 (live: 계속 작용하는 힘은 매 프레임 불림)
+  forceToast(kind, N, dir, camYaw, live = false) {
+    const k = FORCE_KIND[kind];
+    const E = this.els;
+    if (!k || !E.forceToast) return;
+    const h = Math.hypot(dir.x, dir.z);
+    let rot = 0, word = '';
+    if (Math.abs(dir.y) > h * 1.2) {
+      rot = dir.y > 0 ? 0 : 180;
+      word = dir.y > 0 ? '위로' : '아래로';
+    } else {
+      const sx = dir.x * Math.cos(camYaw) - dir.z * Math.sin(camYaw);
+      const sf = -dir.x * Math.sin(camYaw) - dir.z * Math.cos(camYaw);
+      rot = (Math.atan2(sx, sf) * 180) / Math.PI;
+      word = Math.abs(rot) < 35 ? '앞으로' : Math.abs(rot) > 145 ? '뒤로' : rot > 0 ? '오른쪽으로' : '왼쪽으로';
+    }
+    E.forceToast.style.setProperty('--fc', k.color);
+    E.ftArrow.style.transform = `rotate(${rot.toFixed(0)}deg)`;
+    E.ftName.textContent = k.name;
+    E.ftVal.textContent = `${fmtN(N)} N · ${word}`;
+    E.forceToast.classList.add('show');
+    clearTimeout(this.ftTimer);
+    this.ftTimer = setTimeout(() => E.forceToast.classList.remove('show'), live ? 300 : 1800);
+  }
+
   banner(title, sub = '', kind = '') {
     this.bannerQueue.push({ title, sub, kind });
     if (this.bannerQueue.length > 3) this.bannerQueue.shift();

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BotBrain, attachBots } from '../ai/bot.js';
-import { carriedMass, eyePos } from '../sim/agent.js';
-import { BOT_NAMES, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
+import { carriedMass, chestPos, eyePos } from '../sim/agent.js';
+import { BOT_NAMES, CELL, DT, MASTERY, NOISE, ROUNDS, SUPPRESS, TEAM_INFO, TEAMS } from '../sim/constants.js';
 import { K, isKey } from '../core/keys.js';
 
 // 정조준 확대 배율 (조준 진행도 adsT를 부드럽게 · 손에 장비를 들면 확대 없음)
@@ -33,7 +33,9 @@ import { DoorsView } from './doors-view.js';
 import { OpView } from './op-view.js';
 import { missionById } from '../sim/operation.js';
 import { ENTRY_COMMANDS, ENTRY_NAME, ENTRY_REACH } from '../sim/entry-orders.js';
-import { DRONE, GEAR, RC } from '../sim/gear.js';
+import { DRONE, EFFECT, GEAR, RC, exposure } from '../sim/gear.js';
+import { CRATE } from '../sim/devices.js';
+import { ForceArrows, agentMass } from './force-arrows.js';
 import { camLimits } from '../sim/gadgets.js';
 import { DeathLog, weaponName } from '../sim/death-report.js';
 import { BlackHoleView } from './blackhole-view.js';
@@ -136,6 +138,10 @@ export class GameClient {
     stage.resize();
     this.effects = new Effects(stage.scene, this.match, stage.lightRig);
     this.holesView = new BlackHoleView(stage, stage.lightRig);
+    // 힘 화살표 (크기 N · 방향 · 작용점) — 내가 받은 힘은 HUD에
+    this.forceArrows = new ForceArrows(stage.scene);
+    this.forceArrows.enabled = settings.forceArrows !== false;
+    this.forceArrows.onSelf = (kind, N, dir, live) => this.hud?.forceToast(kind, N, dir, this.camYaw ?? 0, live);
     this.gearView = new GearView(stage.scene, this.match, this.effects, stage.lightRig);
     this.conceptCards = new ConceptCards(stage.scene, this.match, (id) => conceptCardTexture(CONCEPT_BY_ID[id]));
     this.devicesView = new DevicesView(stage.scene, this.match, { museum: this.match.map.def.theme === 'museum' });
@@ -397,6 +403,8 @@ export class GameClient {
       if (e.kind === 'c4' && e.ownerId === this.viewAgent?.id) A.play('detClick');
       const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss', emp: 'empBlast' }[e.kind];
       if (snd) A.play(snd, { pos });
+      // 폭발력 화살표: 폭발 지점에서 바깥쪽으로 밀린 요원마다 (작용점 = 가슴, 크기 = 질량 × 속도 변화 ÷ 0.05초)
+      if (e.kind === 'frag' || e.kind === 'c4') this.blastArrows(e);
       // 가까운 폭발(세열·C4)은 잠깐 귀가 먹먹해짐 (무겁게 · 거리 12 m 안)
       if (e.kind === 'frag' || e.kind === 'c4') {
         const cam = this.stage.camera.position;
@@ -736,6 +744,7 @@ export class GameClient {
     ev.on('roundPrep', (e) => {
       this.closeDeathCard();
       this.gearView.blasts.clear();
+      this.forceArrows.clear();
       this.absorbedSeen = false;
       this.voidT = 0;
       this.holeCam = null;
@@ -801,6 +810,9 @@ export class GameClient {
     });
     ev.on('padLaunch', (e) => {
       A.play('pad', { pos: e.agent.pos, vol: viewing(e.agent) ? 1.2 : 1 });
+      // 탄성력 화살표: 발판이 발을 밀어 올림 (작용점 = 발, 크기 = 질량 × 튀어 오르는 속도 ÷ 용수철이 미는 0.12초)
+      const v = e.agent.vel, sp = Math.hypot(v.x, v.y, v.z);
+      if (sp > 2) this.forceArrows.add({ at: { x: e.agent.pos.x, y: e.agent.pos.y + 0.05, z: e.agent.pos.z }, dir: { x: v.x / sp, y: v.y / sp, z: v.z / sp }, N: (agentMass(e.agent) * sp) / 0.12, kind: 'elastic', follow: e.agent, self: viewing(e.agent) });
       if (isMe(e.agent)) this.study.devices++;
     });
     ev.on('gate', (e) => {
@@ -960,6 +972,8 @@ export class GameClient {
       this.gearView.update(dt, alpha, this.droneView?.id ?? null, { viewer: va0, pulseHits: va0.alive && va0.pulseOn ? va0.pulseHits : null });
       this.gearView.blasts.update(dt, this.stage.camera);
     }
+    this.liveForces();
+    this.forceArrows.update(dt);
     this.updateDroneSounds();
     {
       const va0 = this.viewAgent ?? this.player;
@@ -1261,6 +1275,56 @@ export class GameClient {
   }
 
   // 블랙홀 장면 카메라: 내가 쓰러졌거나 빨려 든 뒤에는 가까운 블랙홀을 천천히 돌며 바라봄 (벽 안으로 들어가지 않게)
+  // 폭발력 화살표: 규칙과 같은 계산(벽에 가린 정도 · 거리)으로 밀린 요원을 찾아 바깥쪽으로
+  blastArrows(e) {
+    const def = GEAR[e.kind];
+    if (!def) return;
+    const at = { x: e.x, y: e.y, z: e.z };
+    const cam = this.stage.camera.position;
+    const va = this.viewAgent ?? this.player;
+    for (const a of this.match.agents) {
+      if (!a.alive || a.held) continue;
+      const c = chestPos(a);
+      if (Math.hypot(c.x - cam.x, c.z - cam.z) > 40) continue;
+      const k = Math.max(exposure(this.match.map, at, c, def.radius), exposure(this.match.map, at, eyePos(a), def.radius) * 0.8);
+      if (k <= 0) continue;
+      const dx = c.x - at.x, dz = c.z - at.z, l = Math.hypot(dx, dz) || 1;
+      const h = EFFECT.knock * k, up = 2.5 * k, dv = Math.hypot(h, up);
+      this.forceArrows.add({ at: c, dir: { x: ((dx / l) * h) / dv, y: up / dv, z: ((dz / l) * h) / dv }, N: (agentMass(a) * dv) / 0.05, kind: 'blast', follow: a, self: a === va });
+    }
+  }
+
+  // 계속 작용하는 힘: 상자를 미는 합력 · 블랙홀이 끌어당기는 중력
+  liveForces() {
+    const m = this.match;
+    if (!this.forceArrows.enabled) return;
+    const cam = this.stage.camera.position;
+    for (const d of m.devices?.list ?? []) {
+      const st = d.st;
+      if (d.type !== 'crate' || !(st.pushers > 0) || !(st.force > 0) || !st.dir || st.t < 1) continue;
+      const cx = m.map.cellX(st.c), cz = m.map.cellZ(st.r);
+      if (Math.hypot(cx - cam.x, cz - cam.z) > 35) continue;
+      // 작용점 = 밀리는 면의 가운데 (미는 사람 쪽)
+      this.forceArrows.live(`crate${d.id}`, { at: { x: cx - st.dir[0] * CELL * 0.5, y: 0.6, z: cz - st.dir[1] * CELL * 0.5 }, dir: { x: st.dir[0], y: 0, z: st.dir[1] }, N: st.force * CRATE.personN, kind: 'net', xray: true });
+    }
+    // 블랙홀: 가까울수록 훨씬 세게 (거리의 제곱에 반비례) — 화면 가까운 요원 6명까지
+    if (m.holes?.length) {
+      const va = this.viewAgent ?? this.player;
+      const list = m.agents.filter((a) => !a.absorbed).map((a) => ({ a, d: Math.hypot(a.pos.x - cam.x, a.pos.z - cam.z) })).sort((p, q) => p.d - q.d).slice(0, 6);
+      for (const { a } of list) {
+        const c = chestPos(a);
+        let h = m.holes[0], best = Infinity;
+        for (const o of m.holes) {
+          const dd = Math.hypot(o.x - c.x, o.y - c.y, o.z - c.z);
+          if (dd < best) [best, h] = [dd, o];
+        }
+        if (m.time - h.t0 < 0.25) continue;
+        const r = Math.max(2, best);
+        this.forceArrows.live(`hole${a.id}`, { at: c, dir: { x: (h.x - c.x) / best, y: (h.y - c.y) / best, z: (h.z - c.z) / best }, N: (20000 * agentMass(a)) / (r * r), kind: 'gravity', self: a === va && !this.holeCam });
+      }
+    }
+  }
+
   holeCamera(dt) {
     const m = this.match;
     const cam = this.stage.camera;
@@ -1469,6 +1533,7 @@ export class GameClient {
     }
     this.effects.dispose();
     this.gearView.dispose();
+    this.forceArrows.dispose();
     this.conceptCards.dispose();
     this.devicesView.dispose();
     this.doorsView.dispose();

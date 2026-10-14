@@ -146,3 +146,16 @@ test('미는 상자: 한 명이 밀면 천천히, 두 명이 같은 방향으로
   assert.ok(moved2 != null && moved2 < moved1 * 0.75, `두 명이면 더 빨리 (${moved1.toFixed(2)}s → ${moved2?.toFixed(2)}s)`);
   assert.ok(!map.dynBlocked(start.c, start.r) && map.dynBlocked(crate.st.c, crate.st.r), '막힌 칸도 따라 옮겨감');
 });
+
+test('미는 상자: 미는 힘(합력)·방향이 온라인으로 전달됨 (힘 화살표용)', () => {
+  const { m, dev } = setup('force-bound');
+  const crate = dev('crate');
+  Object.assign(crate.st, { pushers: 2, force: 2, dir: [0, -1] });
+  const packed = m.devices.pack();
+  const other = setup('force-bound');
+  other.m.devices.unpack(packed);
+  const st = other.dev('crate').st;
+  assert.equal(st.force, 2);
+  assert.deepEqual(st.dir, [0, -1]);
+  assert.equal(st.pushers, 2);
+});

@@ -746,6 +746,7 @@ export function settingsModal({ settings, onChange, onClose, qualityNow, onKeys 
         <p class="field-note" data-quality-note></p>
         <div class="field"><span>조준점</span><div class="seg"><button data-cross="cross">점 + 선</button><button data-cross="dot">점만</button><button data-cross="off">없음</button></div></div>
         <label class="check"><input type="checkbox" data-key="bodycam"><span>바디캠 렌즈 (가장자리 왜곡 · 필름 노이즈 · 테두리 눈금)</span></label>
+        <label class="check"><input type="checkbox" data-key="forceArrows"><span>힘 화살표 (폭발·탄성 발판·상자·블랙홀에서 힘의 크기 N · 방향 · 작용점)</span></label>
         <label class="check"><input type="checkbox" data-key="invertY"><span>마우스 상하 반전</span></label>
         <div class="field"><span>조작 키</span><button class="btn ghost small" data-act="keys">키 바꾸기</button></div>
       </div>

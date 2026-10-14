@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   bodycam: true, // 바디캠 렌즈 (가장자리 왜곡·필름 노이즈·테두리 눈금) — 기본은 켬 (약하게)
   shake: 1, // 화면 흔들림 세기
+  forceArrows: true, // 힘 화살표 (힘의 크기 N · 방향 · 작용점)
   crosshair: 'cross', // 조준점: 'cross' 점+선 / 'dot' 점만 / 'off' 없음
   mapId: 'force-bound',
   keys: {}, // 키 바꾸기: 기본과 다른 동작만 { 동작: KeyboardEvent.code } (src/core/keys.js)
