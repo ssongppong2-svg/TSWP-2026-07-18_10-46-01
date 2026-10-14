@@ -190,7 +190,7 @@ export class Devices {
   launch(a, d) {
     const m = this.map;
     const tx = m.cellX(d.to.c), tz = m.cellZ(d.to.r), ty = (d.to.f ? STORY : 0) + 0.2;
-    const T = PAD_FLIGHT, g = PLAYER.gravity;
+    const T = PAD_FLIGHT, g = PLAYER.gravity * m.gravityAt(tx, tz); // 맵 중력에 맞춰 같은 곳에 내려앉게
     a.vel.x = (tx - a.pos.x) / T;
     a.vel.z = (tz - a.pos.z) / T;
     a.vel.y = (ty - a.pos.y + 0.5 * g * T * T) / T;

@@ -2,7 +2,7 @@ import { anglesFromDir, clamp, wrapAngle } from '../core/vec.js';
 import { chestPos, emptyIntent, eyePos } from '../sim/agent.js';
 import { ROUND_TIME, TEAMS } from '../sim/constants.js';
 import { AMMO, ARMOR, PATCHES, WEAPONS } from '../sim/data.js';
-import { GEAR, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
+import { GEAR, GRAVITY, aimForTarget, previewArc, throwVelocity, THROW } from '../sim/gear.js';
 import { DOOR } from '../sim/door-geo.js';
 import { ENTRY_ACK, ENTRY_MODE, stepEntry } from './entry.js';
 import { thinkOperator, thinkSuspect } from './op-brain.js';
@@ -594,7 +594,7 @@ export class BotBrain {
     if (d < minD || d > 26) return false;
     for (const mode of d < 9 ? ['short', 'long'] : ['long']) {
       const speed = THROW[mode].speed;
-      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, speed);
+      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, speed, GRAVITY * match.map.gravityAt(point.x, point.z));
       if (!aim) continue;
       const pitch = Math.max(-0.6, Math.min(1.1, aim.pitch - THROW[mode].up));
       // 실제로 던졌을 때 떨어질 곳이 목표 근처이고 나와 충분히 떨어졌는지 (벽에 맞고 돌아오지 않게)
@@ -608,7 +608,7 @@ export class BotBrain {
       return true;
     }
     if (force) {
-      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, THROW.short.speed);
+      const aim = aimForTarget(eye, { x: point.x, y: point.y ?? 0, z: point.z }, THROW.short.speed, GRAVITY * match.map.gravityAt(point.x, point.z));
       this.gearPlan = { id, mode: 'short', yaw: aim?.yaw ?? Math.atan2(-(point.x - eye.x), -(point.z - eye.z)), pitch: Math.max(-0.4, Math.min(0.8, (aim?.pitch ?? 0.1) - THROW.short.up)), t: 1.5 };
       return true;
     }

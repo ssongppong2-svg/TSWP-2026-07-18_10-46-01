@@ -6,11 +6,15 @@ import { PATCHES, PATCH_ORDER, LOADOUT_SLOTS } from '../src/sim/data.js';
 
 const members = ['p', 'b1', 'b2', 'b3', 'b4'];
 
-test('패치 구성: 일반 5 · 특수 3 · 필살 3', () => {
+test('패치 구성: 일반 8 · 특수 6 · 필살 4 (개념마다 하나 이상)', () => {
   const count = (t) => PATCH_ORDER.filter((id) => PATCHES[id].tier === t).length;
-  assert.equal(count('normal'), 5);
-  assert.equal(count('special'), 3);
-  assert.equal(count('ultimate'), 3);
+  assert.equal(count('normal'), 8);
+  assert.equal(count('special'), 6);
+  assert.equal(count('ultimate'), 4);
+  const concepts = new Set(PATCH_ORDER.map((id) => PATCHES[id].concept));
+  for (const c of ['중력', '탄성력', '합력', '작용·반작용', '부력', '마찰력', '무게']) assert.ok(concepts.has(c), c);
+  assert.equal(new Set(PATCH_ORDER).size, PATCH_ORDER.length);
+  for (const id of PATCH_ORDER) assert.equal(PATCHES[id].id, id);
   assert.deepEqual(LOADOUT_SLOTS.map((s) => s.key), ['C', 'Q', 'E', 'X']);
 });
 

@@ -1,7 +1,7 @@
 import { Emitter } from '../core/events.js';
 import { createRng } from '../core/rng.js';
 import { clamp, copy, dirFromAngles, dist, scale, segmentAabb, segmentSphere } from '../core/vec.js';
-import { bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
+import { ANCHOR_RECOIL, bodyTop, chestPos, createAgent, emptyIntent, eyePos, freshAmmo, giveWeapon, stepMovement } from './agent.js';
 import {
   BOMB, BOT_NAMES, ECON, MASTERY, NOISE, PLAYER, PRE_ROUND_TIME, PROJECTILE, ROUND_TIME, ROUNDS, STAMINA, SUPPRESS, TEAM_SIZE, TEAMS, ULT, otherTeam,
 } from './constants.js';
@@ -304,6 +304,8 @@ export class Match {
       a.sprayIndex = a.burstLeft = 0;
       a.suppress = a.suppressHold = 0;
       a.ampT = a.bounceT = a.tagT = 0;
+      a.anchorT = a.gripT = a.buoyT = a.markT = 0;
+      a.markBy = null;
       a.crouch = a.lean = a.leanOffset = 0;
       a.stamina = STAMINA.max;
       a.tired = false;
@@ -628,6 +630,14 @@ export class Match {
     }
     if (a.ampT > 0) a.ampT = Math.max(0, a.ampT - dt);
     if (a.bounceT > 0) a.bounceT = Math.max(0, a.bounceT - dt);
+    if (a.anchorT > 0) a.anchorT = Math.max(0, a.anchorT - dt);
+    if (a.gripT > 0) a.gripT = Math.max(0, a.gripT - dt);
+    if (a.markT > 0 && (a.markT = Math.max(0, a.markT - dt)) === 0) a.markBy = null;
+    if (a.buoyT > 0) {
+      // 부력 풍선: 시간이 다 되면(또는 쓰러지면) 터지고 다시 중력만 받아 떨어짐
+      a.buoyT = a.alive ? Math.max(0, a.buoyT - dt) : 0;
+      if (a.buoyT === 0) this.emit('balloonPop', { agent: a });
+    }
     // 손에 있는 드론·RC카는 천천히 충전
     for (const kind of ['drone', 'rc']) {
       const key = BAT_KEY[kind], full = GEAR[kind].battery;
@@ -981,7 +991,8 @@ export class Match {
     }
     // 연사 반동 패턴 (정조준·앉기 중에는 줄어듦)
     const i = a.sprayIndex++;
-    const rm = (1 + (w.adsRecoil - 1) * a.adsT) * (a.crouch > 0.5 ? 0.85 : 1);
+    //   무게 닻: 몸이 무거워 반동에 덜 흔들림 (−40%)
+    const rm = (1 + (w.adsRecoil - 1) * a.adsT) * (a.crouch > 0.5 ? 0.85 : 1) * (a.anchorT > 0 ? ANCHOR_RECOIL : 1);
     a.recoil = Math.min(w.recoilMax, a.recoil + w.recoilPitch[Math.min(i, w.recoilPitch.length - 1)] * rm);
     const yawKick = w.recoilYaw[i % w.recoilYaw.length] + (this.rng.next() * 2 - 1) * (w.recoilYawRand ?? 0);
     a.recoilYaw = clamp(a.recoilYaw + yawKick * rm, -w.recoilYawMax, w.recoilYawMax);
@@ -1122,7 +1133,7 @@ export class Match {
         p.life = PROJECTILE.debrisLife;
       }
       // 장막 밖의 멈춘 투사체는 중력 때문에 아래로 떨어짐
-      if (p.harmless && !veil) p.vel.y -= PLAYER.gravity * dt;
+      if (p.harmless && !veil) p.vel.y -= PLAYER.gravity * this.map.gravityAt(p.pos.x, p.pos.z) * dt;
 
       const next = { x: p.pos.x + p.vel.x * dt, y: p.pos.y + p.vel.y * dt, z: p.pos.z + p.vel.z * dt };
       const mh = this.map.raycast(p.pos, next);
@@ -1297,6 +1308,12 @@ export class Match {
   // pen: 탄의 관통력, wear: 방탄을 닳게 하는 배율 (탄종). 방탄이 덮는 곳(몸통, 중량은 머리도)에 맞으면 관통 판정
   applyDamage(t, amount, attacker, { headshot = false, weapon = null, pos = null, backstab = false, pellet = false, pen = 0, wear = 1 } = {}) {
     if (!t.alive || this.phase !== 'live') return;
+    // 합력 표적: 표적을 맞힌 아군이 한 명 늘 때마다 피해 +10% (같은 방향 힘의 합)
+    if (t.markT > 0 && attacker && attacker.team === t.markTeam) {
+      t.markBy ??= [];
+      if (!t.markBy.includes(attacker.id)) t.markBy.push(attacker.id);
+      amount *= 1 + PATCHES.resultantMark.per * Math.min(4, t.markBy.length);
+    }
     amount = Math.round(amount);
     let hpLoss = amount, armorLoss = 0, armorHit = null;
     const kind = ARMOR[t.armorKind];
@@ -1532,6 +1549,88 @@ export class Match {
         payload.zone = zone;
         break;
       }
+      case 'reactionDash': {
+        // 등 뒤로 분사 → 반작용으로 이동 방향(없으면 조준 방향)으로 낮게 질주
+        let dx = a.wish?.x ?? 0, dz = a.wish?.z ?? 0;
+        if (Math.hypot(dx, dz) < 0.3) {
+          dx = -Math.sin(a.yaw);
+          dz = -Math.cos(a.yaw);
+        }
+        const l = Math.hypot(dx, dz) || 1;
+        a.vel.x = (dx / l) * def.speed;
+        a.vel.z = (dz / l) * def.speed;
+        a.vel.y = Math.max(a.vel.y, 3);
+        a.onGround = false;
+        payload.dir = { x: dx / l, z: dz / l };
+        payload.pos = copy(a.pos);
+        break;
+      }
+      case 'weightAnchor': {
+        a.anchorT = def.duration;
+        p.activeT = def.duration;
+        break;
+      }
+      case 'frictionGrip': {
+        a.gripT = def.duration;
+        p.activeT = def.duration;
+        break;
+      }
+      case 'buoyBalloon': {
+        a.buoyT = def.duration;
+        a.buoyTop = a.pos.y + def.rise;
+        a.onGround = false;
+        a.vel.y = Math.max(a.vel.y, 0.8);
+        p.activeT = def.duration;
+        break;
+      }
+      case 'springTrap': {
+        // 한 번에 하나: 예전 덫은 걷음
+        for (const z of this.zones) if (z.type === 'trap' && z.ownerId === a.id) z.t = 0;
+        const pt = this.aimPoint(a, def.range);
+        const zone = { id: this.nextId++, type: 'trap', ownerId: a.id, team: a.team, ...pt, radius: def.radius, t: def.life, duration: def.life, age: 0 };
+        this.zones.push(zone);
+        payload.zone = zone;
+        break;
+      }
+      case 'resultantMark': {
+        // 조준선에 가장 가까운 보이는 적 (45 m 안 · 조준 방향에서 4도 안)
+        const eye = eyePos(a);
+        const d = dirFromAngles(a.yaw, a.pitch);
+        let best = null, bestAng = 0.07;
+        for (const e of this.agents) {
+          if (!e.alive || e.team === a.team) continue;
+          const c = chestPos(e);
+          const vx = c.x - eye.x, vy = c.y - eye.y, vz = c.z - eye.z;
+          const dist = Math.hypot(vx, vy, vz);
+          if (dist > def.range || dist < 0.5) continue;
+          const ang = Math.acos(Math.min(1, (vx * d.x + vy * d.y + vz * d.z) / dist));
+          if (ang < bestAng && this.map.lineOfSight(eye, c)) [best, bestAng] = [e, ang];
+        }
+        if (!best) {
+          this.emit('patchDenied', { agent: a, slot, reason: 'noTarget' });
+          return false;
+        }
+        best.markT = def.duration;
+        best.markTeam = a.team;
+        best.markBy = [];
+        best.revealedUntil = Math.max(best.revealedUntil, this.time + def.duration);
+        payload.target = best.id;
+        break;
+      }
+      case 'gravityDrop': {
+        // 지정 지점 위 가장 높은 빈 곳(최대 height, 실내는 천장 아래)에 추를 띄웠다가 놓음 · 떨어지는 시간 = √(2h ÷ g)
+        const pt = this.aimPoint(a, def.range);
+        const up = this.map.raycast({ x: pt.x, y: pt.y + 1, z: pt.z }, { x: pt.x, y: pt.y + def.height, z: pt.z });
+        const top = up ? Math.max(pt.y + 2, up.y - 1.2) : pt.y + def.height;
+        const g = def.g * this.map.gravity;
+        const h = top - pt.y;
+        const fall = g > 0 ? Math.sqrt((2 * h) / g) : 3;
+        const total = def.warn + fall;
+        const zone = { id: this.nextId++, type: 'drop', ownerId: a.id, team: a.team, ...pt, top, g, radius: def.radius, warn: def.warn, fall, t: total + 0.05, duration: total, age: 0 };
+        this.zones.push(zone);
+        payload.zone = zone;
+        break;
+      }
       default:
         return false;
     }
@@ -1661,6 +1760,29 @@ export class Match {
           if (!a.alive) continue;
           if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) <= r && a.pos.y + 1 > z.y - 0.5 && a.pos.y < z.y + 2.5) a.gasT = Math.max(a.gasT ?? 0, 0.8);
         }
+      } else if (z.type === 'trap' && z.age > 0.6) {
+        // 탄성 덫: 적이 밟으면 압축된 용수철이 펴지며 튕겨 올림 (무게 닻을 쓴 적은 무거워서 덜 뜸)
+        for (const a of this.agents) {
+          if (!a.alive || a.team === z.team || a.held || !a.onGround) continue;
+          if (Math.hypot(a.pos.x - z.x, a.pos.z - z.z) > z.radius || Math.abs(a.pos.y - z.y) > 0.6) continue;
+          const heavy = a.anchorT > 0 ? PATCHES.weightAnchor.mult : 1;
+          a.vel.y = PATCHES.springTrap.launch / heavy;
+          a.vel.x *= 0.3;
+          a.vel.z *= 0.3;
+          a.onGround = false;
+          a.stunT = Math.max(a.stunT ?? 0, 1);
+          a.revealedUntil = Math.max(a.revealedUntil, this.time + 3);
+          if (a.lockpick) this.cancelLockpick(a, 'captured');
+          this.emit('trapSprung', { zone: z, agent: a, heavy });
+          z.t = 0;
+          break;
+        }
+      } else if (z.type === 'drop' && !z.hit && z.age >= z.warn + z.fall) {
+        // 중력 낙하: 추가 땅에 닿음 → 큰 충격
+        z.hit = true;
+        const def = PATCHES.gravityDrop;
+        const owner = this.agentById(z.ownerId);
+        this.blast({ x: z.x, y: z.y + 0.4, z: z.z, kind: 'gravityDrop', team: z.team, ownerId: z.ownerId }, { id: 'gravityDrop', radius: def.radius, damage: def.damage, pen: 3, wear: 2 }, owner);
       } else if (z.type === 'collapse' && z.age <= z.pullT) {
         for (const a of this.agents) {
           if (!a.alive || a.team === z.team || a.held) continue;
@@ -1701,9 +1823,11 @@ export class Match {
               dz = Math.sin(ang);
               l = 1;
             }
-            a.vel.x = (dx / l) * def.throwSpeed;
-            a.vel.z = (dz / l) * def.throwSpeed;
-            a.vel.y = def.throwUp;
+            // 무게 닻: 무거워서 그물이 튕겨 내지 못함
+            const heavy = a.anchorT > 0 ? PATCHES.weightAnchor.mult : 1;
+            a.vel.x = ((dx / l) * def.throwSpeed) / heavy;
+            a.vel.z = ((dz / l) * def.throwSpeed) / heavy;
+            a.vel.y = def.throwUp / heavy;
             a.onGround = false;
           }
           this.emit('netRelease', { zone: z });
@@ -2160,10 +2284,14 @@ export class Match {
       // 폭발이 미는 힘: 폭발 지점에서 바깥쪽으로 속도가 생김
       const dx = c.x - at.x, dz = c.z - at.z, l = Math.hypot(dx, dz) || 1;
       if (!a.held) {
-        a.vel.x += (dx / l) * EFFECT.knock * k;
-        a.vel.z += (dz / l) * EFFECT.knock * k;
-        a.vel.y = Math.max(a.vel.y, 2.5 * k);
-        a.onGround = false;
+        // 무게 닻: 무게가 3배 → 바닥과의 마찰력이 커서 거의 밀리지 않음
+        const heavy = a.anchorT > 0 ? PATCHES.weightAnchor.mult : 1;
+        a.vel.x += ((dx / l) * EFFECT.knock * k) / heavy;
+        a.vel.z += ((dz / l) * EFFECT.knock * k) / heavy;
+        if (heavy === 1) {
+          a.vel.y = Math.max(a.vel.y, 2.5 * k);
+          a.onGround = false;
+        }
       }
       a.stunT = Math.max(a.stunT ?? 0, 1.5 * k);
       if (owner && a.team === owner.team) continue;
@@ -2176,7 +2304,7 @@ export class Match {
     // 가까운 카메라·경보 센서는 부서짐
     this.gadgets.blast(at, def.radius);
     if (owner) this.makeNoise(owner, 'blast', at);
-    this.emit('detonate', { kind: def.id === 'c4' ? 'c4' : 'frag', x: at.x, y: at.y, z: at.z, nx: at.nx ?? 0, ny: at.ny ?? 1, nz: at.nz ?? 0, ownerId: owner?.id ?? null, team: at.team, id: at.id, hits, doorId: at.doorId ?? null });
+    this.emit('detonate', { kind: def.id === 'c4' ? 'c4' : def.id === 'gravityDrop' ? 'drop' : 'frag', x: at.x, y: at.y, z: at.z, nx: at.nx ?? 0, ny: at.ny ?? 1, nz: at.nz ?? 0, ownerId: owner?.id ?? null, team: at.team, id: at.id, hits, doorId: at.doorId ?? null });
   }
 
   // ───────────────────────── 폭탄 · 락픽 ─────────────────────────

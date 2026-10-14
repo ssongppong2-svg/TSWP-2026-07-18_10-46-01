@@ -8,6 +8,15 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // 새 총 한 자루의 탄 (탄창 가득 + 예비탄)
 export const freshAmmo = (id) => ({ mag: WEAPONS[id].magSize ?? 0, reserve: WEAPONS[id].reserve ?? 0 });
 
+// 포스 패치가 바꾸는 움직임: 무게 닻(느려짐) · 마찰 장갑(곧바로 멈춤) · 부력 풍선(떠오르는 속도 m/s)
+export const ANCHOR_SLOW = 0.75;
+export const ANCHOR_RECOIL = 0.6;
+export const GRIP_ACCEL = 2.6;
+export const BUOY_RISE_SPEED = 1.7;
+// 무중력 구역: 분사 가속(m/s²) · 최고 속도(m/s)
+export const ZERO_G_THRUST = 6;
+export const ZERO_G_MAX = 5;
+
 // 총을 손에 넣음: 같은 칸(주무기·보조무기)에 있던 총은 버림
 export function giveWeapon(a, id) {
   const w = WEAPONS[id];
@@ -93,6 +102,10 @@ export function createAgent({ id, name, team, isPlayer = false, spawn, yaw = 0, 
     ult: ULT.start,
     ampT: 0,
     bounceT: 0,
+    anchorT: 0, // 무게 닻 (무게 ×3)
+    gripT: 0, // 마찰 장갑
+    buoyT: 0, // 부력 풍선 (떠 있는 남은 시간) · buoyTop = 떠오를 높이
+    markT: 0, // 합력 표적에 찍힘 · markTeam = 찍은 팀 · markBy = 맞힌 아군 id
     slippery: false,
     mired: false,
     held: null,
@@ -160,7 +173,8 @@ export function moveSpeed(a, intent) {
   else s *= w?.moveMult ?? 1;
   if (Math.abs(a.lean) > 0.3) s *= P.leanSpeedMult;
   if (a.tagT > 0) s *= P.tagSlow;
-  if (a.mired) s *= P.miredMult;
+  if (a.mired && !(a.gripT > 0)) s *= P.miredMult; // 마찰 장갑: 마찰 폭풍 무시
+  if ((a.anchorT ?? 0) > 0) s *= ANCHOR_SLOW; // 무게 닻: 무거워 느림
   if ((a.stunT ?? 0) > 0) s *= EFFECT.stunSlow;
   if ((a.gasT ?? 0) > 0) s *= EFFECT.gasSlow;
   // 무거운 장비 · 지침
@@ -253,6 +267,7 @@ export function stepMovement(agent, intent, map, dt, canMove) {
   const speed = moveSpeed(agent, intent);
   // 관성: 무거울수록 빨라지는 데도, 멈추는 데도 오래 걸림
   const load = loadFactors(carriedMass(agent));
+  const gHere = map.gravityAt?.(agent.pos.x, agent.pos.z) ?? 1; // 중력 배율 (달 1/6 · 무중력 0)
 
   const slide = agent.onGround ? map.slideAt?.(agent.pos.x, agent.pos.z) : null;
   if (slide) {
@@ -266,7 +281,7 @@ export function stepMovement(agent, intent, map, dt, canMove) {
     vel.x = slide.x * down + side.x * lateral;
     vel.z = slide.z * down + side.z * lateral;
   } else if (agent.onGround) {
-    if (agent.slippery) {
+    if (agent.slippery && !(agent.gripT > 0)) {
       vel.x += wx * P.slipAccel * dt;
       vel.z += wz * P.slipAccel * dt;
       const hs = Math.hypot(vel.x, vel.z);
@@ -278,16 +293,37 @@ export function stepMovement(agent, intent, map, dt, canMove) {
       // 원하는 속도로 다가가되, 빨라질 때는 accel, 느려질 때는 decel 비율 (관성)
       const tx = wx * speed, tz = wz * speed;
       const speeding = tx * vel.x + tz * vel.z > 0 && Math.hypot(tx, tz) >= Math.hypot(vel.x, vel.z);
-      const k = 1 - Math.exp(-(speeding ? P.accel : P.decel) * load.accel * dt);
+      // 마찰 장갑: 마찰력이 커서 곧바로 멈추고 방향을 바꿈
+      const grip = (agent.gripT ?? 0) > 0 ? GRIP_ACCEL : 1;
+      const k = 1 - Math.exp(-(speeding ? P.accel : P.decel) * load.accel * grip * dt);
       vel.x += (tx - vel.x) * k;
       vel.z += (tz - vel.z) * k;
     }
-    if (canMove && intent.jump && agent.crouch < 0.5 && !agent.mired && !agent.tired) {
-      vel.y = P.jumpSpeed;
+    if (canMove && intent.jump && agent.crouch < 0.5 && (!agent.mired || agent.gripT > 0) && !agent.tired && !(agent.anchorT > 0)) {
+      // 무중력 구역: 바닥을 차고 천천히 떠오름 · 달: 같은 힘으로 뛰어도 더 높이·오래
+      vel.y = gHere > 0 ? P.jumpSpeed * map.jumpMult : P.jumpSpeed * 0.45;
       agent.onGround = false;
       agent.stamina = Math.max(0, (agent.stamina ?? STAMINA.max) - STAMINA.jumpCost * (1 + load.over * STAMINA.perKg));
       agent.restT = 0;
     }
+  } else if (gHere === 0 && agent.alive) {
+    // 무중력: 발이 떨어지면 반작용 추진(분사)으로 바라보는 방향(위아래 포함)으로 천천히 나아감 · 마찰이 없어 관성대로 계속 움직임
+    const cp = Math.cos(agent.pitch ?? 0), sp = Math.sin(agent.pitch ?? 0);
+    const tx = -sin * cp * mz + cos * mx, ty = sp * mz + (intent.jump ? 1 : 0) - (intent.crouch ? 1 : 0), tz = -cos * cp * mz - sin * mx;
+    vel.x += tx * ZERO_G_THRUST * dt;
+    vel.y += ty * ZERO_G_THRUST * dt;
+    vel.z += tz * ZERO_G_THRUST * dt;
+    const v = Math.hypot(vel.x, vel.y, vel.z);
+    if (v > ZERO_G_MAX) {
+      vel.x *= ZERO_G_MAX / v;
+      vel.y *= ZERO_G_MAX / v;
+      vel.z *= ZERO_G_MAX / v;
+    }
+  } else if ((agent.buoyT ?? 0) > 0) {
+    // 부력 풍선에 매달림: 공기 저항 때문에 천천히 떠다니며 조종 (걷는 속도의 절반쯤)
+    const k = 1 - Math.exp(-3 * dt);
+    vel.x += (wx * speed * 0.45 - vel.x) * k;
+    vel.z += (wz * speed * 0.45 - vel.z) * k;
   } else if (ml > 0.01) {
     // 공중: 원하는 방향으로 약간만 조종. 탄성판으로 얻은 빠른 속도는 유지.
     const before = Math.hypot(vel.x, vel.z);
@@ -302,7 +338,11 @@ export function stepMovement(agent, intent, map, dt, canMove) {
   }
 
   if (agent.alive) stepStamina(agent, intent, dt, load.over);
-  vel.y -= P.gravity * dt;
+  if ((agent.buoyT ?? 0) > 0 && agent.alive) {
+    // 부력 풍선: 부력 > 중력이면 떠오르고, 정해진 높이에서는 부력 = 중력 (떠 있음)
+    const want = agent.pos.y < (agent.buoyTop ?? agent.pos.y) - 0.05 ? BUOY_RISE_SPEED : 0;
+    vel.y += (want - vel.y) * Math.min(1, dt * 4);
+  } else vel.y -= P.gravity * gHere * dt;
 
   agent.pos.x += vel.x * dt;
   agent.pos.z += vel.z * dt;

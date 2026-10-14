@@ -99,7 +99,7 @@ export function stepRC(map, d, inp, dt) {
     d.onGround = false;
     d.hopT = RC.hopCd;
   }
-  d.vel.y -= GRAVITY * dt;
+  d.vel.y -= GRAVITY * (map.gravityAt?.(d.pos.x, d.pos.z) ?? 1) * dt;
   const y0 = d.pos.y;
   d.pos.x += d.vel.x * dt;
   d.pos.z += d.vel.z * dt;
@@ -154,7 +154,7 @@ export function throwVelocity(dir, mode = 'long', carry = null) {
 // 던진 물체 한 틱: 중력 → 이동 → 벽·바닥 충돌(튕김) → 바닥에서 구름(마찰). 부딪히면 { bounced, speed }
 export function stepThrown(map, t, dt) {
   const R = THROW.radius;
-  t.vel.y -= GRAVITY * dt;
+  t.vel.y -= GRAVITY * (map.gravityAt?.(t.pos.x, t.pos.z) ?? 1) * dt; // 맵 중력 (달 1/6 · 무중력 0)
   const next = { x: t.pos.x + t.vel.x * dt, y: t.pos.y + t.vel.y * dt, z: t.pos.z + t.vel.z * dt };
   let bounced = null;
   const hit = map.raycast(t.pos, next);
@@ -218,10 +218,11 @@ export function previewArc(map, pos, vel, { dt = 1 / 30, maxT = 3 } = {}) {
 
 // 봇 조준: from에서 to까지 speed로 던질 때의 위 방향 각도(낮은 쪽 해). 닿지 못하면 null
 // 포물선 운동: 수평 거리 x, 높이 차 y, 속력 v → tanθ = (v² − √(v⁴ − g(gx² + 2yv²))) / (gx)
-export function aimForTarget(from, to, speed) {
+export function aimForTarget(from, to, speed, g = GRAVITY) {
   const dx = to.x - from.x, dz = to.z - from.z;
   const x = Math.hypot(dx, dz), y = to.y - from.y;
-  const v2 = speed * speed, g = GRAVITY;
+  const v2 = speed * speed;
+  if (g <= 0) return x < 0.1 ? null : { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(y, x) }; // 무중력: 곧게 날아감
   const disc = v2 * v2 - g * (g * x * x + 2 * y * v2);
   if (disc < 0 || x < 0.1) return null;
   const pitch = Math.atan((v2 - Math.sqrt(disc)) / (g * x));

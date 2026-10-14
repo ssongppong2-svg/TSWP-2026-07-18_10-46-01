@@ -42,6 +42,10 @@ export class GameMap {
     this.id = def.id;
     this.name = def.name;
     this.weather = def.weather ?? 'clear';
+    // 중력: 맵 전체 배율(지구 1 · 달 1/6) + 무중력 구역(우주선: 칸 범위 { r0, r1, c0, c1 }) · 점프 배율
+    this.gravity = def.gravity ?? 1;
+    this.jumpMult = def.jumpMult ?? 1;
+    this.zeroG = (def.zeroG ?? []).map((z) => ({ ...z }));
     const ground = def.layout;
     const upper = def.upper ?? null;
     this.rows = ground.length;
@@ -346,6 +350,15 @@ export class GameMap {
   // ───────── 칸 정보 ─────────
   idx(c, r) {
     return r * this.cols + c;
+  }
+
+  // 그 자리의 중력 배율 (무중력 구역 안이면 0)
+  gravityAt(x, z) {
+    if (this.zeroG.length) {
+      const c = Math.floor((x - this.originX) / CELL), r = Math.floor((z - this.originZ) / CELL);
+      for (const q of this.zeroG) if (r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1) return 0;
+    }
+    return this.gravity;
   }
 
   inBounds(c, r) {
