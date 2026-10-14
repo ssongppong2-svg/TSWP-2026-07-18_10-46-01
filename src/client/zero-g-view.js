@@ -1,6 +1,7 @@
 // 무중력 구역 꾸밈: 경계를 알리는 빛나는 바닥 선 · 입구 바닥 표지 · 천천히 떠도는 화물·공구 · 떠다니는 먼지
 //   떠 있는 물체는 장식(충돌 없음)이라 머리 위(2.4 m 이상)에만 둠 — 중력이 없으니 떨어지지 않고 처음 움직임대로 천천히 돎
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 
 const CYAN = '#4fd8ff';
@@ -47,6 +48,7 @@ export function buildZeroGDecor(map) {
   group.name = 'zeroG';
   const floaters = [];
   const dusts = [];
+  const stripGeos = [], signGeos = [];
   let seed = 17;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const lineMat = new THREE.MeshBasicMaterial({ color: CYAN, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
@@ -66,12 +68,7 @@ export function buildZeroGDecor(map) {
     const entries = [];
     const door = (c, r, inward, axis) => entries.push({ c, r, inward, axis });
     // 경계 선: 구역 가장자리 칸 중 걸을 수 있는 칸의 바깥 변 (벽 속에는 긋지 않음)
-    const strip = (x, z, w, d) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lineMat);
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(x, 0.025, z);
-      group.add(m);
-    };
+    const strip = (x, z, w, d) => stripGeos.push(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).translate(x, 0.025, z));
     for (let c = q.c0; c <= q.c1; c++) {
       for (const [r, out, edgeZ] of [[q.r0, q.r0 - 1, z0 + 0.12], [q.r1, q.r1 + 1, z1 - 0.12]]) {
         if (!map.walkable(c, r)) continue;
@@ -97,46 +94,26 @@ export function buildZeroGDecor(map) {
       const e = run[0];
       const mx = run.reduce((t, q) => t + map.cellX(q.c), 0) / run.length;
       const mz = run.reduce((t, q) => t + map.cellZ(q.r), 0) / run.length;
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(3.2, run.length * CELL - 0.3), Math.min(1.0, (run.length * CELL - 0.3) / 3.2)), signMat);
-      sign.rotation.x = -Math.PI / 2;
       // 구역 밖에서 들어오며 읽히게: 글자 위쪽이 들어가는 쪽
-      sign.rotation.z = e.axis === 'z' ? (e.inward > 0 ? Math.PI : 0) : e.inward > 0 ? -Math.PI / 2 : Math.PI / 2;
-      sign.position.set(mx + (e.axis === 'x' ? e.inward * 0.9 : 0), 0.03, mz + (e.axis === 'z' ? e.inward * 0.9 : 0));
-      group.add(sign);
+      const rz = e.axis === 'z' ? (e.inward > 0 ? Math.PI : 0) : e.inward > 0 ? -Math.PI / 2 : Math.PI / 2;
+      const sign = new THREE.PlaneGeometry(Math.min(3.2, run.length * CELL - 0.3), Math.min(1.0, (run.length * CELL - 0.3) / 3.2));
+      signGeos.push(sign.rotateZ(rz).rotateX(-Math.PI / 2).translate(mx + (e.axis === 'x' ? e.inward * 0.9 : 0), 0.03, mz + (e.axis === 'z' ? e.inward * 0.9 : 0)));
     }
     // 떠도는 물체: 화물 상자·가스통·공구·감긴 전선
     const n = Math.round(((q.c1 - q.c0 + 1) * (q.r1 - q.r0 + 1)) / 6);
     for (let i = 0; i < n; i++) {
       const kind = i % 4;
-      const o = new THREE.Group();
+      // 부품: [종류, 놓는 행렬(물체 기준)] — 같은 종류는 한 번에 그림 (InstancedMesh)
+      const M = (x, y, z, sx = 1, sy = 1, sz = 1) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sz));
+      let parts;
       if (kind === 0) {
         const s = 0.6 + rnd() * 0.5;
-        o.add(new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.7, s * 0.8), mats.box));
-        const band = new THREE.Mesh(new THREE.BoxGeometry(s * 1.02, s * 0.72, 0.08), mats.strap);
-        o.add(band);
-      } else if (kind === 1) {
-        o.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.9, 14), mats.can));
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.14, 10), mats.tool);
-        cap.position.y = 0.52;
-        o.add(cap);
-        const led = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.02), mats.led);
-        led.position.set(0, 0.1, 0.205);
-        o.add(led);
-      } else if (kind === 2) {
-        // 렌치
-        o.add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.6, 0.035), mats.tool));
-        const head = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.03, 6, 12, Math.PI * 1.5), mats.tool);
-        head.position.y = 0.34;
-        o.add(head);
-      } else {
-        o.add(new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.045, 8, 24), mats.cable));
-      }
-      o.traverse((m) => m.isMesh && (m.castShadow = true));
+        parts = [['boxBody', M(0, 0, 0, s, s * 0.7, s * 0.8)], ['boxBand', M(0, 0, 0, s * 1.02, s * 0.72, 0.08)]];
+      } else if (kind === 1) parts = [['canBody', M(0, 0, 0)], ['canCap', M(0, 0.52, 0)], ['canLed', M(0, 0.1, 0.205)]];
+      else if (kind === 2) parts = [['wrenchBar', M(0, 0, 0)], ['wrenchHead', M(0, 0.34, 0)]]; // 렌치
+      else parts = [['cable', M(0, 0, 0)]];
       const base = new THREE.Vector3(x0 + 1 + rnd() * (x1 - x0 - 2), 2.6 + rnd() * 3.8, z0 + 1 + rnd() * (z1 - z0 - 2));
-      o.position.copy(base);
-      o.rotation.set(rnd() * 6, rnd() * 6, rnd() * 6);
-      floaters.push({ o, base, amp: new THREE.Vector3(0.3 + rnd() * 0.6, 0.15 + rnd() * 0.3, 0.3 + rnd() * 0.6), w: 0.08 + rnd() * 0.12, ph: rnd() * 6.28, spin: new THREE.Vector3((rnd() - 0.5) * 0.5, (rnd() - 0.5) * 0.5, (rnd() - 0.5) * 0.5) });
-      group.add(o);
+      floaters.push({ parts, base, rot: new THREE.Euler(rnd() * 6, rnd() * 6, rnd() * 6), amp: new THREE.Vector3(0.3 + rnd() * 0.6, 0.15 + rnd() * 0.3, 0.3 + rnd() * 0.6), w: 0.08 + rnd() * 0.12, ph: rnd() * 6.28, spin: new THREE.Vector3((rnd() - 0.5) * 0.5, (rnd() - 0.5) * 0.5, (rnd() - 0.5) * 0.5) });
     }
     // 먼지: 공기 속에 가라앉지 않고 떠 있음
     const N = 140;
@@ -154,16 +131,43 @@ export function buildZeroGDecor(map) {
     group.add(pts);
     dusts.push({ geo, base });
   }
+  if (stripGeos.length) group.add(new THREE.Mesh(mergeGeometries(stripGeos), lineMat));
+  if (signGeos.length) group.add(new THREE.Mesh(mergeGeometries(signGeos), signMat));
+  const PART = {
+    boxBody: [new THREE.BoxGeometry(1, 1, 1), mats.box],
+    boxBand: [new THREE.BoxGeometry(1, 1, 1), mats.strap],
+    canBody: [new THREE.CylinderGeometry(0.2, 0.2, 0.9, 14), mats.can],
+    canCap: [new THREE.CylinderGeometry(0.07, 0.1, 0.14, 10), mats.tool],
+    canLed: [new THREE.BoxGeometry(0.05, 0.16, 0.02), mats.led],
+    wrenchBar: [new THREE.BoxGeometry(0.07, 0.6, 0.035), mats.tool],
+    wrenchHead: [new THREE.TorusGeometry(0.09, 0.03, 6, 12, Math.PI * 1.5), mats.tool],
+    cable: [new THREE.TorusGeometry(0.34, 0.045, 8, 24), mats.cable],
+  };
+  const inst = {};
+  for (const [kind, [geo, mat]] of Object.entries(PART)) {
+    const users = floaters.flatMap((f) => f.parts.filter((p) => p[0] === kind).map((p) => ({ f, local: p[1] })));
+    if (!users.length) continue;
+    const mesh = new THREE.InstancedMesh(geo, mat, users.length);
+    mesh.castShadow = mat !== mats.led;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    inst[kind] = { mesh, users };
+  }
+  const q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3(), tmp = new THREE.Matrix4();
   let last = null;
   group.userData.tick = (time) => {
     const dt = last == null ? 0 : Math.min(0.1, time - last);
     last = time;
     for (const f of floaters) {
       const t = time * f.w + f.ph;
-      f.o.position.set(f.base.x + Math.sin(t) * f.amp.x, f.base.y + Math.sin(t * 1.3 + 1) * f.amp.y, f.base.z + Math.cos(t * 0.8) * f.amp.z);
-      f.o.rotation.x += f.spin.x * dt;
-      f.o.rotation.y += f.spin.y * dt;
-      f.o.rotation.z += f.spin.z * dt;
+      f.rot.x += f.spin.x * dt;
+      f.rot.y += f.spin.y * dt;
+      f.rot.z += f.spin.z * dt;
+      (f.m ??= new THREE.Matrix4()).compose(pos.set(f.base.x + Math.sin(t) * f.amp.x, f.base.y + Math.sin(t * 1.3 + 1) * f.amp.y, f.base.z + Math.cos(t * 0.8) * f.amp.z), q.setFromEuler(f.rot), one);
+    }
+    for (const { mesh, users } of Object.values(inst)) {
+      users.forEach((u, i) => mesh.setMatrixAt(i, tmp.multiplyMatrices(u.f.m, u.local)));
+      mesh.instanceMatrix.needsUpdate = true;
     }
     for (const d of dusts) {
       const a = d.geo.attributes.position;
@@ -174,5 +178,6 @@ export function buildZeroGDecor(map) {
       a.needsUpdate = true;
     }
   };
+  group.userData.tick(0); // 첫 화면부터 제자리에
   return group;
 }

@@ -2,6 +2,7 @@
 //   충돌은 맵 글자 그대로 (원자로 = 천장까지 닿는 벽 기둥 '#', 셔틀 = 2.2 m 큰 상자 'C')이고, 모형은 그 둘레를 감쌈
 //   decor.landmarks: [{ type: 'reactor' | 'shuttle' | 'egg', r0, r1, c0, c1, dir? }]
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../sim/constants.js';
 import { ROOF, WALL } from '../sim/map.js';
 
@@ -258,13 +259,44 @@ function giantEgg(map, q) {
   return g;
 }
 
+// 같은 재질끼리 한 덩어리로 합침 (부품 수십 개 → 그리기 몇 번) · 움직이지 않는 모형에만
+export function bakeGroup(g) {
+  g.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+  const buckets = new Map();
+  g.traverse((m) => {
+    if (!m.isMesh) return;
+    const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+    for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(k)) geo.deleteAttribute(k);
+    geo.clearGroups();
+    const b = buckets.get(m.material) ?? { geos: [], shadow: false };
+    b.geos.push(geo);
+    b.shadow ||= m.castShadow;
+    buckets.set(m.material, b);
+  });
+  const out = new THREE.Group();
+  out.position.copy(g.position);
+  out.quaternion.copy(g.quaternion);
+  out.scale.copy(g.scale);
+  for (const [mat, b] of buckets) {
+    const mesh = new THREE.Mesh(mergeGeometries(b.geos), mat);
+    mesh.castShadow = b.shadow;
+    mesh.receiveShadow = true;
+    out.add(mesh);
+    for (const geo of b.geos) geo.dispose();
+  }
+  out.userData = g.userData;
+  return out;
+}
+
 export function buildLandmarks(map) {
   const group = new THREE.Group();
   group.name = 'landmarks';
   const ticks = [];
   for (const q of map.def.decor?.landmarks ?? []) {
-    const m = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : q.type === 'egg' ? giantEgg(map, q) : null;
-    if (!m) continue;
+    const raw = q.type === 'reactor' ? reactor(map, q) : q.type === 'shuttle' ? shuttle(map, q) : q.type === 'egg' ? giantEgg(map, q) : null;
+    if (!raw) continue;
+    const m = bakeGroup(raw);
     group.add(m);
     if (m.userData.tick) ticks.push(m.userData.tick);
   }
