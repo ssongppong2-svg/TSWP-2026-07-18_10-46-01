@@ -119,9 +119,10 @@ ui.addEventListener('click', (e) => {
 // 온라인: 연결 통로·방은 화면을 오가도 유지 (경기가 끝나면 같은 방 대기실로 돌아옴)
 const net = { transport: undefined, session: null, lastStart: null };
 
-function showOnline() {
+// quick: 화면을 열자마자 빠른 매칭 대기열에 들어감 (메인의 '빠른 매칭')
+function showOnline(quick = false) {
   endGame();
-  setScreen(onlineScreen({ settings, net, toast, onBack: showTitle, onStart: startNetGame }));
+  setScreen(onlineScreen({ settings, net, toast, onBack: showTitle, onStart: startNetGame, quick }));
 }
 
 function startNetGame({ start, myKey, role }) {
@@ -205,7 +206,8 @@ function showTitle() {
     S.titleScreen({
       onStart: showTeam,
       onOp: showOp,
-      onOnline: showOnline,
+      onOnline: () => showOnline(false),
+      onQuick: () => showOnline(true),
       onCodex: () => openModal(S.codexModal({ onClose: closeModal })),
       onControls: openControls,
       onSettings: openSettings,

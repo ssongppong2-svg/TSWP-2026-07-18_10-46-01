@@ -7,6 +7,7 @@ import { DIFFICULTY } from '../ai/bot.js';
 import { createRng } from '../core/rng.js';
 import { openTransport } from '../net/transport.js';
 import { NetSession, normCode } from '../net/session.js';
+import { Matchmaker, MM_MAX, MM_COUNTDOWN } from '../net/matchmaking.js';
 import { packPlan, planMatch, planOp } from '../net/protocol.js';
 import { MISSIONS, missionById } from '../sim/operation.js';
 import { PATCH_ICONS, UI_ICONS } from './icons.js';
@@ -21,9 +22,10 @@ const TEAM_MAX = 5;
 const TIERS = ['normal', 'special', 'ultimate'];
 const TIER_KEYS = { normal: 'C · Q', special: 'E', ultimate: 'X' };
 const TIER_COUNT = { normal: 2, special: 1, ultimate: 1 };
+const QUICK_WAIT = 20; // 빠른 매칭 방: 모두 모이고 준비하지 않아도 이 초 뒤 자동 시작
 
 // 온라인 대기실. net = { transport, session } 은 화면을 오가도 유지 (경기 후 같은 방으로 돌아옴)
-export function onlineScreen({ settings, net, onBack, onStart, toast }) {
+export function onlineScreen({ settings, net, onBack, onStart, toast, quick: quickStart = false }) {
   const el = h(`<section class="screen online-screen"><header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>온라인 작전</h2><span class="net-kind"></span></header><div class="online-body"></div></section>`);
   const body = el.querySelector('.online-body');
   let disposed = false;
@@ -31,6 +33,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
   let lastStart = net.lastStart ?? null;
   let lastMode = null;
   let raf = 0;
+  let queueSig = null; // 빠른 매칭 화면을 마지막으로 그린 상태
 
   // 한 프레임에 한 번만 다시 그림 (창이 가려져 있으면 프레임 콜백이 멈추므로 타이머로)
   const render = () => {
@@ -62,15 +65,97 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
         </div>`;
       return;
     }
+    if (net.mm) return drawQueue(net.mm);
     if (!s?.room) return drawMenu();
     drawRoom(s);
   };
+
+  // ── 빠른 매칭 대기열: 모인 사람 · 맵 투표 · 카운트다운
+  const drawQueue = (mm) => {
+    const q = mm.queue();
+    const votes = new Map();
+    for (const p of q) if (p.vote) votes.set(p.vote, (votes.get(p.vote) ?? 0) + 1);
+    const cd = mm.countdown;
+    const status = mm.launched
+      ? '경기 방으로 이동 중…'
+      : q.length >= 2 && cd != null
+        ? `<b>${cd}초</b> 뒤 출발 · ${MM_MAX}명이 모이면 바로`
+        : '다른 요원을 기다리는 중… (혼자라도 <b>지금 시작</b>하면 빈자리는 봇)';
+    // 명단·투표·진행자가 그대로면 남은 시간 글자만 바꿈 (버튼을 누르는 중에 화면이 바뀌지 않게)
+    const sig = JSON.stringify([q.map((p) => [p.tk, p.name, p.vote]), mm.vote, mm.isLeader, mm.launched]);
+    if (sig === queueSig && body.querySelector('.quick-card')) {
+      body.querySelector('.quick-status').innerHTML = status;
+      return;
+    }
+    queueSig = sig;
+    body.innerHTML = `
+      <div class="online-card quick-card">
+        <div class="quick-head"><h3>빠른 매칭</h3><span class="quick-count">${q.length} / ${MM_MAX}명</span></div>
+        <p class="quick-status">${status}</p>
+        <div class="quick-bar"><i style="width:${Math.min(100, (q.length / MM_MAX) * 100)}%"></i></div>
+        <ul class="quick-list">${q.slice(0, MM_MAX).map((p, i) => `<li class="${p.tk === mm.ticket ? 'me' : ''}"><span>${esc(p.name)}</span>${i === 0 ? '<i>진행</i>' : ''}</li>`).join('')}${Array.from({ length: Math.max(0, MM_MAX - q.length) }, () => '<li class="bot"><span>빈자리 · 봇</span></li>').join('')}</ul>
+        <h3 class="brief-label">맵 투표 <small>가장 많이 고른 맵 · 표가 없으면 무작위</small></h3>
+        <div class="lobby-maps quick-maps">
+          <button class="lobby-map ${mm.vote ? '' : 'on'}" data-vote=""><b>무작위</b><small>상관없음</small></button>
+          ${MAP_ORDER.map((id) => { const d = getMapDef(id); const n = votes.get(id) ?? 0; return `<button class="lobby-map ${mm.vote === id ? 'on' : ''}" data-vote="${id}"><b>${esc(d.name)}</b><small>${esc(d.mood ?? '')}${n ? ` · <em>${n}표</em>` : ''}</small></button>`; }).join('')}
+        </div>
+        <footer class="screen-foot">
+          <button class="btn ghost" data-act="mm-cancel">매칭 취소</button>
+          ${mm.isLeader ? `<button class="btn primary big" data-act="mm-now" ${mm.launched ? 'disabled' : ''}>지금 시작 <small>빈자리 봇</small></button>` : '<span class="online-note">가장 먼저 온 요원이 진행합니다 · 2명부터 ' + MM_COUNTDOWN + '초 카운트다운</span>'}
+        </footer>
+        <p class="online-note">팀은 온 순서대로 번갈아 자동 배정 · 경기 방에서 포스 패치를 고를 수 있습니다 (${QUICK_WAIT}초 뒤 자동 시작).</p>
+      </div>`;
+  };
+
+  // 대기열에서 출발: 진행자는 방장으로 방을 열고, 나머지는 그 코드로 참가 (팀은 대기열에서 정한 대로)
+  const goMatch = async ({ code, map, teams, team, ticket, host }) => {
+    net.mm = null;
+    const s = net.session;
+    const name = settings.name || '요원';
+    try {
+      if (host) {
+        await s.enter(code, name, true);
+        s.set({ tk: ticket, team, lobby: { map, diff: settings.difficulty ?? 'normal', quick: { teams, n: Object.keys(teams).length, left: QUICK_WAIT } } });
+        net.quick = { deadline: Date.now() + QUICK_WAIT * 1000, started: false };
+      } else {
+        await s.join(code, name);
+        s.set({ tk: ticket, team });
+      }
+    } catch (err) {
+      console.error(err);
+      toast?.('경기 방에 들어가지 못했습니다. 다시 매칭하세요.');
+    }
+    render();
+  };
+
+  // 빠른 매칭 방장: 모두 모여 준비하면 바로, 아니면 정해진 시간 뒤 자동 시작 (남은 시간은 대기실에 알림)
+  const quickTick = () => {
+    const s = net.session;
+    if (!s?.room || !s.isHost || !net.quick || net.quick.started) return;
+    const lobby = s.me.lobby;
+    if (!lobby?.quick) return;
+    const peers = s.peers();
+    const tickets = Object.keys(lobby.quick.teams ?? {});
+    const here = peers.filter((p) => tickets.includes(p.tk));
+    const allReady = here.length >= tickets.length && here.every((p) => p.ready || p.me);
+    const left = Math.max(0, Math.ceil((net.quick.deadline - Date.now()) / 1000));
+    if (left !== lobby.quick.left) s.set({ lobby: { ...lobby, quick: { ...lobby.quick, left } } });
+    if (allReady || left <= 0) {
+      net.quick.started = true;
+      start();
+    }
+  };
+  const quickTimer = setInterval(quickTick, 500);
 
   // ── 방 만들기 / 참가
   const drawMenu = () => {
     body.innerHTML = `
       <div class="online-card">
         <label class="field"><span>콜사인</span><input class="name-input" maxlength="8" value="${esc(settings.name || '요원')}"></label>
+        <div class="quick-cta">
+          <div><h3>빠른 매칭</h3><p>기다리는 요원끼리 자동으로 묶어 5 대 5 경기를 엽니다. 팀은 자동, 빈자리는 봇, 맵은 투표(없으면 무작위).</p></div>
+          <button class="btn primary big" data-act="quick">빠른 매칭</button>
+        </div>
         <div class="online-actions">
           <div class="oa-col">
             <h3>방 만들기</h3>
@@ -98,6 +183,10 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     const isHost = !!me && host?.key === me.key;
     const lobby = host?.lobby ?? { map: settings.mapId, diff: settings.difficulty ?? 'normal' };
     const cqb = lobby.mode === 'cqb';
+    // 빠른 매칭 방: 팀은 대기열에서 정한 대로 (다시 들어와도 같은 팀)
+    const quick = !cqb ? lobby.quick : null;
+    const quickTeam = quick && me?.tk ? quick.teams?.[me.tk] : null;
+    if (quickTeam && me.team !== quickTeam) s.set({ team: quickTeam });
     // 방장이 경기 방식을 바꾸면 준비를 풀어 다시 확인하게
     if (me && !isHost && lastMode != null && lastMode !== (lobby.mode ?? 'rounds') && me.ready) s.set({ ready: false });
     lastMode = lobby.mode ?? 'rounds';
@@ -114,7 +203,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
       return `<div class="lobby-team t-${t}"><div class="lt-head"><b>${TEAM_INFO[t].name}</b><span>${list.length} / ${TEAM_MAX} · 빈자리 봇</span></div>
         <ul>${list.map((p) => `<li class="${p.me ? 'me' : ''}"><span class="lt-name">${esc(p.name)}${p.key === host?.key ? ' <i>방장</i>' : ''}</span><span class="lt-load">${(p.load ?? []).map((id) => PATCH_ICONS[id] ?? '').join('')}</span><span class="lt-ready ${p.ready || p.key === host?.key ? 'on' : ''}">${p.key === host?.key ? '방장' : p.ready ? '준비' : '대기'}</span></li>`).join('')}
         ${Array.from({ length: Math.max(0, TEAM_MAX - list.length) }, () => `<li class="bot"><span class="lt-name">봇</span></li>`).join('')}</ul>
-        <button class="btn ${team === t ? 'primary' : 'ghost'} small" data-team="${t}" ${team !== t && counts[t] >= TEAM_MAX ? 'disabled' : ''}>${team === t ? '소속됨' : '이 팀으로'}</button></div>`;
+        <button class="btn ${team === t ? 'primary' : 'ghost'} small" data-team="${t}" ${(team !== t && counts[t] >= TEAM_MAX) || quick ? 'disabled' : ''}>${team === t ? '소속됨' : quick ? '자동 배정' : '이 팀으로'}</button></div>`;
     };
     const unassigned = peers.filter((p) => !p.team);
     const tierRow = (tier) => `
@@ -166,11 +255,15 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
         </div>`;
       return;
     }
+    const quickBar = quick
+      ? `<div class="quick-room"><b>빠른 매칭</b><span>팀 자동 배정 · 맵 <em>${esc(getMapDef(lobby.map).name)}</em> · ${net.quick?.started || (quick.left ?? 0) <= 0 ? '곧 시작' : `<em>${quick.left ?? QUICK_WAIT}초</em> 뒤 자동 시작 (모두 준비하면 바로)`}</span></div>`
+      : '';
     body.innerHTML = `
       <div class="lobby">
         ${noHost}
+        ${quickBar}
         <div class="lobby-code"><small>방 코드</small><b>${esc(s.code)}</b><span>친구에게 이 코드를 알려 주세요 · 같은 아티팩트 링크에서 <b>코드로 참가</b></span><button class="btn ghost small" data-act="copy">복사</button></div>
-        ${modeSeg}
+        ${quick ? '' : modeSeg}
         <div class="lobby-grid">
           <div class="lobby-teams">${roster(TEAMS.DEFUSE)}${roster(TEAMS.FORCE)}
             ${unassigned.length ? `<p class="lobby-unassigned">소속 미정: ${unassigned.map((p) => esc(p.name)).join(', ')}</p>` : ''}
@@ -187,10 +280,10 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
         <footer class="screen-foot">
           <button class="btn ghost" data-act="leave">방 나가기</button>
           ${isHost
-            ? `<button class="btn primary big" data-act="start" ${everyoneReady ? '' : 'disabled'}>작전 개시</button>`
+            ? `<button class="btn primary big" data-act="start" ${everyoneReady || quick ? '' : 'disabled'}>${quick ? '지금 시작' : '작전 개시'}</button>`
             : `<button class="btn ${me?.ready ? 'ghost' : 'primary'} big" data-act="ready" ${team ? '' : 'disabled'}>${me?.ready ? '준비 취소' : '준비 완료'}</button>`}
         </footer>
-        ${isHost && !everyoneReady ? '<p class="online-note right">모두 소속을 고르고 준비하면 시작할 수 있습니다. 빈자리는 봇.</p>' : ''}
+        ${isHost && !everyoneReady && !quick ? '<p class="online-note right">모두 소속을 고르고 준비하면 시작할 수 있습니다. 빈자리는 봇.</p>' : ''}
       </div>`;
   };
 
@@ -230,12 +323,51 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     s.set({ start: st, g: null });
   };
 
+  el.addEventListener('quick-start', () => joinQueue(settings.name || '요원'));
+  // 빠른 매칭 대기열에 들어감
+  const joinQueue = async (name) => {
+    settings.name = name;
+    const mm = new Matchmaker(net.transport, { name, onGo: (g) => goMatch(g), onChange: () => render() });
+    net.mm = mm;
+    try {
+      await net.session?.leave();
+      await mm.start();
+    } catch (err) {
+      console.error(err);
+      net.mm = null;
+      toast?.('매칭 대기열에 들어가지 못했습니다. 잠시 후 다시 시도하세요.');
+    }
+    render();
+  };
+
   el.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     const s = net.session;
     if (act === 'back') {
+      if (net.mm) {
+        const mm = net.mm;
+        net.mm = null;
+        await mm.leave();
+      }
       await s?.leave();
+      net.quick = null;
       onBack();
+      return;
+    }
+    if (act === 'quick') {
+      await joinQueue(body.querySelector('.name-input')?.value.trim() || settings.name || '요원');
+      return;
+    }
+    if (net.mm) {
+      const v = e.target.closest('[data-vote]');
+      if (v) net.mm.setVote(v.dataset.vote || null);
+      if (act === 'mm-now') net.mm.launchNow();
+      if (act === 'mm-cancel') {
+        const mm = net.mm;
+        net.mm = null;
+        await mm.leave();
+        render();
+      }
       return;
     }
     if (act === 'create' || act === 'join') {
@@ -278,6 +410,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     if (act === 'copy') navigator.clipboard?.writeText(s.code).then(() => toast?.('방 코드를 복사했습니다.'), () => {});
     if (act === 'leave') {
       await s.leave();
+      net.quick = null;
       render();
     }
   });
@@ -311,12 +444,15 @@ export function onlineScreen({ settings, net, onBack, onStart, toast }) {
     }
     if (disposed) return;
     off = net.session?.onChange(watch);
+    // 메인에서 '빠른 매칭'으로 들어왔으면 바로 대기열로 (연결이 안 되면 안내 화면 그대로)
+    if (quickStart && net.transport && !net.mm && !net.session?.room) el.querySelector('.online-body').dispatchEvent(new CustomEvent('quick-start', { bubbles: true }));
     render();
   })();
 
   el.cleanup = () => {
     disposed = true;
     cancelAnimationFrame(raf);
+    clearInterval(quickTimer);
     off?.();
   };
   return el;

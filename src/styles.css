@@ -6229,3 +6229,153 @@ button.kb-row:hover {
     right: 10px;
   }
 }
+
+/* ── 빠른 매칭 */
+.quick-btn {
+  border: 1px solid #7fe0a8;
+  color: #d8f7e4;
+  background: rgba(127, 224, 168, 0.08);
+}
+
+.quick-btn:hover {
+  background: rgba(127, 224, 168, 0.16);
+}
+
+.quick-cta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 16px 0 4px;
+  padding: 16px 18px;
+  border: 1px solid #7fe0a8;
+  background: rgba(127, 224, 168, 0.06);
+}
+
+.quick-cta p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.quick-cta .btn {
+  flex: none;
+}
+
+.quick-card {
+  width: min(820px, 100%);
+}
+
+.quick-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.quick-count {
+  font: 700 22px var(--mono);
+  color: #bdf2d2;
+}
+
+.quick-status {
+  font-size: 14px;
+}
+
+.quick-status b {
+  color: #bdf2d2;
+  font-family: var(--mono);
+}
+
+.quick-bar {
+  height: 4px;
+  margin: 4px 0 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.quick-bar i {
+  display: block;
+  height: 100%;
+  background: #7fe0a8;
+  transition: width 0.3s ease;
+}
+
+.quick-list {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.quick-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.quick-list li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.quick-list li.me {
+  border-color: #7fe0a8;
+}
+
+.quick-list li.bot {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.quick-list li i {
+  font: 600 10px var(--mono);
+  font-style: normal;
+  color: #7fe0a8;
+}
+
+.quick-maps {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.quick-maps em,
+.quick-room em {
+  font-style: normal;
+  color: #bdf2d2;
+}
+
+.quick-room {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 16px 0 0;
+  padding: 10px 16px;
+  font-size: 13px;
+  border: 1px solid #7fe0a8;
+  background: rgba(127, 224, 168, 0.07);
+}
+
+.quick-room b {
+  font: 700 13px var(--mono);
+  color: #bdf2d2;
+}
+
+@media (max-width: 760px) {
+  .quick-cta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .quick-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .quick-maps {
+    grid-template-columns: 1fr;
+  }
+}

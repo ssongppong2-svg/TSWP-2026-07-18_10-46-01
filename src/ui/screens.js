@@ -25,7 +25,7 @@ const tierColor = (id) => PATCH_TIERS[PATCHES[id].tier].color;
 const slotKeys = (tier) => LOADOUT_SLOTS.filter((s) => s.tier === tier).map((s) => s.key).join('·');
 
 // ───────────────────────── 타이틀 ─────────────────────────
-export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline, onOp }) {
+export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onCodex, onOnline, onOp, onQuick }) {
   const prog = loadProgress();
   const mastered = masteredIds().length;
   const el = h(`
@@ -39,7 +39,8 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
           <div class="menu-main">
             <button class="btn primary big" data-act="start">5 대 5 교전 <small>봇 9명</small></button>
             <button class="btn big op-btn" data-act="op">CQB 작전 <small>인질 구출 · 진압</small></button>
-            <button class="btn big online-btn" data-act="online">온라인 <small>친구와 함께</small></button>
+            <button class="btn big online-btn" data-act="online">온라인 <small>친구와 함께 · 방 코드</small></button>
+            <button class="btn big quick-btn" data-act="quick">빠른 매칭 <small>자동 5 대 5 · 빈자리 봇</small></button>
           </div>
           <div class="menu-row">
             <button class="btn ghost" data-act="codex">개념 도감 <small>${prog.concepts.length}/${CONCEPTS.length}${mastered ? ` · 숙달 ${mastered}` : ''}</small></button>
@@ -61,6 +62,7 @@ export function titleScreen({ onStart, onControls, onSettings, onFullscreen, onC
     if (act === 'fullscreen') onFullscreen();
     if (act === 'codex') onCodex?.();
     if (act === 'online') onOnline?.();
+    if (act === 'quick') onQuick?.();
     if (act === 'op') onOp?.();
   });
   return el;
