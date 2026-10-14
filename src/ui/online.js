@@ -142,6 +142,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast, quick: qui
     if (left !== lobby.quick.left) s.set({ lobby: { ...lobby, quick: { ...lobby.quick, left } } });
     if (allReady || left <= 0) {
       net.quick.started = true;
+      s.set({ lobby: { ...lobby, quick: { ...lobby.quick, left: 0, done: true } } });
       start();
     }
   };
@@ -203,7 +204,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast, quick: qui
       return `<div class="lobby-team t-${t}"><div class="lt-head"><b>${TEAM_INFO[t].name}</b><span>${list.length} / ${TEAM_MAX} · 빈자리 봇</span></div>
         <ul>${list.map((p) => `<li class="${p.me ? 'me' : ''}"><span class="lt-name">${esc(p.name)}${p.key === host?.key ? ' <i>방장</i>' : ''}</span><span class="lt-load">${(p.load ?? []).map((id) => PATCH_ICONS[id] ?? '').join('')}</span><span class="lt-ready ${p.ready || p.key === host?.key ? 'on' : ''}">${p.key === host?.key ? '방장' : p.ready ? '준비' : '대기'}</span></li>`).join('')}
         ${Array.from({ length: Math.max(0, TEAM_MAX - list.length) }, () => `<li class="bot"><span class="lt-name">봇</span></li>`).join('')}</ul>
-        <button class="btn ${team === t ? 'primary' : 'ghost'} small" data-team="${t}" ${(team !== t && counts[t] >= TEAM_MAX) || quick ? 'disabled' : ''}>${team === t ? '소속됨' : quick ? '자동 배정' : '이 팀으로'}</button></div>`;
+        <button class="btn ${team === t ? 'primary' : 'ghost'} small" data-team="${t}" ${(team !== t && counts[t] >= TEAM_MAX) || quickTeam ? 'disabled' : ''}>${team === t ? '소속됨' : quickTeam ? '자동 배정' : '이 팀으로'}</button></div>`;
     };
     const unassigned = peers.filter((p) => !p.team);
     const tierRow = (tier) => `
@@ -256,7 +257,7 @@ export function onlineScreen({ settings, net, onBack, onStart, toast, quick: qui
       return;
     }
     const quickBar = quick
-      ? `<div class="quick-room"><b>빠른 매칭</b><span>팀 자동 배정 · 맵 <em>${esc(getMapDef(lobby.map).name)}</em> · ${net.quick?.started || (quick.left ?? 0) <= 0 ? '곧 시작' : `<em>${quick.left ?? QUICK_WAIT}초</em> 뒤 자동 시작 (모두 준비하면 바로)`}</span></div>`
+      ? `<div class="quick-room"><b>빠른 매칭</b><span>팀 자동 배정 · 맵 <em>${esc(getMapDef(lobby.map).name)}</em> · ${quick.done ? '다음 판은 방장이 시작 (나중에 코드로 온 요원은 팀을 고름)' : (quick.left ?? QUICK_WAIT) <= 0 ? '곧 시작' : `<em>${quick.left ?? QUICK_WAIT}초</em> 뒤 자동 시작 (모두 준비하면 바로)`}</span></div>`
       : '';
     body.innerHTML = `
       <div class="lobby">

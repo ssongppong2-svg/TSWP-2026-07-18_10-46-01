@@ -70,7 +70,7 @@ test('빠른 매칭: 2명부터 카운트다운 → 진행자가 방을 열고 �
   let clock = 1000;
   const now = () => clock;
   const gos = [];
-  const mk = (name) => new Matchmaker(tr, { name, now, tick: 0, linger: 0, onGo: (g) => gos.push({ name, ...g }) });
+  const mk = (name) => new Matchmaker(tr, { name, now, tick: 0, linger: 0, goDelay: 0, onGo: (g) => gos.push({ name, ...g }) });
   const a = mk('가'), b = mk('나'), c = mk('다');
   await a.start();
   clock += 10;
@@ -98,7 +98,7 @@ test('빠른 매칭: 혼자면 카운트다운 없음 · 진행자는 지금 시
   const tr = memoryTransport();
   let clock = 0;
   const gos = [];
-  const solo = new Matchmaker(tr, { name: '혼자', now: () => clock, tick: 0, linger: 0, onGo: (g) => gos.push(g) });
+  const solo = new Matchmaker(tr, { name: '혼자', now: () => clock, tick: 0, linger: 0, goDelay: 0, onGo: (g) => gos.push(g) });
   await solo.start();
   solo.update();
   assert.equal(solo.countdown, null);
@@ -112,7 +112,7 @@ test('빠른 매칭: 혼자면 카운트다운 없음 · 진행자는 지금 시
   const many = [];
   for (let i = 0; i < MM_MAX; i++) {
     clock += 1;
-    const m = new Matchmaker(tr2, { name: `요원${i}`, now: () => clock, tick: 0, linger: 0, onGo: (g) => got.push(g) });
+    const m = new Matchmaker(tr2, { name: `요원${i}`, now: () => clock, tick: 0, linger: 0, goDelay: 0, onGo: (g) => got.push(g) });
     await m.start();
     many.push(m);
   }
@@ -121,4 +121,24 @@ test('빠른 매칭: 혼자면 카운트다운 없음 · 진행자는 지금 시
   assert.equal(got.length, MM_MAX, '10명이 모이면 카운트다운 없이 출발');
   assert.equal(Object.values(got[0].teams).filter((t) => t === 'defuse').length, 5);
   await new Promise((r) => setTimeout(r, 20));
+});
+
+test('빠른 매칭: 진행자는 출발 알림을 먼저 올리고 잠시 뒤 방으로 (나머지가 알림을 읽을 시간)', async () => {
+  const tr = memoryTransport();
+  let clock = 0;
+  const gos = [];
+  const a = new Matchmaker(tr, { name: '가', now: () => clock, tick: 0, linger: 200, goDelay: 60, onGo: (g) => gos.push(g) });
+  const b = new Matchmaker(tr, { name: '나', now: () => clock, tick: 0, linger: 200, goDelay: 60, onGo: (g) => gos.push(g) });
+  await a.start();
+  clock += 5;
+  await b.start();
+  a.update();
+  a.launchNow();
+  b.update();
+  assert.ok(!gos.some((g) => g.host), '진행자는 아직 방으로 가지 않음');
+  assert.ok(gos.some((g) => !g.host), '나머지는 알림을 보자마자 출발');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(gos.length, 2);
+  assert.ok(gos.some((g) => g.host), '잠시 뒤 진행자도 방으로');
+  await new Promise((r) => setTimeout(r, 250));
 });

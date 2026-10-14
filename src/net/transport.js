@@ -41,8 +41,13 @@ function wrapClaudeRoom(r, tag = null) {
         .map((p) => ({ peer: p.peer, isMe: p.isMe && p.sameTab, presence: p.presence ?? {}, updatedAt: p.updatedAt })),
     onPeers: (fn) => r.onPeers(() => fn()),
     connected: () => r.connected(),
-    // 공용 방을 빌려 쓴 경우에는 나가지 않고 내 상태만 지움
-    leave: () => (tag ? r.presence({ k: null, rm: null, g: null, in: null, start: null }).catch(() => {}) : r.leave().catch(() => {})),
+    // 공용 방을 빌려 쓴 경우에는 나가지 않고 내 상태만 지움 — 그 사이 다른 방(이름표)으로 옮겼으면 그 방 상태는 건드리지 않음
+    leave: () => {
+      if (!tag) return r.leave().catch(() => {});
+      const mine = r.peers().find((p) => p.isMe && p.sameTab !== false);
+      if (mine && mine.presence?.rm !== tag) return Promise.resolve();
+      return r.presence({ k: null, rm: null, g: null, in: null, start: null, go: null, tk: null, cd: null, vote: null }).catch(() => {});
+    },
   };
 }
 

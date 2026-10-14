@@ -42,7 +42,7 @@ const ticketId = () => Math.random().toString(36).slice(2, 10);
 
 // 대기열 하나에 들어가 있는 동안의 상태 · 출발 처리
 export class Matchmaker {
-  constructor(transport, { name, onGo, onChange, now = () => Date.now(), linger = 5000, tick = 250 }) {
+  constructor(transport, { name, onGo, onChange, now = () => Date.now(), linger = 5000, tick = 250, goDelay = 1200 }) {
     this.transport = transport;
     this.name = String(name || '요원').slice(0, 8);
     this.onGo = onGo;
@@ -50,6 +50,7 @@ export class Matchmaker {
     this.now = now;
     this.linger = linger; // 출발 알림을 대기열에 남겨 두는 시간 (ms)
     this.tick = tick;
+    this.goDelay = goDelay; // 진행자는 출발 알림을 올리고 이만큼 기다렸다가 방으로 (모두가 알림을 읽을 시간)
     this.ticket = ticketId();
     this.room = null;
     this.vote = null;
@@ -150,8 +151,11 @@ export class Matchmaker {
     this.launched = true;
     // 출발 알림은 다른 사람이 볼 수 있게 몇 초 남겨 둔 뒤 대기열을 떠남
     this.room.presence({ go: { code, map, teams }, cd: null });
-    this.onGo?.({ code, map, teams, team: teams[this.ticket], ticket: this.ticket, host: true });
-    setTimeout(() => this.leave(), this.linger);
+    const go = () => this.onGo?.({ code, map, teams, team: teams[this.ticket], ticket: this.ticket, host: true });
+    if (this.goDelay > 0) setTimeout(go, this.goDelay);
+    else go();
+    setTimeout(() => this.leave(), Math.max(this.linger, this.goDelay + 300));
+    this.onChange?.();
   }
 
   async leave() {
