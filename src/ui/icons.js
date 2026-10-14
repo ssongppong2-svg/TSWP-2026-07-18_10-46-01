@@ -18,7 +18,31 @@ export const PATCH_ICONS = {
   buoyShield: `<svg ${S}>
     <path d="M12 6h24v20l-12 6-12-6z"/><path d="M24 11v15" opacity=".45"/>
     <path d="M14 45v-7M24 45v-7M34 45v-7"/><path d="M11 41l3-3 3 3M21 41l3-3 3 3M31 41l3-3 3 3"/></svg>`,
+  // 반작용 추진기: 등 뒤로 뿜는 가스(작용) ↔ 앞으로 나가는 몸(반작용)
+  reactionDash: `<svg ${S}>
+    <rect x="19" y="16" width="10" height="16"/><path d="M29 24h14" stroke-width="4"/><path d="M37 17l7 7-7 7" stroke-width="3.2"/>
+    <path d="M17 19l-8-3M17 24H5M17 29l-8 3" opacity=".55"/></svg>`,
+  // 무게 닻: 무거운 추 + 아래로 향한 무게 화살표
+  weightAnchor: `<svg ${S}>
+    <path d="M18 10a6 6 0 0 1 12 0"/><path d="M14 13h20l5 20H9z"/><path d="M24 33v8" stroke-width="3.6"/><path d="M19 37l5 5 5-5"/>
+    <path d="M18 24h12" opacity=".5"/></svg>`,
+  // 마찰 장갑: 거친 접촉면 + 멈춤 표시
+  frictionGrip: `<svg ${S}>
+    <path d="M10 28V14a3 3 0 0 1 6 0v10M16 13a3 3 0 0 1 6 0v11M22 14a3 3 0 0 1 6 0v10M28 18a3 3 0 0 1 6 0v12l-4 6H16l-6-8"/>
+    <path d="M4 44l4-4 4 4 4-4 4 4 4-4 4 4 4-4 4 4 4-4 4 4"/></svg>`,
   // ── 특수 ──
+  // 부력 풍선: 풍선 + 위(부력)·아래(중력) 화살표 (힘의 평형)
+  buoyBalloon: `<svg ${S}>
+    <ellipse cx="24" cy="15" rx="10" ry="12"/><path d="M24 27l-2 3h4z"/><path d="M24 30v12" opacity=".6"/>
+    <path d="M40 22V6M36 10l4-4 4 4" opacity=".75"/><path d="M8 26v16M4 38l4 4 4-4" opacity=".75"/></svg>`,
+  // 탄성 덫: 눌린 용수철 + 위로 튕기는 화살표
+  springTrap: `<svg ${S}>
+    <path d="M6 42h36"/><path d="M10 36l28-4M10 32l28-4M10 28l28-4"/><path d="M8 22h32"/>
+    <path d="M24 17V3"/><path d="M18 9l6-6 6 6"/><path d="M12 14l-4-4M36 14l4-4" opacity=".5"/></svg>`,
+  // 합력 표적: 표적 + 여러 방향에서 모이는 같은 방향 화살표
+  resultantMark: `<svg ${S}>
+    <circle cx="30" cy="24" r="11"/><circle cx="30" cy="24" r="4" fill="currentColor"/>
+    <path d="M3 14h13M3 24h13M3 34h13"/><path d="M12 10l4 4-4 4M12 20l4 4-4 4M12 30l4 4-4 4" opacity=".7"/></svg>`,
   frictionZero: `<svg ${S}>
     <rect x="15" y="13" width="17" height="15"/><path d="M3 33h42"/><path d="M3 39h9M17 39h9M31 39h14" opacity=".55"/>
     <path d="M36 20h9"/><path d="M41 16l4 4-4 4"/><path d="M4 20h6" opacity=".45"/></svg>`,
@@ -34,6 +58,10 @@ export const PATCH_ICONS = {
     <path d="M24 43A19 19 0 0 1 5 24" opacity=".45"/><path d="M5 24A19 19 0 0 1 24 5" opacity=".25"/><path d="M24 13a11 11 0 0 1 11 11"/></svg>`,
   resultantSurge: `<svg ${S}>
     <path d="M4 9l15 11M4 24h15M4 39l15-11"/><path d="M19 24h17" stroke-width="5"/><path d="M31 15l11 9-11 9" stroke-width="3.6"/></svg>`,
+  // 중력 낙하: 떨어지는 1톤 추 + 아래 화살표 + 땅에 닿을 자리
+  gravityDrop: `<svg ${S}>
+    <path d="M17 4h14l3 12H14z"/><path d="M24 20v14" stroke-width="3.6"/><path d="M18 28l6 6 6-6"/>
+    <ellipse cx="24" cy="42" rx="14" ry="3" opacity=".6"/><path d="M20 10h8" opacity=".5"/></svg>`,
   frictionStorm: `<svg ${S}>
     <path d="M3 41l4-5 4 5 4-5 4 5 4-5 4 5 4-5 4 5 4-5 4 5"/><path d="M38 24H10"/><path d="M16 18l-6 6 6 6"/>
     <path d="M30 6l-4 6h6l-4 6" opacity=".6"/><path d="M42 8l-3 5h5l-3 5" opacity=".35"/></svg>`,

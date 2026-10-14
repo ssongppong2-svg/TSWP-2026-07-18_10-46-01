@@ -365,3 +365,21 @@ test('온라인 동기화: 사건이 한꺼번에 몰려 스냅숏이 넘쳐도 
   assert.equal(got[12].attacker, null);
   assert.equal(got[12].amount, 30);
 });
+
+test('온라인 동기화: 새 포스 패치 상태(무게 닻·마찰 장갑·부력 풍선·합력 표적)가 참가자 화면에 전달됨', () => {
+  const { host, client } = setup();
+  const hs = new HostSync(host);
+  const cs = new ClientSync(client, 'defuse-1');
+  client.localAgent = client.agentById('defuse-1');
+  host.phase = 'live';
+  const a = host.agentById('force-1');
+  Object.assign(a, { anchorT: 3.2, gripT: 1.5, buoyT: 2.25, buoyTop: 4.5, markT: 5, markTeam: 'defuse' });
+  for (let j = 0; j < 2; j++) cs.apply(JSON.parse(JSON.stringify(hs.snapshot({ withStats: true }))), 1);
+  const c = client.agentById('force-1');
+  assert.equal(c.anchorT, 3.2);
+  assert.equal(c.gripT, 1.5);
+  assert.equal(c.buoyT, 2.25);
+  assert.equal(c.buoyTop, 4.5);
+  assert.equal(c.markT, 5);
+  assert.equal(c.markTeam, 'defuse');
+});

@@ -179,6 +179,13 @@ export const PATCH_CONCEPT = {
   frictionZero: 'friction',
   frictionStorm: 'frictionFactors',
   weightScanner: 'weightMass',
+  reactionDash: 'actionReaction',
+  weightAnchor: 'weightMass',
+  frictionGrip: 'frictionFactors',
+  buoyBalloon: 'equilibrium',
+  springTrap: 'springScale',
+  resultantMark: 'resultantSame',
+  gravityDrop: 'gravity',
 };
 
 // 경기가 끝난 뒤 낼 점검 문제 (주운 카드 우선, 모자라면 이번 경기에 쓴 패치 관련 개념, 그래도 모자라면 남은 개념)

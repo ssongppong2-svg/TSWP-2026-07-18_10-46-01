@@ -46,7 +46,7 @@ test('봇끼리 5:5 경기가 끝까지 진행되고 규칙대로 끝남', () =>
     else assert.ok(match.alive(TEAMS.DEFUSE).length === 0 || match.timeLeft <= 0);
     for (const a of match.agents) {
       assert.ok(Number.isFinite(a.pos.x) && Number.isFinite(a.pos.y) && Number.isFinite(a.pos.z));
-      assert.ok(a.pos.y >= 0 && a.pos.y < 6, `${a.name} y=${a.pos.y}`);
+      assert.ok(a.pos.y >= 0 && a.pos.y < 8, `${a.name} y=${a.pos.y}`); // 2층(3.6 m) + 부력 풍선(3.2 m)까지
     }
   }
   console.log('승리:', results, '사유:', reasons, '패치 사용:', patchUses, '처치:', kills, '해체:', defuses);

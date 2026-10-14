@@ -396,7 +396,7 @@ export class Hud {
     const me = this.match.agentById(this.localId);
     const side = (a) => (a?.squad === this.squad ? 'ally' : 'enemy');
     const row = el('div', `kf-row ${killer?.id === me.id || victim.id === me.id ? 'mine' : ''}`);
-    const wIcon = WEAPON_ICONS[weapon] ?? '';
+    const wIcon = WEAPON_ICONS[weapon] ?? GEAR_ICONS[weapon] ?? PATCH_ICONS[weapon] ?? '';
     row.innerHTML = `${killer ? `<b class="${side(killer)}">${esc(killer.name)}</b>` : ''}<span class="kf-w">${wIcon}</span>${headshot ? `<span class="kf-h">${GEAR_ICONS.head}</span>` : ''}<b class="${side(victim)}">${esc(victim.name)}</b>`;
     this.els.feed.appendChild(row);
     setTimeout(() => row.classList.add('out'), 6000);
@@ -439,7 +439,7 @@ export class Hud {
     }
     const k = r.killer;
     const hpBar = (v) => `<i class="dc-hp"><i style="transform:scaleX(${Math.max(0, Math.min(1, v / 100)).toFixed(2)})"></i></i>`;
-    const icon = WEAPON_ICONS[r.weapon] ?? GEAR_ICONS[r.weapon] ?? '';
+    const icon = WEAPON_ICONS[r.weapon] ?? GEAR_ICONS[r.weapon] ?? PATCH_ICONS[r.weapon] ?? '';
     const rows = r.attackers.slice(0, 3).map((x) => `<li><b>${esc(x.name)}</b><span>${x.hits}발${x.headshots ? ` · 머리 ${x.headshots}` : ''}</span><em>${Math.round(x.amount)}</em></li>`).join('');
     const acc = r.dealt.shots ? ` · 명중 ${r.dealt.hits}/${r.dealt.shots}` : '';
     E.deathCard.innerHTML = `

@@ -389,10 +389,10 @@ export function draftScreen({ team, playerName, seed = Date.now(), audio, onDone
     const p = PATCHES[id];
     return `
       <button class="patch-card tier-${p.tier} ${isMastered(id) ? 'mastered' : ''}" data-patch="${id}" style="--tier:${tierColor(id)}">
-        <div class="pc-top"><div class="pc-icon">${PATCH_ICONS[id]}</div><span class="pc-concept">${isMastered(id) ? '<b class="pc-star">★</b>' : ''}${p.concept}</span></div>
+        <div class="pc-top"><div class="pc-icon">${PATCH_ICONS[id]}</div></div>
         <div class="pc-name">${p.name}</div>
         <div class="pc-short">${p.short}</div>
-        <div class="pc-stock"></div>
+        <div class="pc-foot"><span class="pc-concept">${isMastered(id) ? '<b class="pc-star">★</b>' : ''}${p.concept}</span><div class="pc-stock"></div></div>
         <div class="pc-flash"></div>
       </button>`;
   };

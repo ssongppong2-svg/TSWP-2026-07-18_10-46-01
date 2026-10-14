@@ -1,7 +1,7 @@
 import { TILES, STORY } from '../sim/map.js';
 
 const SITE = { A: '#d9a441', B: '#9b8ac4' };
-const ZONE_FILL = { friction: 'rgba(150,200,215,0.22)', storm: 'rgba(196,150,90,0.26)', net: 'rgba(181,154,223,0.3)', collapse: 'rgba(181,154,223,0.32)' };
+const ZONE_FILL = { friction: 'rgba(150,200,215,0.22)', storm: 'rgba(196,150,90,0.26)', net: 'rgba(181,154,223,0.3)', collapse: 'rgba(181,154,223,0.32)', trap: 'rgba(127,224,138,0.45)', drop: 'rgba(255,90,90,0.45)' };
 
 const ALLY = '#4fe0c0';
 const ENEMY = '#ff4655';
@@ -193,9 +193,9 @@ export class TacticalMap {
       }
     }
 
-    // 아군이 만든 패치 구역
+    // 아군이 만든 패치 구역 (중력 낙하 자리는 위험하므로 양쪽 모두에게)
     for (const z of m.zones) {
-      if (z.team !== myTeam) continue;
+      if (z.team !== myTeam && z.type !== 'drop') continue;
       const [x, y] = this.toPx(z.x, z.z);
       g.beginPath();
       g.arc(x, y, (z.radius / m.map.width) * m.map.cols * S, 0, Math.PI * 2);

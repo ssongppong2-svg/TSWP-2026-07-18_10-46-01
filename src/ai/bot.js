@@ -1089,6 +1089,41 @@ export class BotBrain {
         case 'resultantSurge':
           if (visible && match.alive(a.team).length >= 2 && td < 40) this.nowPatch = slot;
           break;
+        case 'reactionDash': {
+          // 맞고 있으면 옆걸음 방향으로 빠져나감 · 교전 없이 먼 길을 갈 때 가끔 질주
+          const hurt = match.time - a.lastHurtT < 0.5 && a.hp < 70;
+          const far = !visible && this.path && this.pathIdx < this.path.length && dist2(this.path[this.pathIdx], a.pos) > 9 && !this.goal?.quiet;
+          if (a.onGround && (hurt || (far && this.rng.chance(0.15)))) this.nowPatch = slot;
+          break;
+        }
+        case 'weightAnchor':
+        case 'frictionGrip':
+          // 교전을 시작할 때 (무게 닻: 반동↓·안 밀림 / 마찰 장갑: 멈춰 쏘기) · 마찰 구역에 갇히면 마찰 장갑
+          if ((visible && !WEAPONS[a.weapon].melee && this.reactLeft <= 0.1 && td < 35) || (p.id === 'frictionGrip' && (a.slippery || a.mired))) this.nowPatch = slot;
+          break;
+        case 'buoyBalloon':
+          // 지키는 중 가까이에서 소리가 나면 떠올라 높은 곳에서 내려다봄
+          if (!visible && a.onGround && this.heard && match.time - this.heard.t < 2.5 && dist2(this.heard, a.pos) < 26 && this.rng.chance(0.2)) this.nowPatch = slot;
+          break;
+        case 'springTrap': {
+          // 지키는 자리에서 바라보는 길목 쪽(거리의 70%, 최대 7 m) 바닥에 덫 (이미 깔려 있으면 그대로)
+          if (visible || !this.goal?.look || Math.hypot(a.vel.x, a.vel.z) > 0.8) break;
+          if (match.zones.some((z) => z.type === 'trap' && z.ownerId === a.id)) break;
+          const lx = this.goal.look.x - a.pos.x, lz = this.goal.look.z - a.pos.z, l = Math.hypot(lx, lz) || 1;
+          const d = Math.min(7, l * 0.7);
+          if (d > 2 && this.rng.chance(0.3)) this.pending = { slot, point: { x: a.pos.x + (lx / l) * d, y: a.pos.y + 0.05, z: a.pos.z + (lz / l) * d }, t: 0.8 };
+          break;
+        }
+        case 'resultantMark':
+          // 아군이 함께 싸울 때 보이는 적에게 표적
+          if (visible && td < def.range - 3 && match.alive(a.team).length >= 2) this.pending = { slot, point: chestPos(target), t: 0.6 };
+          break;
+        case 'gravityDrop':
+          // 멈춰 있거나(해체 중 포함) 뭉친 적에게
+          if (visible && td > 8 && td < def.range - 2 && (target.lockpick || Math.hypot(target.vel.x, target.vel.z) < 1.2 || bestGroup(def.range, 6).bestScore >= 2)) {
+            this.pending = { slot, point: { x: target.pos.x, y: target.pos.y + 0.05, z: target.pos.z }, t: 1 };
+          }
+          break;
         case 'gravityCollapse':
         case 'frictionStorm': {
           if (!visible) break;

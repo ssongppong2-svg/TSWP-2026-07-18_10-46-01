@@ -1909,13 +1909,45 @@ export class AgentView {
     if (a.held) ring = '#9b7fd1';
     else if (a.mired) ring = '#a08860';
     else if (a.slippery) ring = '#8fd3e0';
+    else if (a.markT > 0) ring = '#ffb347'; // 합력 표적
+    else if (a.anchorT > 0) ring = '#c9b2ff'; // 무게 닻
+    else if (a.gripT > 0) ring = '#ff8f6a'; // 마찰 장갑
     else if (a.ampT > 0) ring = '#d9a25a';
+    this.updateBalloon(a, dt, time);
     this.ring.visible = !!ring;
     if (ring) {
       this.ring.material.color.set(ring);
       this.ring.position.y = 0.06 + Math.sin(time * 5) * 0.03;
       this.ring.rotation.z += dt * 2;
     }
+  }
+
+  // 부력 풍선: 머리 위에 떠서 살랑거림 + 줄 (떠 있는 동안 눈에 잘 띔)
+  updateBalloon(a, dt, time) {
+    const on = (a.buoyT ?? 0) > 0 && a.alive;
+    if (!on && !this.balloon) return;
+    if (!this.balloon) {
+      const g = new THREE.Group();
+      const skin = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 24, 16),
+        new THREE.MeshStandardMaterial({ color: '#7fd6ff', roughness: 0.22, metalness: 0.05, emissive: '#2a7fa8', emissiveIntensity: 0.35, transparent: true, opacity: 0.92 }),
+      );
+      skin.scale.set(1, 1.18, 1);
+      const knot = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 8), skin.material);
+      knot.position.y = -0.52;
+      knot.rotation.x = Math.PI;
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -0.56, 0), new THREE.Vector3(0.05, -1.1, 0.02), new THREE.Vector3(0.18, -1.55, 0.05)]),
+        new THREE.LineBasicMaterial({ color: '#d8e4ea' }),
+      );
+      g.add(skin, knot, line);
+      this.root.add(g);
+      this.balloon = g;
+    }
+    this.balloon.visible = on;
+    if (!on) return;
+    this.balloon.position.set(0.15 + Math.sin(time * 1.3) * 0.06, 3.15 + Math.sin(time * 2.1) * 0.05, Math.cos(time * 1.1) * 0.06);
+    this.balloon.rotation.z = Math.sin(time * 1.7) * 0.08;
   }
 
   // 상체 공간의 점 → 루트 공간

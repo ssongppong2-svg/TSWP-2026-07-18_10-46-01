@@ -11,7 +11,7 @@ import { AMMO_ORDER, WEAPONS } from '../sim/data.js';
 import { GEAR_ORDER, THROW_ORDER, emptyGear } from '../sim/gear.js';
 import { makeHoles } from '../sim/blackhole.js';
 
-export const PROTOCOL = 10;
+export const PROTOCOL = 11;
 const CONCEPT_IDS = CONCEPTS.map((c) => c.id);
 // 총 번호 (뒤에만 덧붙임 · 총이 늘면 PROTOCOL도 올림: ITEMS 번호가 밀리기 때문)
 const WEAP = ['rifle', 'pistol', 'knife', 'sheriff', 'shotgun', 'smg', 'sniper', 'mpistol', 'carbine', 'burst', 'dmr', 'lmg'];
@@ -163,6 +163,8 @@ export class HostSync {
         encEquip(a.equip),
         a.mirror ? (a.mirror.door + 1) * a.mirror.side : 0, // 문 밑 카메라 (문 번호+1, 부호 = 보는 쪽)
         a.kickT > 0 ? 1 : 0, // 발차기 동작 중
+        // 새 포스 패치 상태: 무게 닻 · 마찰 장갑 · 부력 풍선(남은 시간·떠오를 높이) · 합력 표적(남은 시간·찍은 팀)
+        r2(a.anchorT ?? 0), r2(a.gripT ?? 0), r2(a.buoyT ?? 0), r2(a.buoyTop ?? 0), r2(a.markT ?? 0), a.markTeam === 'force' ? 2 : a.markTeam ? 1 : 0,
       ];
     });
     // 사람이 조종하는 요원만: 탄약·패치 대기·필살 게이지·해체 문제·입력 확인 번호
@@ -283,7 +285,7 @@ export class ClientSync {
     snap.A.forEach((s, i) => {
       const a = m.agents[i];
       if (!a) return;
-      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak, eq, mi, kk] = s;
+      const [x, y, z, vx, vy, vz, yaw, pitch, hp, flags, w, crouch, lean, leanOffset, adsT, reloadT, swapT, sinceShot, meleeCd, ampT, reveal, heldZ, lpBomb, armor, spotted, pw, sw, ak, eq, mi, kk, anchorT, gripT, buoyT, buoyTop, markT, markTeam] = s;
       const alive = !!(flags & 1);
       if (!alive && a.alive) a.deadT = 0;
       a.alive = alive;
@@ -296,6 +298,12 @@ export class ClientSync {
       a.mired = !!(flags & 4);
       a.slippery = !!(flags & 8);
       a.ampT = ampT;
+      a.anchorT = anchorT ?? 0;
+      a.gripT = gripT ?? 0;
+      a.buoyT = buoyT ?? 0;
+      a.buoyTop = buoyTop ?? 0;
+      a.markT = markT ?? 0;
+      a.markTeam = markTeam === 2 ? 'force' : markTeam === 1 ? 'defuse' : null;
       a.revealedUntil = reveal > 0 ? m.time + reveal : -99;
       a.held = heldZ ? { zoneId: heldZ, x, y, z } : null;
       // 문 밑 카메라: 이 화면 요원은 카메라 방향(yaw·pitch)을 그대로 두고 문·쪽만 맞춤

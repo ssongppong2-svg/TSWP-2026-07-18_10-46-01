@@ -39,6 +39,13 @@ export const PATCH_COLORS = {
   gravityCollapse: '#8b74b8',
   resultantSurge: '#e0a14f',
   frictionStorm: '#a08860',
+  reactionDash: '#ffd84a',
+  weightAnchor: '#c9b2ff',
+  frictionGrip: '#ff8f6a',
+  buoyBalloon: '#7fd6ff',
+  springTrap: '#7fe08a',
+  resultantMark: '#ffb347',
+  gravityDrop: '#ff5a5a',
 };
 
 const FRESNEL_VERT = /* glsl */ `
@@ -732,6 +739,28 @@ export class Effects {
           if (m) this.sparks.burst({ x: m.pos.x, y: m.pos.y + 1, z: m.pos.z }, c, 22, { speed: 2, up: 2.5, life: 0.6, gravity: -1 });
         }
         break;
+      case 'reactionDash': {
+        // 등 뒤로 뿜는 가스(작용) — 몸은 반대쪽으로 나감(반작용)
+        const d = e.dir ?? { x: 0, z: 0 };
+        const back = { x: -d.x, y: 0, z: -d.z };
+        const p = { x: a.pos.x - d.x * 0.4, y: a.pos.y + 0.9, z: a.pos.z - d.z * 0.4 };
+        this.dust.burst(p, '#b8b2a6', 26, { speed: 7, up: 0.3, life: 0.7, gravity: 0, drag: 3, normal: back, spread: 0.5 });
+        this.sparks.burst(p, c, 18, { speed: 9, up: 0.2, life: 0.25, gravity: 0, normal: back, spread: 0.4 });
+        break;
+      }
+      case 'weightAnchor':
+        // 쿵: 발밑 바닥에 무게가 실림
+        this.dust.ring({ x: a.pos.x, y: a.pos.y + 0.05, z: a.pos.z }, '#8a8478', 32, 4, 0.6, 0.2);
+        this.pulses.push(this.makePulse(a.pos, 1.6, c));
+        break;
+      case 'frictionGrip':
+        this.sparks.burst({ x: a.pos.x, y: a.pos.y + 0.1, z: a.pos.z }, c, 14, { speed: 2, up: 0.4, life: 0.35, gravity: 4 });
+        break;
+      case 'resultantMark': {
+        const t = this.match.agentById(e.target);
+        if (t) this.sparks.burst({ x: t.pos.x, y: t.pos.y + 1.2, z: t.pos.z }, c, 24, { speed: 2.5, up: 1.2, life: 0.5, gravity: -1 });
+        break;
+      }
       default:
         break;
     }
@@ -917,7 +946,7 @@ export class Effects {
     this.casingMesh.instanceMatrix.needsUpdate = true;
 
     this.updateVeils(dt);
-    this.updateZones(dt);
+    this.updateZones(dt, viewerTeam);
     this.updateShields(dt);
 
     for (const pad of this.pads) {
@@ -1070,7 +1099,7 @@ export class Effects {
     return { root, edge, fade: 0 };
   }
 
-  updateZones(dt) {
+  updateZones(dt, viewerTeam = null) {
     const live = new Set();
     for (const z of this.match.zones) {
       live.add(z.id);
@@ -1091,6 +1120,32 @@ export class Effects {
         u.opacity.value = e.fade * (alive && z.t < 1 ? 0.6 + 0.4 * Math.sin(this.time * 20) : 1);
       }
       if (e.label) e.label.material.opacity = e.fade * 0.9;
+      if (z.type === 'trap') {
+        // 탄성 덫: 놓은 팀에게만 보임 · 준비되면 불빛이 깜빡임 · 튕기면 용수철이 펴짐
+        e.root.visible = viewerTeam == null || viewerTeam === z.team || !alive;
+        const armed = z.age > 0.6;
+        e.light.material.opacity = e.fade * (armed ? 0.55 + 0.45 * Math.sin(this.time * 6) : 0.25);
+        e.sprung = !alive && (e.sprung || e.fade > 0.6);
+        const k = e.sprung ? Math.min(2.6, (e.springK ?? 1) + dt * 18) : 1;
+        e.springK = k;
+        e.spring.scale.y = k;
+        e.top.position.y = z.y + 0.08 + 0.12 * k;
+      }
+      if (z.type === 'drop') {
+        // 중력 낙하: 경고 원(남은 시간만큼 고리가 줄어듦) · 띄운 추 → 놓으면 중력으로 점점 빨라지며 떨어짐
+        e.age = alive ? (Math.abs((e.age ?? 0) - z.age) > 0.2 ? z.age : (e.age ?? z.age) + dt) : e.age ?? z.age;
+        const ft = Math.max(0, e.age - z.warn);
+        const y = Math.max(z.y + 0.55, z.top - 0.5 * z.g * ft * ft);
+        e.weight.position.set(z.x, y, z.z);
+        e.weight.visible = alive && e.age < z.warn + z.fall + 0.02;
+        e.weight.rotation.y += dt * (ft > 0 ? 0.5 : 2);
+        const left = Math.max(0, 1 - e.age / (z.warn + z.fall));
+        e.count.scale.setScalar(Math.max(0.02, left) * z.radius);
+        e.count.material.opacity = e.fade * 0.85;
+        e.beam.material.opacity = e.fade * (ft > 0 ? 0.25 : 0.12) * (alive ? 1 : 0);
+        e.beam.scale.y = Math.max(0.01, y - z.y);
+        e.beam.position.y = z.y + (y - z.y) / 2;
+      }
       if (z.type === 'storm' && alive && Math.random() < dt * 40) {
         const a = Math.random() * Math.PI * 2, r = Math.random() * z.radius;
         this.dust.burst({ x: z.x + Math.cos(a) * r, y: z.y + 0.3 + Math.random() * 1.5, z: z.z + Math.sin(a) * r }, '#8a7a5e', 2, { speed: 3, up: 0.3, life: 1.2, gravity: 0, drag: 0.5 });
@@ -1165,6 +1220,58 @@ export class Effects {
       ring.position.set(z.x, (z.groundY ?? 0) + 0.04, z.z);
       root.add(core, rim, ring);
       Object.assign(e, { core, rim, ring });
+    }
+    if (z.type === 'trap') {
+      // 탄성 덫: 바닥판 + 압축된 용수철 + 윗판(불빛 테)
+      const steel = new THREE.MeshStandardMaterial({ color: '#4a5058', metalness: 0.85, roughness: 0.35 });
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.66, 0.05, 24), steel);
+      base.position.set(z.x, z.y + 0.03, z.z);
+      const pts = [];
+      for (let i = 0; i <= 80; i++) {
+        const t = i / 80;
+        pts.push(new THREE.Vector3(Math.cos(t * Math.PI * 12) * 0.4, t * 0.1, Math.sin(t * Math.PI * 12) * 0.4));
+      }
+      const spring = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 120, 0.025, 6), steel);
+      spring.position.set(z.x, z.y + 0.05, z.z);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.04, 24), steel);
+      top.position.set(z.x, z.y + 0.2, z.z);
+      const light = new THREE.Mesh(
+        new THREE.RingGeometry(0.5, 0.62, 40),
+        new THREE.MeshBasicMaterial({ color: PATCH_COLORS.springTrap, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
+      );
+      light.rotation.x = -Math.PI / 2;
+      light.position.set(z.x, z.y + 0.07, z.z);
+      root.add(base, spring, top, light);
+      Object.assign(e, { spring, top, light });
+    } else if (z.type === 'drop') {
+      const red = PATCH_COLORS.gravityDrop;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(z.radius, 64), sheenMaterial(red));
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.set(z.x, z.y + 0.03, z.z);
+      const count = new THREE.Mesh(
+        new THREE.RingGeometry(0.93, 1, 72),
+        new THREE.MeshBasicMaterial({ color: red, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
+      );
+      count.rotation.x = -Math.PI / 2;
+      count.position.set(z.x, z.y + 0.05, z.z);
+      // 1톤 추: 육각 쇳덩이 + 고리 + '1t' 글자
+      const iron = new THREE.MeshStandardMaterial({ color: '#2d3036', metalness: 0.8, roughness: 0.45, emissive: '#ff3a2a', emissiveIntensity: 0.15 });
+      const weight = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 1.1, 6), iron);
+      const hook = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 8, 20), iron);
+      hook.position.y = 0.72;
+      const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture('1 t · 9,800 N', red), transparent: true, depthWrite: false }));
+      tag.scale.set(1.6, 0.36, 1);
+      tag.position.y = 1.3;
+      weight.add(body, hook, tag);
+      weight.position.set(z.x, z.top, z.z);
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 1, 8),
+        new THREE.MeshBasicMaterial({ color: red, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+      );
+      beam.position.set(z.x, z.y, z.z);
+      root.add(disc, count, weight, beam);
+      Object.assign(e, { disc, count, weight, beam });
     }
     if (z.type === 'collapse' || z.type === 'net') {
       const beamGeo = new THREE.BufferGeometry();

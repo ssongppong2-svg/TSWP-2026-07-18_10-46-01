@@ -704,7 +704,7 @@ button {
 
 .tier-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
   gap: 8px;
 }
 
@@ -714,13 +714,16 @@ button {
   gap: 16px;
 }
 
+/* 패치 카드: 가로형 (아이콘 왼쪽 · 이름·설명 오른쪽 · 아래에 팀 배정 칸) — 패치 18개가 한 화면에 들어오게 */
 .patch-card {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 136px;
-  padding: 10px 11px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-height: 0;
+  padding: 9px 10px 8px;
   text-align: left;
   border: 1px solid var(--line);
   border-top: 2px solid color-mix(in srgb, var(--tier) 60%, transparent);
@@ -783,14 +786,15 @@ button {
 }
 
 .pc-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: contents;
 }
 
 .pc-icon {
-  width: 36px;
-  height: 36px;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: start;
+  width: 38px;
+  height: 38px;
   padding: 4px;
   color: var(--tier);
   border: 1px solid color-mix(in srgb, var(--tier) 45%, transparent);
@@ -803,7 +807,8 @@ button {
 }
 
 .pc-concept {
-  font: 500 11px var(--mono);
+  flex: none;
+  font: 500 10.5px var(--mono);
   color: var(--muted);
 }
 
@@ -816,28 +821,44 @@ button {
   color: var(--warn);
 }
 
-.patch-card.mine .pc-concept,
-.patch-card.soldout .pc-concept {
-  visibility: hidden;
-}
-
 .pc-name {
-  margin-top: 4px;
+  grid-column: 2;
+  grid-row: 1;
   font-weight: 700;
   font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pc-short {
+  grid-column: 2;
+  grid-row: 2;
   font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.35;
+}
+
+/* 아래 줄: 개념 이름 · 팀 배정 칸 */
+.pc-foot {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.patch-card.mine .pc-name {
+  padding-right: 36px; /* '장착' 표시 자리 */
 }
 
 .pc-stock {
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: 4px;
-  margin-top: auto;
-  padding-top: 6px;
 }
 
 .stock {

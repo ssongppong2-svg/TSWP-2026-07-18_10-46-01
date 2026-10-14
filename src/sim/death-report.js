@@ -1,12 +1,12 @@
 // 죽음 분석표: 한 요원의 이번 목숨 동안 받은 피해·준 피해·사격을 모아, 쓰러지면 무엇 때문에 졌는지 정리한다.
 // 화면과 무관한 순수 계산 → Node 시험 가능. (방장·참가자 화면 모두 자기 화면에서 본 사건으로 만듦)
 import { chestPos, eyePos } from './agent.js';
-import { WEAPONS } from './data.js';
+import { PATCHES, WEAPONS } from './data.js';
 import { GEAR } from './gear.js';
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const wrap = (x) => Math.atan2(Math.sin(x), Math.cos(x));
-export const weaponName = (id) => WEAPONS[id]?.name ?? GEAR[id]?.name ?? { blast: '폭발' }[id] ?? id ?? '알 수 없음';
+export const weaponName = (id) => WEAPONS[id]?.name ?? GEAR[id]?.name ?? PATCHES[id]?.name ?? { blast: '폭발' }[id] ?? id ?? '알 수 없음';
 
 export class DeathLog {
   constructor(match, agentId) {

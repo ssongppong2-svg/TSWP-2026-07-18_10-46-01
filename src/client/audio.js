@@ -951,6 +951,74 @@ const SOUNDS = {
     a.tone(o, t + 0.12, 0.35, { type: 'sine', freq: 988, gain: 0.08 });
   },
   // 탄성 발판: 용수철이 튕기는 '보잉' + 착지 충격
+  // ── 새 포스 패치 ──
+  // 반작용 추진기: 가스가 '푸쉭' 뿜어져 나감 + 몸이 밀려 나가는 바람
+  dash(a, t, pos, vol) {
+    const o = a.out(pos, 0.6 * vol, 0.7, 0.1);
+    a.noise(o, t, 0.32, { type: 'bandpass', freq: 900, q: 0.7, gain: 0.9, attack: 0.005, sweepTo: 300 });
+    a.noise(o, t, 0.12, { type: 'lowpass', freq: 260, gain: 0.8, buf: a.brownBuf });
+    a.noise(o, t + 0.05, 0.4, { type: 'bandpass', freq: 500, q: 0.9, gain: 0.35, attack: 0.08, sweepTo: 1800 });
+  },
+  // 무게 닻: 무게가 실리며 바닥이 '쿵' + 쇠사슬 소리
+  anchor(a, t, pos, vol) {
+    const o = a.out(pos, 0.7 * vol, 1.2, 0.25);
+    a.tone(o, t, 0.6, { type: 'sine', freq: 70, to: 32, gain: 1 });
+    a.noise(o, t, 0.25, { type: 'lowpass', freq: 200, gain: 0.9, buf: a.brownBuf });
+    for (let i = 0; i < 4; i++) a.click(o, t + 0.05 + i * 0.05, 2600 + i * 300, 0.25, 9);
+  },
+  // 마찰 장갑: 거친 면이 긁히는 '끽'
+  grip(a, t, pos, vol) {
+    const o = a.out(pos, 0.45 * vol, 0.5, 0.05);
+    a.noise(o, t, 0.22, { type: 'bandpass', freq: 2400, q: 2, gain: 0.5, attack: 0.01, sweepTo: 1400 });
+    a.tone(o, t, 0.18, { type: 'sawtooth', freq: 340, to: 260, gain: 0.06 });
+  },
+  // 부력 풍선: 가스가 차오르는 '쉬이익' (점점 높아짐)
+  balloon(a, t, pos, vol) {
+    const o = a.out(pos, 0.5 * vol, 1.2, 0.05);
+    a.noise(o, t, 0.9, { type: 'bandpass', freq: 700, q: 1.2, gain: 0.5, attack: 0.1, sweepTo: 2200 });
+    a.tone(o, t + 0.1, 0.8, { type: 'triangle', freq: 220, to: 420, gain: 0.08 });
+  },
+  // 풍선이 터짐: '빵'
+  pop(a, t, pos, vol) {
+    const o = a.out(pos, 0.7 * vol, 0.6, 0.15);
+    a.noise(o, t, 0.03, { type: 'highpass', freq: 1800, gain: 1, attack: 0.0005 });
+    a.noise(o, t, 0.15, { type: 'bandpass', freq: 900, q: 0.8, gain: 0.6, sweepTo: 300 });
+  },
+  // 탄성 덫 설치: 용수철을 눌러 거는 '끼릭 · 딸깍'
+  trapSet(a, t, pos, vol) {
+    const o = a.out(pos, 0.35 * vol, 0.5, 0.05);
+    a.tone(o, t, 0.25, { type: 'triangle', freq: 900, to: 500, gain: 0.12, vibrato: 40 });
+    a.click(o, t + 0.24, 3600, 0.5, 7);
+  },
+  // 탄성 덫 작동: 용수철이 펴지는 '보잉' + 쇳소리
+  trapSpring(a, t, pos, vol) {
+    const o = a.out(pos, 0.8 * vol, 1, 0.15);
+    a.click(o, t, 3000, 0.8, 6);
+    a.tone(o, t, 0.6, { type: 'triangle', freq: 180, to: 620, gain: 0.35, vibrato: 26 });
+    a.tone(o, t, 0.4, { type: 'sine', freq: 80, to: 50, gain: 0.7 });
+  },
+  // 합력 표적: 조준 고정 '삐비빅'
+  mark(a, t, pos, vol) {
+    const o = a.out(pos, 0.4 * vol, 0.5, 0.05);
+    for (let i = 0; i < 3; i++) a.tone(o, t + i * 0.07, 0.06, { type: 'square', freq: 1500 + i * 300, gain: 0.08 });
+  },
+  // 중력 낙하: 하늘 위 추가 내는 낮은 웅웅 → 떨어지며 높아지는 휘파람
+  dropWarn(a, t, pos, vol) {
+    const o = a.out(pos, 0.8 * vol, 3.5, 0.3);
+    a.tone(o, t, 0.8, { type: 'sine', freq: 60, to: 90, gain: 0.5, attack: 0.2 });
+    a.tone(o, t + 0.8, 2.2, { type: 'sine', freq: 400, to: 1400, gain: 0.12, attack: 0.3 });
+    a.noise(o, t + 0.8, 2.2, { type: 'bandpass', freq: 600, q: 2, gain: 0.25, attack: 1.2, sweepTo: 2400 });
+  },
+  // 1톤 추가 땅에 닿음: 쇳덩이 '쾅' + 땅울림
+  dropImpact(a, t, pos, vol) {
+    const o = a.out(pos, 1.0 * vol, 4, 0.8, 1.0);
+    a.noise(o, t, 0.05, { type: 'highpass', freq: 1400, gain: 1, attack: 0.001 });
+    a.tone(o, t, 1.4, { type: 'sine', freq: 52, to: 20, gain: 1 });
+    a.noise(o, t, 2, { type: 'lowpass', freq: 180, gain: 1, attack: 0.01, buf: a.brownBuf });
+    a.tone(o, t, 1.6, { type: 'triangle', freq: 340, to: 330, gain: 0.18 }); // 쇳덩이 울림
+    a.tone(o, t, 1.2, { type: 'triangle', freq: 517, to: 510, gain: 0.1 });
+    for (let i = 0; i < 10; i++) a.noise(o, t + 0.15 + Math.random() * 1.2, 0.05, { type: 'bandpass', freq: 900 + Math.random() * 2400, q: 3, gain: 0.2 });
+  },
   pad(a, t, pos, vol) {
     const o = a.out(pos, 0.6 * vol, 0.8, 0.15);
     a.noise(o, t, 0.1, { type: 'lowpass', freq: 220, gain: 1, buf: a.brownBuf });

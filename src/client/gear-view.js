@@ -113,15 +113,15 @@ export class GearView {
     const p = { x: e.x, y: e.y, z: e.z };
     const fx = this.effects;
     const near = cameraPos ? Math.hypot(cameraPos.x - p.x, cameraPos.y - p.y, cameraPos.z - p.z) : 99;
-    if (e.kind === 'frag' || e.kind === 'c4') {
+    if (e.kind === 'frag' || e.kind === 'c4' || e.kind === 'drop') {
       // 플라스마 폭발: 흰빛·주황 불티 + 보랏빛 파편 + 어두운 보랏빛 먼지
       //   (불덩이·충격파·달궈진 파편·그을음·폭발 빛은 BlastView)
-      const big = e.kind === 'c4' ? 1.4 : 1;
+      const big = e.kind === 'frag' ? 1 : 1.4; // C4 · 중력 낙하(1톤 추)는 크게
       fx.sparks.burst(p, '#ffd9a8', Math.round(70 * big), { speed: 13 * big, up: 2, life: 0.9, gravity: 6, spread: 1.4 });
       fx.sparks.burst(p, '#c39bff', Math.round(50 * big), { speed: 10 * big, up: 2, life: 0.8, gravity: 2, spread: 1.5 });
       fx.dust.burst(p, '#2f2a3a', Math.round(60 * big), { speed: 7 * big, up: 2, life: 2.4, gravity: 0.6, spread: 1.3, drag: 1.4 });
       fx.smoke.burst(p, '#2a2734', Math.round(10 * big), { speed: 3, up: 2.2, life: 3.5, gravity: -0.6, spread: 1, drag: 0.9 });
-      this.blasts?.spawn(e, e.kind);
+      this.blasts?.spawn(e, e.kind === 'frag' ? 'frag' : 'c4');
       if (near < 18) fx.shake = Math.max(fx.shake, (1 - near / 18) * 1.2 * big);
     } else if (e.kind === 'flash') {
       fx.sparks.burst(p, '#ffffff', 40, { speed: 6, up: 1, life: 0.25, gravity: 0 });

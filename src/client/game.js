@@ -53,6 +53,7 @@ const PATCH_SOUNDS = {
   gravityVeil: 'veil', elasticPad: 'pad', resultantAmp: 'amp', reactionRounds: 'rounds', buoyShield: 'shield',
   frictionZero: 'friction', elasticNet: 'net', weightScanner: 'scanner',
   gravityCollapse: 'collapse', resultantSurge: 'surge', frictionStorm: 'storm',
+  reactionDash: 'dash', weightAnchor: 'anchor', frictionGrip: 'grip', buoyBalloon: 'balloon', springTrap: 'trapSet', resultantMark: 'mark', gravityDrop: 'dropWarn',
 };
 
 // 한 경기를 화면에 연결: 시뮬레이션 + 3D + 소리 + HUD
@@ -401,18 +402,18 @@ export class GameClient {
       this.gearView.onDetonate(e, this.stage.camera.position);
       const pos = { x: e.x, y: e.y, z: e.z };
       if (e.kind === 'c4' && e.ownerId === this.viewAgent?.id) A.play('detClick');
-      const snd = { frag: 'fragBlast', c4: 'c4Blast', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss', emp: 'empBlast' }[e.kind];
+      const snd = { frag: 'fragBlast', c4: 'c4Blast', drop: 'dropImpact', stun: 'stunBang', flash: 'flashBang', smoke: 'smokeHiss', gas: 'smokeHiss', emp: 'empBlast' }[e.kind];
       if (snd) A.play(snd, { pos });
       // 폭발력 화살표: 폭발 지점에서 바깥쪽으로 밀린 요원마다 (작용점 = 가슴, 크기 = 질량 × 속도 변화 ÷ 0.05초)
-      if (e.kind === 'frag' || e.kind === 'c4') this.blastArrows(e);
-      // 가까운 폭발(세열·C4)은 잠깐 귀가 먹먹해짐 (무겁게 · 거리 12 m 안)
-      if (e.kind === 'frag' || e.kind === 'c4') {
+      if (e.kind === 'frag' || e.kind === 'c4' || e.kind === 'drop') this.blastArrows(e);
+      // 가까운 폭발(세열·C4·중력 낙하)은 잠깐 귀가 먹먹해짐 (무겁게 · 거리 12 m 안)
+      if (e.kind === 'frag' || e.kind === 'c4' || e.kind === 'drop') {
         const cam = this.stage.camera.position;
         const d = Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
         this.blastDeaf = Math.max(this.blastDeaf ?? 0, Math.max(0, 1 - d / 12) * 0.85);
         this.shake = Math.min(1, this.shake + Math.max(0, 1 - d / 16) * 0.6);
         // 폭풍이 얼굴을 때림: 고개가 폭발 반대쪽으로 젖혀지고(가까울수록 큼) 눈앞이 잠깐 하얗게
-        const k = Math.max(0, 1 - d / 14) * (e.kind === 'c4' ? 1.3 : 1);
+        const k = Math.max(0, 1 - d / 14) * (e.kind === 'frag' ? 1 : 1.3);
         if (k > 0 && (this.viewAgent ?? this.player).alive) {
           const right = this.tmpVel.set(1, 0, 0).applyQuaternion(this.stage.camera.quaternion);
           const side = Math.sign((e.x - cam.x) * right.x + (e.z - cam.z) * right.z) || 1;
@@ -629,12 +630,27 @@ export class GameClient {
       if (isMe(e.agent)) this.hud.concept(e.patchId);
       if (e.patchId === 'weightScanner' && e.agent.team === this.team) this.hud.banner('무게 감지 작동', '4초간 달리기·사격·착지 진동 탐지', 'warn');
       if (e.patchId === 'resultantSurge' && e.agent.team === this.team) this.hud.banner('합력 폭주', '분대 전원 공격력 +15% · 8초', 'good');
+      this.patchForces(e);
+    });
+    // 탄성 덫이 튕김 · 부력 풍선이 터짐
+    ev.on('trapSprung', (e) => {
+      A.play('trapSpring', { pos: e.zone });
+      this.effects.sparks.burst({ x: e.zone.x, y: e.zone.y + 0.3, z: e.zone.z }, '#7fe08a', 26, { speed: 4, up: 2.5, life: 0.5, gravity: 6 });
+      const v = e.agent;
+      this.forceArrows.add({ at: { x: v.pos.x, y: v.pos.y + 0.05, z: v.pos.z }, dir: { x: 0, y: 1, z: 0 }, N: (agentMass(v) * PATCHES.springTrap.launch) / (0.08 * (e.heavy ?? 1)), kind: 'elastic', follow: v, self: viewing(v) });
+      if (isMe(v)) this.hud.banner('탄성 덫!', '튕겨 올라 3초 동안 위치가 드러남', 'bad');
+      else if (e.zone.team === this.team) this.hud.banner('탄성 덫 작동', `${v.name} 튕겨 오름 · 위치 표시`, 'good');
+    });
+    ev.on('balloonPop', (e) => {
+      const a = e.agent;
+      A.play('pop', { pos: { x: a.pos.x, y: a.pos.y + 3, z: a.pos.z } });
+      this.effects.sparks.burst({ x: a.pos.x, y: a.pos.y + 3.1, z: a.pos.z }, '#7fd6ff', 20, { speed: 3, up: 1, life: 0.4, gravity: 6 });
     });
     ev.on('patchDenied', (e) => {
       if (isMe(e.agent)) {
         A.play('denied');
         const def = PATCHES[e.agent.patches[e.slot].id];
-        this.hud.banner(def.name, e.reason === 'gauge' ? '필살 게이지 미충전' : '재사용 대기 중', 'small');
+        this.hud.banner(def.name, e.reason === 'gauge' ? '필살 게이지 미충전' : e.reason === 'noTarget' ? '조준선 가까이에 보이는 적이 없음' : '재사용 대기 중', 'small');
       }
     });
     ev.on('captured', (e) => {
@@ -1277,7 +1293,7 @@ export class GameClient {
   // 블랙홀 장면 카메라: 내가 쓰러졌거나 빨려 든 뒤에는 가까운 블랙홀을 천천히 돌며 바라봄 (벽 안으로 들어가지 않게)
   // 폭발력 화살표: 규칙과 같은 계산(벽에 가린 정도 · 거리)으로 밀린 요원을 찾아 바깥쪽으로
   blastArrows(e) {
-    const def = GEAR[e.kind];
+    const def = e.kind === 'drop' ? PATCHES.gravityDrop : GEAR[e.kind];
     if (!def) return;
     const at = { x: e.x, y: e.y, z: e.z };
     const cam = this.stage.camera.position;
@@ -1289,8 +1305,33 @@ export class GameClient {
       const k = Math.max(exposure(this.match.map, at, c, def.radius), exposure(this.match.map, at, eyePos(a), def.radius) * 0.8);
       if (k <= 0) continue;
       const dx = c.x - at.x, dz = c.z - at.z, l = Math.hypot(dx, dz) || 1;
-      const h = EFFECT.knock * k, up = 2.5 * k, dv = Math.hypot(h, up);
-      this.forceArrows.add({ at: c, dir: { x: ((dx / l) * h) / dv, y: up / dv, z: ((dz / l) * h) / dv }, N: (agentMass(a) * dv) / 0.05, kind: 'blast', follow: a, self: a === va });
+      // 무게 닻: 무게가 3배라 같은 힘에 덜 밀림 (속도 변화가 1/3)
+      const heavy = a.anchorT > 0 ? PATCHES.weightAnchor.mult : 1;
+      const h = (EFFECT.knock * k) / heavy, up = heavy > 1 ? 0 : 2.5 * k, dv = Math.hypot(h, up);
+      this.forceArrows.add({ at: c, dir: { x: ((dx / l) * h) / dv, y: up / dv, z: ((dz / l) * h) / dv }, N: (agentMass(a) * heavy * dv) / 0.05, kind: 'blast', follow: a, self: a === va });
+    }
+  }
+
+  // 패치를 쓰는 순간의 힘: 반작용 추진기(작용·반작용 한 쌍) · 무게 닻 · 합력 표적·중력 낙하 알림
+  patchForces(e) {
+    const a = e.agent;
+    const va = this.viewAgent ?? this.player;
+    if (e.patchId === 'reactionDash' && e.dir) {
+      // 같은 크기 · 반대 방향: 추진기가 가스를 뒤로 밂(작용) ↔ 가스가 추진기를 앞으로 밂(반작용)
+      const N = (agentMass(a) * PATCHES.reactionDash.speed) / 0.2;
+      const c = chestPos(a);
+      this.forceArrows.add({ at: { x: c.x - e.dir.x * 0.35, y: c.y, z: c.z - e.dir.z * 0.35 }, dir: { x: -e.dir.x, y: 0, z: -e.dir.z }, N, kind: 'action', life: 1.2 });
+      this.forceArrows.add({ at: c, dir: { x: e.dir.x, y: 0, z: e.dir.z }, N, kind: 'reaction', follow: a, life: 1.2, self: a === va });
+    }
+    if (e.patchId === 'weightAnchor' && a === va) this.hud.banner('무게 닻', `무게 ×${PATCHES.weightAnchor.mult} · 안 밀림 · 반동 −40% · 5초`, 'good');
+    if (e.patchId === 'buoyBalloon' && a === va) this.hud.banner('부력 풍선', '부력 > 중력 → 떠오름 · 부력 = 중력 → 떠 있음', 'good');
+    if (e.patchId === 'resultantMark') {
+      const t = this.match.agentById(e.target);
+      if (t && t === va) this.hud.banner('합력 표적에 찍힘', '6초 동안 위치가 드러나고 더 많이 다침', 'bad');
+      else if (t && a.team === this.team) this.hud.banner('합력 표적', `${t.name} · 맞힌 아군 1명마다 피해 +10%`, 'good');
+    }
+    if (e.patchId === 'gravityDrop' && e.zone && va.alive && Math.hypot(va.pos.x - e.zone.x, va.pos.z - e.zone.z) < e.zone.radius + 3) {
+      this.hud.banner('머리 위에 1톤 추!', `${(e.zone.warn + e.zone.fall).toFixed(1)}초 뒤 떨어짐 · 붉은 원 밖으로`, 'bad');
     }
   }
 
@@ -1307,9 +1348,32 @@ export class GameClient {
       // 작용점 = 밀리는 면의 가운데 (미는 사람 쪽)
       this.forceArrows.live(`crate${d.id}`, { at: { x: cx - st.dir[0] * CELL * 0.5, y: 0.6, z: cz - st.dir[1] * CELL * 0.5 }, dir: { x: st.dir[0], y: 0, z: st.dir[1] }, N: st.force * CRATE.personN, kind: 'net', xray: true });
     }
+    // 포스 패치: 무게 닻(무게 ×3) · 부력 풍선(부력 ↑ · 중력 ↓ — 떠 있으면 같은 크기) · 마찰 장갑(멈출 때 마찰력) · 떨어지는 1톤 추(중력)
+    const va = this.viewAgent ?? this.player;
+    const G = 9.8 * (m.map.gravity ?? 1);
+    for (const a of m.agents) {
+      if (!a.alive || Math.hypot(a.pos.x - cam.x, a.pos.z - cam.z) > 35) continue;
+      const self = a === va;
+      const W = agentMass(a) * G;
+      if (a.anchorT > 0) this.forceArrows.live(`anchor${a.id}`, { at: { x: a.pos.x, y: a.pos.y + 0.9, z: a.pos.z }, dir: { x: 0, y: -1, z: 0 }, N: W * PATCHES.weightAnchor.mult, kind: 'weight', self, xray: true });
+      if (a.buoyT > 0) {
+        const rising = a.pos.y < (a.buoyTop ?? 0) - 0.1;
+        this.forceArrows.live(`buoy${a.id}`, { at: { x: a.pos.x, y: a.pos.y + 2.2, z: a.pos.z }, dir: { x: 0, y: 1, z: 0 }, N: W * (rising ? 1.3 : 1), kind: 'buoyancy', self });
+        if (!self) this.forceArrows.live(`buoyW${a.id}`, { at: { x: a.pos.x, y: a.pos.y + 0.9, z: a.pos.z }, dir: { x: 0, y: -1, z: 0 }, N: W, kind: 'gravity', xray: true });
+      }
+      const sp = Math.hypot(a.vel.x, a.vel.z);
+      if (a.gripT > 0 && a.onGround && sp > 0.8 && !self) {
+        this.forceArrows.live(`grip${a.id}`, { at: { x: a.pos.x, y: a.pos.y + 0.05, z: a.pos.z }, dir: { x: -a.vel.x / sp, y: 0, z: -a.vel.z / sp }, N: 0.9 * W, kind: 'friction' });
+      }
+    }
+    for (const z of m.zones) {
+      if (z.type !== 'drop' || z.age < z.warn) continue;
+      const ft = z.age - z.warn;
+      const y = Math.max(z.y + 0.55, z.top - 0.5 * z.g * ft * ft);
+      this.forceArrows.live(`drop${z.id}`, { at: { x: z.x + 1, y, z: z.z }, dir: { x: 0, y: -1, z: 0 }, N: 1000 * G, kind: 'gravity' });
+    }
     // 블랙홀: 가까울수록 훨씬 세게 (거리의 제곱에 반비례) — 화면 가까운 요원 6명까지
     if (m.holes?.length) {
-      const va = this.viewAgent ?? this.player;
       const list = m.agents.filter((a) => !a.absorbed).map((a) => ({ a, d: Math.hypot(a.pos.x - cam.x, a.pos.z - cam.z) })).sort((p, q) => p.d - q.d).slice(0, 6);
       for (const { a } of list) {
         const c = chestPos(a);

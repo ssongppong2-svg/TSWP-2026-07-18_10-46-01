@@ -11,6 +11,7 @@ export const FORCE_KIND = {
   net: { name: '합력', color: '#4fe3ff' },
   gravity: { name: '중력', color: '#b48cff' },
   friction: { name: '마찰력', color: '#ff6a5a' },
+  action: { name: '작용', color: '#ffd84a' },
   reaction: { name: '반작용', color: '#ffd84a' },
   buoyancy: { name: '부력', color: '#6fc8ff' },
   weight: { name: '무게', color: '#d7c2ff' },

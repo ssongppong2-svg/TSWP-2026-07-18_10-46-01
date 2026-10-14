@@ -102,7 +102,8 @@ test('부력 풍선: 부력 > 중력이면 떠오르고, 정해진 높이에서 
 });
 
 test('탄성 덫: 적이 밟으면 튕겨 오르고 위치가 표시됨 · 한 번 터지면 사라짐', () => {
-  const { m, me, foe, put, run } = setup('springTrap');
+  const { m, me, foe, put, run, s: sp } = setup('springTrap');
+  put(foe, sp.x + 30, sp.z + 30); // 덫 자리에서 멀리
   assert.ok(m.usePatch(me, 0));
   const trap = m.zones.find((z) => z.type === 'trap');
   assert.ok(trap, '덫이 놓임');
