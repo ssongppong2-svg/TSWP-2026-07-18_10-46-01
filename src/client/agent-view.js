@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEAM_INFO } from '../sim/constants.js';
 import { WEAPONS } from '../sim/data.js';
 import { labelTexture } from './textures.js';
+import { plasmaOf } from './plasma.js';
 
 // ─────────────────────────────────────────────────────────────
 // 팀별 전술 장비 색 (해체팀: 남색·흑색·회색 / 포스팀: 코요테·탄·올리브)
@@ -1013,6 +1014,7 @@ function buildSmg() {
   for (const y of [0.042, -0.012]) P.add('metal', cylG(0.0045, 0.0045, 0.18, 6), [0, y, 0.16], [Math.PI / 2, 0, 0]);
   P.add('rubber', rbox(0.03, 0.08, 0.014, 0.004), [0, 0.014, 0.25]);
   P.add('accent', rbox(0.037, 0.063, 0.008, 0.004), [0, 0.033, -0.16]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.037 / 2 + 0.0008), 0.033 + 0.063 * 0.28, -0.16 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 function buildSmgMag() {
@@ -1069,6 +1071,7 @@ function buildSniper() {
   // 접힌 양각대
   for (const s of [-1, 1]) P.add('metal', cylG(0.0045, 0.0045, 0.17, 6), [s * 0.016, 0.0, -0.47], [Math.PI / 2, 0, 0]);
   P.add('accent', rbox(0.054, 0.052, 0.01, 0.004), [0, 0.03, -0.22]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.054 / 2 + 0.0008), 0.03 + 0.052 * 0.28, -0.22 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 function buildSniperMag() {
@@ -1121,6 +1124,7 @@ function buildCarbine() {
   P.add('rubber', rbox(0.044, 0.124, 0.014, 0.005), [0, 0.006, 0.27]);
   tpDot(P, 0.096, -0.04);
   P.add('accent', rbox(0.052, 0.052, 0.008, 0.01), [0, CARBINE.bore, -0.15]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.052 / 2 + 0.0008), CARBINE.bore + 0.052 * 0.28, -0.15 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 
@@ -1140,6 +1144,7 @@ function buildBurstTP() {
   P.add('poly', rbox(0.036, 0.03, 0.012, 0.003), [0, 0.098, -0.062], [-0.12, 0, 0]);
   P.add('lens', rbox(0.028, 0.024, 0.002, 0.001), [0, 0.098, -0.056], [-0.12, 0, 0]);
   P.add('accent', rbox(0.056, 0.056, 0.008, 0.012), [0, BURST.bore, -0.4]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.056 / 2 + 0.0008), BURST.bore + 0.056 * 0.28, -0.4 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 
@@ -1163,6 +1168,7 @@ function buildDmrTP() {
   P.add('lens', cylG(0.02, 0.02, 0.002, 12), [0, 0.106, -0.231], [Math.PI / 2, 0, 0]);
   P.add('metal', cylG(0.01, 0.01, 0.018, 8), [0, 0.128, -0.07]);
   P.add('accent', rbox(0.053, 0.053, 0.008, 0.01), [0, DMR3.bore, -0.2]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.053 / 2 + 0.0008), DMR3.bore + 0.053 * 0.28, -0.2 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 function buildDmrMagTP() {
@@ -1189,6 +1195,7 @@ function buildLmgTP() {
   P.add('rubber', rbox(0.048, 0.138, 0.016, 0.005), [0, -0.01, 0.352]);
   tpDot(P, 0.118, -0.03);
   P.add('accent', rbox(0.053, 0.051, 0.008, 0.01), [0, LMG3.bore - 0.004, -0.39]);
+  for (const s of [-1, 1]) P.add('glow', rbox(0.002, 0.005, 0.15, 0.001), [s * (0.053 / 2 + 0.0008), LMG3.bore - 0.004 + 0.051 * 0.28, -0.39 + 0.085]); // 우주 테마 에너지 줄 (띠에서 몸통 쪽으로)
   return P;
 }
 function buildLmgBoxTP() {
@@ -1433,6 +1440,9 @@ function skinGeometry(team, level, builds) {
     // 연구소 장비 화면·표시등 (팀 색으로 은은하게 빛남) · 바디캠 녹화등
     if (mat === 'screen') return { cls: 'solid', color: accent.clone().lerp(new THREE.Color('#ffffff'), 0.25), rme: [0.3, 0, 0.55] };
     if (mat === 'rec') return { cls: 'solid', color: new THREE.Color('#ff2a1a'), rme: [0.3, 0, 1.2] };
+    // 우주 테마: 총의 팀 색 띠·에너지 줄이 빛남
+    if (mat === 'glow') return { cls: 'solid', color: new THREE.Color(plasmaOf(team)), rme: [0.4, 0, 1.6] };
+    if (mat === 'accent') return { cls: 'solid', color: accent, rme: [0.6, 0, 0.6] };
     const src = T[mat];
     return { cls: 'solid', color: src?.color ?? new THREE.Color('#808080'), rme: [src?.roughness ?? 0.7, src?.metalness ?? 0, 0] };
   });

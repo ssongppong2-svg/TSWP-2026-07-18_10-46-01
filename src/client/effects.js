@@ -4,8 +4,27 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeSolidMaterial } from './agent-view.js';
 import { createBombScreen, glowTexture, holeTexture, labelTexture, smokeTexture } from './textures.js';
 
+const WHITE = new THREE.Color('#ffffff');
+
 // 3인칭 총구 불꽃 크기 (배율)
 const FLASH3P = { smg: 0.55, mpistol: 0.75, pistol: 0.85, carbine: 1.25, burst: 1, rifle: 1, lmg: 1.2, dmr: 1.3, sniper: 1.45, shotgun: 1.4, sheriff: 1.15 };
+
+import { plasmaOf } from './plasma.js';
+
+// 탄 궤적 줄: z 0(탄 머리, 밝음) → 1(꼬리, 진행 반대쪽으로 어두워짐) · 정점 색이 인스턴스 색에 곱해짐
+function streakGeometry(fade = true) {
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  g.translate(0, 0, 0.5);
+  const pos = g.attributes.position;
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const k = fade ? 1 - pos.getZ(i) : 1;
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+const streakMaterial = (opacity) => new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 
 // 포스 패치 표시 색 (채도를 낮춘 현실적인 톤)
 export const PATCH_COLORS = {
@@ -425,19 +444,41 @@ export class Effects {
     this.dust = new Particles(this.group, 700, { additive: false, size: 0.42, map: smoke });
     this.smoke = new Particles(this.group, 300, { additive: false, size: 0.7, map: smoke });
 
-    // 총알 궤적 (흐릿한 예광)
+    // 에너지 탄 궤적: 밝은 심 + 팀 색 빛무리 (머리가 밝고 꼬리로 갈수록 흐려짐)
     this.maxTracers = 600;
-    const tgeo = new THREE.BoxGeometry(1, 1, 1);
-    tgeo.translate(0, 0, -0.5);
-    this.tracers = new THREE.InstancedMesh(tgeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }), this.maxTracers);
+    const sgeo = streakGeometry();
+    this.tracers = new THREE.InstancedMesh(sgeo, streakMaterial(0.95), this.maxTracers);
     this.tracers.frustumCulled = false;
     this.tracers.count = 0;
     this.group.add(this.tracers);
+    this.tracerGlow = new THREE.InstancedMesh(sgeo, streakMaterial(0.42), this.maxTracers);
+    this.tracerGlow.frustumCulled = false;
+    this.tracerGlow.count = 0;
+    this.group.add(this.tracerGlow);
+    // 잔상: 탄이 지나간 자리에 0.18초 남는 빛줄기 (점점 가늘고 어두워짐)
+    this.maxTrails = 480;
+    this.trailMesh = new THREE.InstancedMesh(streakGeometry(false), streakMaterial(0.5), this.maxTrails);
+    this.trailMesh.frustumCulled = false;
+    this.trailMesh.count = 0;
+    this.group.add(this.trailMesh);
+    this.trails = [];
+    this.trailPrev = new Map();
+    this.tmpA = new THREE.Vector3();
+    // 탄착 빛 (맞은 자리가 잠깐 달아올랐다 식음)
+    this.embers = [];
+    for (let i = 0; i < 40; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: '#bfefff', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false }));
+      s.visible = false;
+      this.group.add(s);
+      this.embers.push({ sprite: s, t: 0, life: 0.35, size: 0.3 });
+    }
+    this.emberNext = 0;
     this.tmpM = new THREE.Matrix4();
     this.tmpQ = new THREE.Quaternion();
     this.tmpV = new THREE.Vector3();
     this.tmpS = new THREE.Vector3();
     this.tmpC = new THREE.Color();
+    this.tmpC2 = new THREE.Color();
     this.fwd = new THREE.Vector3(0, 0, -1);
     this.tracerOffsets = new Map();
 
@@ -457,7 +498,8 @@ export class Effects {
     this.maxCasings = 48;
     const cgeo = new THREE.CylinderGeometry(0.005, 0.005, 0.03, 6);
     cgeo.rotateZ(Math.PI / 2);
-    this.casingMesh = new THREE.InstancedMesh(cgeo, new THREE.MeshStandardMaterial({ color: '#b58a3c', metalness: 0.9, roughness: 0.35 }), this.maxCasings);
+    // 탄피 대신 다 쓴 에너지 셀 (식어 가는 하늘빛 띠)
+    this.casingMesh = new THREE.InstancedMesh(cgeo, new THREE.MeshStandardMaterial({ color: '#2b3239', metalness: 0.8, roughness: 0.3, emissive: '#3fd6ff', emissiveIntensity: 1.3 }), this.maxCasings);
     this.casingMesh.frustumCulled = false;
     this.group.add(this.casingMesh);
     this.casings = Array.from({ length: this.maxCasings }, () => ({ life: 0, p: new THREE.Vector3(), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3(), bounced: false }));
@@ -565,11 +607,12 @@ export class Effects {
       const sz = 0.45 * (FLASH3P[e.weapon] ?? 1) * (0.85 + Math.random() * 0.3);
       f.sprite.scale.set(sz, sz, sz);
       f.sprite.material.rotation = Math.random() * Math.PI;
-      f.sprite.material.color.set(e.amp ? '#ffb15a' : '#ffc27a');
+      f.sprite.material.color.set(e.amp ? '#ffd36a' : this.tmpC.set(plasmaOf(e.agent?.team)).lerp(WHITE, 0.35));
     }
     this.lights?.flash(muzzlePos, isLocal ? 9 : 14);
-    // 총구 연기
-    this.smoke.burst(muzzlePos, '#9a9ea3', isLocal ? 2 : 1, { speed: 0.5, up: 1.2, life: 1.2, gravity: -0.6, spread: 0.6, drag: 2 });
+    // 총구: 플라스마 불티 + 옅은 푸른 증기
+    this.sparks.burst(muzzlePos, plasmaOf(e.agent?.team), isLocal ? 3 : 4, { speed: 2.2, up: 0.4, life: 0.12, gravity: 0, spread: 0.5 });
+    this.smoke.burst(muzzlePos, '#8ea4c4', isLocal ? 2 : 1, { speed: 0.5, up: 1.2, life: 1.0, gravity: -0.6, spread: 0.6, drag: 2 });
     // 탄피 (가까운 사격만)
     if (portPos && camera && e.weapon !== 'knife') {
       const c = this.casings[this.casingNext];
@@ -594,13 +637,14 @@ export class Effects {
       return;
     }
     if (e.kind === 'debris') {
-      this.sparks.burst(p, '#8fa3c9', 3, { speed: 1, up: 1, life: 0.25, gravity: 6 });
+      this.sparks.burst(p, '#a9c4ff', 3, { speed: 1, up: 1, life: 0.25, gravity: 6 });
       return;
     }
+    this.ember(p, e.kind === 'shield' ? '#ffe2a8' : '#bfefff', e.kind === 'door' ? 0.22 : 0.3);
     const n = { x: e.nx ?? 0, y: e.ny ?? 1, z: e.nz ?? 0 };
     // 문짝: 나무는 부스러기, 철문은 불똥 (문은 움직이므로 탄흔은 남기지 않음)
     if (e.kind === 'door') {
-      if (e.mat === 'steel') this.sparks.burst(p, '#ffd9a0', 7, { speed: 4, up: 1, life: 0.25, normal: n, gravity: 12 });
+      if (e.mat === 'steel') this.sparks.burst(p, '#bff3ff', 9, { speed: 4, up: 1, life: 0.25, normal: n, gravity: 12 });
       else {
         this.dust.burst(p, '#7a5a3a', 8, { speed: 2.2, up: 0.6, life: 0.7, normal: n, gravity: 6, drag: 2 });
         this.dust.burst(p, '#c9a77a', 4, { speed: 3, up: 1, life: 0.35, normal: n, gravity: 10 });
@@ -611,8 +655,10 @@ export class Effects {
       this.sparks.burst(p, '#ffd29a', 10, { speed: 4, up: 1, life: 0.3, normal: n, gravity: 10 });
       return;
     }
-    this.sparks.burst(p, '#ffcf8a', 4, { speed: 3.5, up: 1, life: 0.22, normal: n, gravity: 14 });
-    this.dust.burst(p, '#7d7b76', 6, { speed: 1.3, up: 0.8, life: 0.9, normal: n, gravity: 1.5, drag: 3 });
+    // 에너지 탄 탄착: 하늘빛 불티 + 보랏빛 잿가루
+    this.sparks.burst(p, '#a8ecff', 5, { speed: 3.5, up: 1, life: 0.24, normal: n, gravity: 10 });
+    this.sparks.burst(p, '#c9a8ff', 2, { speed: 2, up: 0.6, life: 0.3, normal: n, gravity: 4 });
+    this.dust.burst(p, '#77748a', 6, { speed: 1.3, up: 0.8, life: 0.9, normal: n, gravity: 1.5, drag: 3 });
     const h = this.holes[this.holeNext];
     this.holeNext = (this.holeNext + 1) % this.holes.length;
     h.visible = true;
@@ -623,7 +669,20 @@ export class Effects {
 
   onRicochet(e) {
     const n = { x: e.nx, y: e.ny, z: e.nz };
-    this.sparks.burst(e, '#ffe0a0', 12, { speed: 5, up: 1, life: 0.3, normal: n, gravity: 10 });
+    this.sparks.burst(e, '#c4f5ff', 12, { speed: 5, up: 1, life: 0.3, normal: n, gravity: 10 });
+    this.ember(e, '#c4f5ff', 0.25);
+  }
+
+  // 탄착 자리가 잠깐 달아오름
+  ember(p, color, size) {
+    const em = this.embers[this.emberNext];
+    this.emberNext = (this.emberNext + 1) % this.embers.length;
+    em.sprite.position.set(p.x, p.y, p.z);
+    em.sprite.material.color.set(color);
+    em.sprite.material.rotation = Math.random() * Math.PI;
+    em.sprite.visible = true;
+    em.t = em.life;
+    em.size = size;
   }
 
   onPatch(e) {
@@ -663,11 +722,13 @@ export class Effects {
     for (const b of this.match.bombs) {
       if (b.state !== 'exploded') continue;
       const p = { x: b.x, y: 1, z: b.z };
-      this.sparks.burst(p, '#ffb347', 180, { speed: 16, up: 2, life: 1.2, gravity: 8, spread: 1.4 });
-      this.dust.burst(p, '#3b3631', 160, { speed: 9, up: 2.2, life: 3, gravity: 0.5, spread: 1.3, drag: 1.2 });
-      this.smoke.burst(p, '#2c2a28', 60, { speed: 4, up: 3, life: 4.5, gravity: -0.8, spread: 1, drag: 0.8 });
+      // 폭탄 폭발 (곧 블랙홀이 됨): 흰빛·보랏빛 불티 + 어두운 보랏빛 먼지
+      this.sparks.burst(p, '#e6d4ff', 140, { speed: 16, up: 2, life: 1.2, gravity: 2, spread: 1.4 });
+      this.sparks.burst(p, '#ffb36a', 60, { speed: 12, up: 2, life: 1, gravity: 4, spread: 1.4 });
+      this.dust.burst(p, '#2d2838', 140, { speed: 9, up: 2.2, life: 3, gravity: 0.5, spread: 1.3, drag: 1.2 });
+      this.smoke.burst(p, '#2a2633', 50, { speed: 4, up: 3, life: 4.5, gravity: -0.8, spread: 1, drag: 0.8 });
       // 폭발 빛: 광원 예산에서 가장 먼저 배정됨
-      const light = { pos: new THREE.Vector3(b.x, 3, b.z), color: new THREE.Color('#ffb347'), intensity: 900, distance: 70, priority: 5 };
+      const light = { pos: new THREE.Vector3(b.x, 3, b.z), color: new THREE.Color('#c9a0ff'), intensity: 900, distance: 70, priority: 5 };
       this.lights?.add(light);
       this.blasts.push({ light, t: 0 });
       if (cameraPos) this.flash = Math.max(this.flash, Math.max(0, 1 - Math.hypot(cameraPos.x - b.x, cameraPos.z - b.z) / 45));
@@ -720,8 +781,9 @@ export class Effects {
     this.shake = Math.max(0, this.shake - dt * 1.6);
     this.flash = Math.max(0, this.flash - dt * 1.4);
 
-    // 총알 궤적
+    // 에너지 탄 궤적 + 잔상
     let n = 0;
+    const live = new Set();
     for (const p of m.projectiles) {
       if (n >= this.maxTracers) break;
       const off = this.tracerOffsets.get(p.id);
@@ -738,22 +800,64 @@ export class Effects {
       }
       const vx = p.vel.x, vy = p.vel.y, vz = p.vel.z;
       const speed = Math.hypot(vx, vy, vz);
-      const len = p.harmless ? 0.08 : Math.min(2.4, Math.max(0.1, speed * 0.015));
-      const width = p.harmless || p.inVeil ? 0.03 : 0.012;
+      const len = p.harmless ? 0.08 : Math.min(3.2, Math.max(0.15, speed * 0.02));
+      const width = p.harmless || p.inVeil ? 0.03 : 0.014;
       if (speed > 0.01) this.tmpQ.setFromUnitVectors(this.fwd, this.tmpV.set(vx / speed, vy / speed, vz / speed));
+      let col = plasmaOf(p.team);
+      if (p.inVeil || p.harmless) col = PATCH_COLORS.gravityVeil;
+      else if (p.bounced) col = PATCH_COLORS.reactionRounds;
+      else if (p.amp) col = '#ffd36a';
+      this.tmpC.set(col);
+      // 심: 거의 흰빛 · 빛무리: 팀 색으로 굵고 길게
       this.tmpS.set(width, width, len);
       this.tmpM.compose(this.tmpV.set(px, py, pz), this.tmpQ, this.tmpS);
       this.tracers.setMatrixAt(n, this.tmpM);
-      let col = '#ffd9a0';
-      if (p.inVeil || p.harmless) col = PATCH_COLORS.gravityVeil;
-      else if (p.bounced) col = PATCH_COLORS.reactionRounds;
-      else if (p.amp) col = '#ffb15a';
-      this.tracers.setColorAt(n, this.tmpC.set(col));
+      this.tracers.setColorAt(n, this.tmpC2.copy(this.tmpC).lerp(WHITE, 0.6));
+      this.tmpS.set(width * 5, width * 5, len * 1.3);
+      this.tmpM.compose(this.tmpV, this.tmpQ, this.tmpS);
+      this.tracerGlow.setMatrixAt(n, this.tmpM);
+      this.tracerGlow.setColorAt(n, this.tmpC);
+      // 잔상: 지난번 그린 머리에서 지금 머리까지
+      live.add(p.id);
+      const last = this.trailPrev.get(p.id);
+      if (last && !p.harmless && this.trails.length < this.maxTrails) this.trails.push({ a: last.clone(), b: new THREE.Vector3(px, py, pz), t: 0.18, c: this.tmpC.clone() });
+      (last ?? this.trailPrev.set(p.id, new THREE.Vector3()).get(p.id)).set(px, py, pz);
       n++;
     }
+    for (const id of this.trailPrev.keys()) if (!live.has(id)) this.trailPrev.delete(id);
     this.tracers.count = n;
-    this.tracers.instanceMatrix.needsUpdate = true;
-    if (this.tracers.instanceColor) this.tracers.instanceColor.needsUpdate = true;
+    this.tracerGlow.count = n;
+    for (const mesh of [this.tracers, this.tracerGlow]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    let tn = 0;
+    for (const tr of this.trails) {
+      tr.t -= dt;
+      if (tr.t <= 0) continue;
+      const d = this.tmpA.copy(tr.b).sub(tr.a);
+      const L = d.length();
+      if (L < 1e-3) continue;
+      const k = tr.t / 0.18;
+      this.tmpQ.setFromUnitVectors(this.fwd, d.multiplyScalar(1 / L)); // 꼬리(+z)가 지난 자리 쪽으로
+      this.tmpS.set(0.03 * k + 0.004, 0.03 * k + 0.004, L);
+      this.tmpM.compose(tr.b, this.tmpQ, this.tmpS);
+      this.trailMesh.setMatrixAt(tn, this.tmpM);
+      this.trailMesh.setColorAt(tn, this.tmpC.copy(tr.c).multiplyScalar(k * 0.8));
+      tn++;
+    }
+    this.trails = this.trails.filter((tr) => tr.t > 0);
+    this.trailMesh.count = tn;
+    this.trailMesh.instanceMatrix.needsUpdate = true;
+    if (this.trailMesh.instanceColor) this.trailMesh.instanceColor.needsUpdate = true;
+    for (const em of this.embers) {
+      if (em.t <= 0) continue;
+      em.t -= dt;
+      const k = Math.max(0, em.t / em.life);
+      em.sprite.visible = em.t > 0;
+      em.sprite.scale.setScalar(em.size * (0.5 + 0.5 * k));
+      em.sprite.material.opacity = k;
+    }
     if (this.tracerOffsets.size > 400) this.tracerOffsets.clear();
 
     for (const f of this.flashes) {

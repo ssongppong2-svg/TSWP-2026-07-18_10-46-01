@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WEAPONS } from '../sim/data.js';
 import { TEAM_INFO } from '../sim/constants.js';
 import { flashTexture } from './textures.js';
+import { plasmaOf } from './plasma.js';
 import { addDetail } from './detail.js';
 import { Parts, rbox, cylG, profile, teamMaterials, makeSolidMaterial, mergeSkinned, hideableBone, withDetail } from './agent-view.js';
 
@@ -188,6 +189,14 @@ function arUpper(P) {
   rail(P, 0.0665, 0.085, -0.125);
 }
 
+// 우주 테마: 몸통 양옆의 빛나는 에너지 줄 (x = 옆면, 길이 len) · 총구 둘레의 빛나는 고리
+function energyStrips(P, x, y, z, len, h = 0.004) {
+  for (const s of [-1, 1]) P.add('glow', rbox(0.0018, h, len, 0.0008), [s * x, y, z]);
+}
+function energyRing(P, x, y, z, r) {
+  P.add('glow', new THREE.TorusGeometry(r, 0.0017, 6, 22), [x, y, z]);
+}
+
 function buildRifleParts() {
   const P = new Parts();
   arLower(P);
@@ -219,8 +228,10 @@ function buildRifleParts() {
   P.add('metal', cylG(0.0135, 0.0125, 0.024, 14), [0.036, RB + 0.02, -0.448], [Math.PI / 2, 0, 0]);
   P.add('lensW', cylG(0.0112, 0.0112, 0.002, 14), [0.036, RB + 0.02, -0.4605], [Math.PI / 2, 0, 0]);
   P.add('dark', cylG(0.0048, 0.0048, 0.01, 8), [0.036, RB + 0.02, -0.348], [Math.PI / 2, 0, 0]);
-  // 팀 색 테이프 (작은 표식)
+  // 팀 색 테이프 (작은 표식) — 우주 테마: 빛나는 에너지 띠
   P.add('accent', rbox(0.0515, 0.0538, 0.009, 0.014), [0, RB - 0.002, -0.2]);
+  energyStrips(P, 0.0256, RB + 0.012, -0.3, 0.24);
+  energyRing(P, 0, RB, -0.536, 0.0132);
   // ── 완충관 · 성곽 너트 · 신축식 개머리판 (보관통 2개) · 고무 패드
   P.add('metal', cylG(0.0155, 0.0155, 0.22, 14), [0, 0.042, 0.195], [Math.PI / 2, 0, 0]);
   P.add('metal', cylG(0.019, 0.019, 0.012, 12), [0, 0.042, 0.092], [Math.PI / 2, 0, 0]);
@@ -257,8 +268,9 @@ function buildMagParts() {
   for (const sx of [-1, 1]) P.add('poly', rbox(0.0016, 0.05, 0.004, 0.0008), [sx * 0.0122, -0.045, -0.012], [0.12, 0, 0]);
   P.add('poly', rbox(0.029, 0.012, 0.072, 0.004), [0, -0.171, -0.077], [0.17, 0, 0]);
   P.add('dark', rbox(0.02, 0.004, 0.07, 0.001), [0, 0.002, -0.042]);
-  P.add('brass', cylG(0.0048, 0.0048, 0.034, 12), [0, 0.0085, -0.03], [Math.PI / 2, 0, 0]);
-  P.add('copper', cylG(0.0003, 0.0046, 0.022, 12), [0, 0.0085, -0.058], [-Math.PI / 2, 0, 0]);
+  // 맨 위 탄: 에너지 셀 (빛나는 몸통 + 어두운 끝)
+  P.add('glow', cylG(0.0048, 0.0048, 0.034, 12), [0, 0.0085, -0.03], [Math.PI / 2, 0, 0]);
+  P.add('metal', cylG(0.0003, 0.0046, 0.022, 12), [0, 0.0085, -0.058], [-Math.PI / 2, 0, 0]);
   return P;
 }
 
@@ -298,13 +310,14 @@ function buildPistolSlide() {
   P.add('dark', cylG(0.0044, 0.0044, 0.0008, 12), [0, PB, -0.1566], [Math.PI / 2, 0, 0]);
   P.add('tritium', new THREE.SphereGeometry(0.0013, 8, 6), [0, 0.0545, -0.1365]);
   for (const x of [-0.0068, 0.0068]) P.add('tritium', new THREE.SphereGeometry(0.0012, 8, 6), [x, 0.0535, 0.0232]);
+  energyStrips(P, 0.0131, 0.041, -0.06, 0.088, 0.0028);
   return P;
 }
 function buildPistolMag() {
   const P = new Parts();
   P.add('poly', rbox(0.019, 0.1, 0.03, 0.004), [0, -0.05, 0]);
   P.add('poly', rbox(0.025, 0.01, 0.042, 0.004), [0, -0.103, -0.002]);
-  P.add('brass', cylG(0.0045, 0.0045, 0.02, 10), [0, 0.003, -0.002], [Math.PI / 2, 0, 0]);
+  P.add('glow', cylG(0.0045, 0.0045, 0.02, 10), [0, 0.003, -0.002], [Math.PI / 2, 0, 0]);
   return P;
 }
 
@@ -355,6 +368,8 @@ function buildSmgParts() {
   for (const [y, x] of [[0.05, 0.012], [0.05, -0.012], [-0.006, 0]]) P.add('steel', cylG(0.0042, 0.0042, 0.2, 8), [x, y, 0.17], [Math.PI / 2, 0, 0]);
   P.add('rubber', rbox(0.034, 0.085, 0.014, 0.005), [0, 0.022, 0.272]);
   P.add('accent', rbox(0.0392, 0.04, 0.008, 0.004), [0, 0.05, -0.185]);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0196, 0.066, -0.06, 0.2);
   return P;
 }
 function buildSmgMag() {
@@ -390,6 +405,9 @@ function buildShotgunParts() {
   P.add('furn', profile([[-0.065, 0.082], [-0.33, 0.05], [-0.345, 0.044], [-0.345, -0.09], [-0.33, -0.096], [-0.2, -0.048], [-0.12, -0.03], [-0.065, 0.0]], 0.042, 0.007));
   P.add('rubber', rbox(0.044, 0.142, 0.016, 0.006), [0, -0.022, 0.348]);
   P.add('steel', rbox(0.006, 0.012, 0.008, 0.002), [0, 0.094, 0.05]); // 가늠자
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0206, 0.077, -0.04, 0.15);
+  energyRing(P, 0, 0.03, -0.585, 0.0136);
   return P;
 }
 function buildShotgunPump() {
@@ -447,6 +465,8 @@ function buildSniperParts() {
     P.add('rubber', rbox(0.012, 0.012, 0.02, 0.003), [s * 0.016, 0.0, -0.3]);
   }
   P.add('accent', rbox(0.0545, 0.03, 0.01, 0.004), [0, 0.032, -0.24]);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0276, 0.056, -0.32, 0.34);
   return P;
 }
 function buildSniperMag() {
@@ -513,6 +533,8 @@ function buildCarbineParts() {
   P.add('rubber', rbox(0.046, 0.14, 0.014, 0.006), [0, 0.002, 0.298]);
   P.add('dark', rbox(0.01, 0.008, 0.03, 0.002), [0, 0.016, 0.16]);
   redDot(P, CDOT, 0.072);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0246, RB + 0.012, -0.22, 0.15);
   return P;
 }
 
@@ -549,6 +571,8 @@ function buildBurstParts() {
   P.add('poly', rbox(0.0375, 0.0045, 0.014, 0.0015), [0, REFLEX.y + 0.018, REFLEX.z - 0.014], [-0.12, 0, 0]);
   P.add('glass', rbox(0.029, 0.026, 0.0012, 0.0005), [0, REFLEX.y + 0.003, REFLEX.z - 0.012], [-0.12, 0, 0]);
   P.add('dark', rbox(0.006, 0.004, 0.006, 0.0015), [0.012, 0.0905, REFLEX.z + 0.014]);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0264, RB + 0.008, -0.27, 0.2);
   return P;
 }
 
@@ -604,6 +628,8 @@ function buildDmrParts() {
   P.add('metal', cylG(0.011, 0.011, 0.018, 14), [0, LPVO.y + 0.022, LPVO.z]);
   P.add('metal', cylG(0.011, 0.011, 0.018, 14), [0.022, LPVO.y, LPVO.z], [0, 0, Math.PI / 2]);
   P.add('red', cylG(0.006, 0.006, 0.006, 10), [-0.019, LPVO.y, LPVO.z], [0, 0, Math.PI / 2]); // 밝기 다이얼
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0256, RB + 0.012, -0.335, 0.32);
   return P;
 }
 // 10발 상자 탄창 (원점 = 윗면 뒤쪽)
@@ -669,6 +695,8 @@ function buildLmgParts() {
   P.add('furn', profile([[-0.09, 0.066], [-0.33, 0.06], [-0.346, 0.054], [-0.346, -0.08], [-0.33, -0.086], [-0.22, -0.04], [-0.14, -0.012], [-0.09, 0.004]], 0.046, 0.007, [[[-0.17, 0.04], [-0.27, 0.036], [-0.27, -0.01], [-0.18, 0.004]]]));
   P.add('rubber', rbox(0.048, 0.138, 0.016, 0.006), [0, -0.01, 0.352]);
   redDot(P, LDOT, 0.093);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0256, 0.058, -0.06, 0.22);
   return P;
 }
 // 100발 상자 탄창 (원점 = 윗면 뒤쪽 · 몸통 아래 왼쪽으로)
@@ -723,6 +751,8 @@ function buildSheriffParts() {
   // 나무 손잡이
   P.add('furn', profile([[0.004, -0.004], [-0.002, -0.03], [-0.012, -0.06], [-0.026, -0.09], [-0.056, -0.096], [-0.062, -0.08], [-0.05, -0.03], [-0.046, 0.012], [-0.02, 0.01]], 0.032, 0.007));
   for (let i = 0; i < 5; i++) for (const s of [-1, 1]) P.add('dark', rbox(0.0012, 0.0025, 0.026, 0.0006), [s * 0.0165, -0.03 - i * 0.012, 0.03 + i * 0.004], [-0.3, 0, 0]);
+  // 우주 테마: 빛나는 에너지 줄
+  energyStrips(P, 0.0102, RVB + 0.004, -0.13, 0.12, 0.003);
   return P;
 }
 // 실린더 (발사할 때마다 한 칸 돎)
@@ -843,7 +873,7 @@ export class ViewModel {
     const rim = new THREE.DirectionalLight('#c9d6ea', 0.7);
     rim.position.set(-0.4, 0.7, -1.2);
     this.scene.add(rim);
-    this.muzzleLight = new THREE.PointLight('#ffb866', 0, 2.5, 2);
+    this.muzzleLight = new THREE.PointLight(plasmaOf(team), 0, 2.5, 2);
     this.scene.add(this.muzzleLight);
 
     this.root = new THREE.Group();
@@ -873,6 +903,7 @@ export class ViewModel {
       lensW: std({ color: '#aab4bb', roughness: 0.1, metalness: 0.3, emissive: '#3a3f44', emissiveIntensity: 0.4 }),
       tritium: new THREE.MeshBasicMaterial({ color: '#7dff8a' }),
       accent: std({ color: accent, roughness: 0.6, emissive: accent, emissiveIntensity: 0.02 }),
+      glow: std({ color: plasmaOf(team), roughness: 0.4, emissive: plasmaOf(team), emissiveIntensity: 1 }), // 우주 테마 에너지 줄·셀
       shell: std({ color: '#a8261d', roughness: 0.55 }),
       core: std({ color: '#2a2d31', emissive: '#d9822b', emissiveIntensity: 0, roughness: 0.4 }),
       // 투척·폭발 장비
@@ -912,7 +943,8 @@ export class ViewModel {
     }
     for (const g of Object.values(this.guns)) this.root.add(g.group);
 
-    this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), color: '#ffd7a0', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+    // 총구 불꽃: 팀 색 플라스마 (가운데는 흰빛)
+    this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), color: new THREE.Color(plasmaOf(team)).lerp(new THREE.Color('#ffffff'), 0.45), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
     this.flash.visible = false;
     this.flash.scale.setScalar(0.1);
     this.scene.add(this.flash);
@@ -954,7 +986,7 @@ export class ViewModel {
     const bones = list.map((x) => x.bone);
     const skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
     this.skeletons.push(skeleton);
-    const emissive = { watchFace: 1, tritium: 1.4, lensW: 0.15, screenG: 0.75, screenR: 0.75, screenB: 0.9 };
+    const emissive = { watchFace: 1, tritium: 1.4, lensW: 0.15, screenG: 0.75, screenR: 0.75, screenB: 0.9, glow: 1.8, accent: 1.2 };
     const geos = mergeSkinned(list.map((x) => x.geos), (mat) => {
       if (mat === 'sleeve' || mat === 'glass') return { cls: mat };
       const src = this.mats[mat];

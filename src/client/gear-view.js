@@ -111,11 +111,14 @@ export class GearView {
     const fx = this.effects;
     const near = cameraPos ? Math.hypot(cameraPos.x - p.x, cameraPos.y - p.y, cameraPos.z - p.z) : 99;
     if (e.kind === 'frag' || e.kind === 'c4') {
+      // 플라스마 폭발: 흰빛·주황 불티 + 보랏빛 파편 + 퍼지는 고리 + 어두운 보랏빛 연기
       const big = e.kind === 'c4' ? 1.4 : 1;
-      fx.sparks.burst(p, '#ffb347', Math.round(110 * big), { speed: 13 * big, up: 2, life: 0.9, gravity: 9, spread: 1.4 });
-      fx.dust.burst(p, '#3b3631', Math.round(90 * big), { speed: 7 * big, up: 2, life: 2.4, gravity: 0.6, spread: 1.3, drag: 1.4 });
-      fx.smoke.burst(p, '#2c2a28', Math.round(26 * big), { speed: 3, up: 2.2, life: 3.5, gravity: -0.6, spread: 1, drag: 0.9 });
-      this.pop(p, '#ffb347', 600 * big, 28, 0.6);
+      fx.sparks.burst(p, '#ffd9a8', Math.round(70 * big), { speed: 13 * big, up: 2, life: 0.9, gravity: 6, spread: 1.4 });
+      fx.sparks.burst(p, '#c39bff', Math.round(50 * big), { speed: 10 * big, up: 2, life: 0.8, gravity: 2, spread: 1.5 });
+      fx.dust.burst(p, '#2f2a3a', Math.round(80 * big), { speed: 7 * big, up: 2, life: 2.4, gravity: 0.6, spread: 1.3, drag: 1.4 });
+      fx.smoke.burst(p, '#2a2734', Math.round(24 * big), { speed: 3, up: 2.2, life: 3.5, gravity: -0.6, spread: 1, drag: 0.9 });
+      fx.pulses.push(fx.makePulse({ x: p.x, y: p.y - 0.1, z: p.z }, 6 * big, '#c9a6ff'));
+      this.pop(p, '#d2a8ff', 600 * big, 28, 0.6);
       if (near < 18) fx.shake = Math.max(fx.shake, (1 - near / 18) * 1.2 * big);
     } else if (e.kind === 'flash') {
       fx.sparks.burst(p, '#ffffff', 40, { speed: 6, up: 1, life: 0.25, gravity: 0 });
@@ -144,7 +147,7 @@ export class GearView {
   // 카메라·경보 센서가 부서짐: 불꽃 + 파편
   onBroken(e) {
     const p = { x: e.x, y: e.y, z: e.z };
-    this.effects.sparks.burst(p, '#ffd27a', 18, { speed: 3, up: 1, life: 0.45, gravity: 9 });
+    this.effects.sparks.burst(p, '#a8ecff', 18, { speed: 3, up: 1, life: 0.45, gravity: 9 });
     this.effects.dust.burst(p, '#2c2f33', 8, { speed: 2, up: 1, life: 0.8, gravity: 6 });
   }
 
