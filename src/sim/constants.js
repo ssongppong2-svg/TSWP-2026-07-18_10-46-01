@@ -41,13 +41,13 @@ export const TEAM_INFO = {
     name: '해체팀',
     code: 'DEFUSAL',
     color: '#5ec4d6',
-    goal: '2분 안에 폭탄 2기 해체 또는 포스팀 전원 제압.',
+    goal: '2분 안에 폭탄 2기 해체. 포스팀을 모두 쓰러뜨려도 해체해야 승리.',
   },
   force: {
     name: '포스팀',
     code: 'FORCE',
     color: '#e08a3c',
-    goal: '해체팀 전원 제압 또는 2분간 폭탄 방어.',
+    goal: '해체팀 전원 제압 또는 2분간 폭탄 방어 (모두 쓰러져도 폭탄이 버티면 승리).',
   },
 };
 

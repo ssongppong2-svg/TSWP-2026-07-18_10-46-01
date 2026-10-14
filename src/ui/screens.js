@@ -313,8 +313,8 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
       <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
       <h3 class="brief-label">첫 진영 <small>6라운드가 끝나면 서로 바꿈</small></h3>
       <div class="team-cards">
-        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', `폭탄 앞 ${kbd('interact')} → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)`, '포스팀을 <b>전원 제압</b>해도 라운드 승리'])}
-        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 라운드 승리', '지레 셔터·승강기로 길을 끊고 위층에서 내려다보기'])}
+        ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', `폭탄 앞 ${kbd('interact')} → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)`, '포스팀을 모두 쓰러뜨려도 <b>폭탄 2기를 해체해야</b> 승리'])}
+        ${card(TEAMS.FORCE, UI_ICONS.bolt, ['<b>수비</b> · 해체팀 <b>전원 제압</b> 시 라운드 승리', '<b>2분</b> 버티면 폭탄 폭발 → 블랙홀 · 라운드 승리 (모두 쓰러져도 폭탄이 버티면 승리)', '지레 셔터·승강기로 길을 끊고 위층에서 내려다보기'])}
       </div>
       <footer class="screen-foot sticky team-foot">
         <div class="team-options">

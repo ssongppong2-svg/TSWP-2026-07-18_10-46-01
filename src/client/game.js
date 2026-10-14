@@ -449,6 +449,11 @@ export class GameClient {
         this.hud.banner('경보: 적 통과', `${place ?? '경보 센서'} · ${GEAR.alarm.mark}초 표시`, 'good');
       } else if (viewing(e.agent)) this.hud.banner('경보 줄에 걸림', '위치가 상대에게 보임 · 붉은 줄은 넘거나 부숴서 지나가기', 'bad');
     });
+    ev.on('forceWiped', (e) => {
+      const sec = Math.max(0, Math.ceil(e.timeLeft ?? 0));
+      if (this.team === TEAMS.DEFUSE) this.hud.banner('포스팀 전멸', `남은 폭탄 ${e.left}기 해체 · ${sec}초 안에 못 하면 폭발`, 'good');
+      else this.hud.banner('분대 전멸', `폭탄이 ${sec}초 버티면 승리`, 'bad');
+    });
     ev.on('gadgetBroken', (e) => {
       this.gearView.onBroken(e);
       const v = audible(e, 25);
@@ -685,7 +690,7 @@ export class GameClient {
       A.play('roundStart');
       this.shop.close();
       if (this.match.op) this.hud.roundBanner(this.match.op.mission.code, '작전 개시', '용의자 제압 · 장치 해체 · 연구원 구출 · 연구 자료 확보', 'info', 3);
-      else this.hud.banner('교전 개시', this.team === TEAMS.DEFUSE ? '폭탄 2기 해체 또는 적 전원 제압' : '폭탄 방어 · 해체팀 제압', 'good');
+      else this.hud.banner('교전 개시', this.team === TEAMS.DEFUSE ? '폭탄 2기 해체 · 적을 모두 쓰러뜨려도 해체해야 승리' : '폭탄 방어 · 해체팀 제압', 'good');
     });
     // ── CQB 작전: 결박 풀기·자료 확보·구출·연구원 피해·장치
     ev.on('opTask', (e) => {

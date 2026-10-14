@@ -122,12 +122,19 @@ test('라운드 결과: 점수·크레딧(승리 3000, 패배 1900·2400·2900, 
   const enemies = m.agents.filter((a) => a.team === TEAMS.FORCE);
   const mate = m.agents.find((a) => a.team === TEAMS.DEFUSE && a !== me);
   const mateCredits = mate.credits;
+  let wiped = null;
+  m.events.on('forceWiped', (e) => (wiped = e));
   for (const e of enemies) m.kill(e, me);
+  m.checkEnd();
+  // 포스팀을 모두 쓰러뜨려도 끝나지 않음 → 폭탄 2기를 해체해야 승리
+  assert.equal(m.phase, 'live', '전멸만으로는 라운드가 끝나지 않음');
+  assert.equal(wiped?.left, 2, '남은 폭탄 2기 안내');
+  for (const b of m.bombs) b.state = 'defused';
   m.checkEnd();
   assert.equal(m.phase, 'roundEnd');
   assert.equal(m.score.defuse, 1);
   assert.equal(m.roundWinner, TEAMS.DEFUSE);
-  assert.equal(m.roundReason, '포스팀 전원 제압');
+  assert.equal(m.roundReason, '폭탄 2기 해체 완료');
   assert.equal(me.credits, 0 + ECON.kill * 5 + ECON.win);
   assert.equal(mate.credits, mateCredits + ECON.win);
   assert.equal(enemies[0].credits, ECON.start + ECON.loss[0]);
@@ -142,6 +149,7 @@ test('라운드 결과: 점수·크레딧(승리 3000, 패배 1900·2400·2900, 
   // 두 번째 패배는 더 받음
   m.phase = 'live';
   for (const e of enemies) m.kill(e, me);
+  for (const b of m.bombs) b.state = 'defused';
   m.checkEnd();
   assert.equal(enemies[0].credits, ECON.start + ECON.loss[0] + ECON.loss[1]);
 });
@@ -249,12 +257,15 @@ test('온라인 라운드제: 참가자 구매가 방장에 반영되고 점수�
   host.phase = 'live';
   for (const e of host.agents.filter((a) => a.team === TEAMS.FORCE)) host.kill(e, hm);
   host.checkEnd();
+  assert.equal(host.phase, 'live', '전멸만으로는 끝나지 않음');
+  for (const b of host.bombs) b.state = 'defused';
+  host.checkEnd();
   let roundEnd = 0;
   client.events.on('roundEnd', () => roundEnd++);
   for (let k = 30; k < 60; k++) sync(k);
   assert.equal(client.phase, 'roundEnd');
   assert.equal(client.score.defuse, 1);
-  assert.equal(client.roundReason, '포스팀 전원 제압');
+  assert.equal(client.roundReason, '폭탄 2기 해체 완료');
   assert.equal(roundEnd, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(hs.snapshot({ withStats: true }))) < 3600);
 });
@@ -296,4 +307,27 @@ test('개념 숙달: 관련 개념을 숙달한 사람은 그 패치의 재사�
   const a = plain.player.patches[0].cd, b = master.player.patches[0].cd;
   assert.ok(a > 0 && Math.abs(b - a * 0.85) < 1e-6, `${a} → ${b}`);
   assert.ok(master.isMastered(master.player, 'elasticPad') && !plain.isMastered(plain.player, 'elasticPad'));
+});
+
+test('해체 필수: 포스팀이 모두 쓰러져도 폭탄을 해체하지 못하면 시간이 다 되어 폭발 → 포스팀 승리 · 봇은 전멸 뒤 곧장 폭탄으로', () => {
+  const m = roundsMatch(12);
+  attachBots(m, 'normal');
+  m.phase = 'live';
+  m.phaseT = 0;
+  for (const e of m.agents.filter((a) => a.team === TEAMS.FORCE)) m.kill(e, null);
+  m.checkEnd();
+  assert.equal(m.phase, 'live');
+  // 봇 해체팀: 집결 지점에서 기다리지 않고 폭탄으로 향함
+  const bots = m.agents.filter((a) => a.team === TEAMS.DEFUSE && !a.isPlayer && a.alive);
+  const before = bots.map((a) => Math.min(...m.bombs.map((b) => Math.hypot(b.x - a.pos.x, b.z - a.pos.z))));
+  for (let k = 0; k < 60 * 4; k++) m.tick(1 / 60);
+  const after = bots.map((a) => Math.min(...m.bombs.map((b) => Math.hypot(b.x - a.pos.x, b.z - a.pos.z))));
+  assert.ok(after.filter((d, i) => d < before[i] - 3).length >= Math.ceil(bots.length / 2), '봇들이 폭탄 쪽으로 다가감');
+  // 해체하지 못한 채 시간이 다 됨 → 폭발 · 포스팀 승리
+  for (const b of m.bombs) b.state = 'armed';
+  m.timeLeft = 0;
+  m.checkEnd();
+  assert.equal(m.phase, 'roundEnd');
+  assert.equal(m.roundWinner, TEAMS.FORCE);
+  assert.equal(m.roundReason, '제한 시간 종료 — 폭탄 폭발');
 });

@@ -857,6 +857,14 @@ export class BotBrain {
       const free = armed.find((b) => !b.picker);
       if (free && dist2(free, a.pos) < dist2(bomb, a.pos) + 25) bomb = free;
     }
+    // 포스팀을 모두 쓰러뜨렸으면 기다리지 않고 남은 폭탄으로 (둘 이상 남으면 나눠 맡음, 멀면 뜀)
+    if (!match.alive(TEAMS.FORCE).length) {
+      const mine = [...armed].sort((p, q) => dist2(p, a.pos) - dist2(q, a.pos));
+      bomb = mine.find((b) => !b.picker) ?? (armed.length > 1 ? armed[this.index % armed.length] : armed[0]);
+      this.assignedBomb = bomb.id;
+      this.goToBomb(match, a, bomb, true);
+      return;
+    }
     this.assignedBomb = bomb.id;
     // 진입 전: 집결 지점에서 대기 (팀이 함께 진입)
     const pushAt = (match.botPlan?.defuse?.pushAt ?? 20) + this.pushDelay;

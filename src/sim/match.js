@@ -239,6 +239,7 @@ export class Match {
 
   // 새 라운드 준비: 모두 되살려 시작 구역에, 살아남았던 요원은 총·방탄 유지, 포스 패치는 다시 충전
   startRound() {
+    this.forceWiped = false;
     this.projectiles = [];
     this.veils = [];
     this.zones = [];
@@ -2308,7 +2309,11 @@ export class Match {
     const done = (side, reason) => (this.rounds ? this.endRound(side, reason) : this.end(this.squadOf(side), reason));
     if (this.bombs.every((b) => b.state === 'defused')) return done(TEAMS.DEFUSE, '폭탄 2기 해체 완료');
     if (this.alive(TEAMS.DEFUSE).length === 0) return done(TEAMS.FORCE, '해체팀 전원 제압');
-    if (this.rounds && this.alive(TEAMS.FORCE).length === 0) return done(TEAMS.DEFUSE, '포스팀 전원 제압');
+    // 포스팀을 모두 쓰러뜨려도 끝나지 않음: 남은 폭탄을 시간 안에 해체해야 이김 (못 하면 폭발 → 포스팀 승리)
+    if (this.rounds && !this.forceWiped && this.alive(TEAMS.FORCE).length === 0) {
+      this.forceWiped = true;
+      this.emit('forceWiped', { left: this.bombs.filter((b) => b.state === 'armed').length, timeLeft: this.timeLeft });
+    }
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       for (const b of this.bombs) if (b.state === 'armed') b.state = 'exploded';
