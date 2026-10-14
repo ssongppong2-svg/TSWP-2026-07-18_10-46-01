@@ -298,9 +298,10 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
   let difficulty = settings.difficulty ?? 'normal';
   let mapId = MAP_ORDER.includes(settings.mapId) ? settings.mapId : MAP_ORDER[0];
   const WEATHER_TEXT = { rain: '야간 · 강우', clear: '야간 · 맑음', wet: '주간 · 비 갠 뒤' };
+  // 맵 카드는 한 줄로 작게 (이름·분위기), 고른 맵의 설명은 카드 아래 한 줄로
   const mapCard = (id) => {
     const d = getMapDef(id);
-    return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-en">${d.nameEn ?? ''}</span><span class="mc-desc">${d.desc ?? ''}</span><span class="mc-wx">${d.mood ?? WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
+    return `<button class="map-card" data-map="${id}"><small>${d.code}</small><b>${d.name}</b><span class="mc-wx">${d.mood ?? WEATHER_TEXT[d.weather] ?? ''}</span></button>`;
   };
   const card = (t, icon, lines) => `
     <button class="team-card t-${t}" data-team="${t}">
@@ -312,7 +313,8 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
     <section class="screen team-screen">
       <header class="screen-head"><button class="btn ghost small" data-act="back">← 메인</button><h2>작전 브리핑</h2><span></span></header>
       <h3 class="brief-label">작전 지역</h3>
-      <div class="map-cards">${MAP_ORDER.map(mapCard).join('')}<div class="map-card locked"><small>— —</small><b>신규 작전 지역</b><span class="mc-desc">추가 예정</span></div></div>
+      <div class="map-cards compact">${MAP_ORDER.map(mapCard).join('')}</div>
+      <p class="map-desc"></p>
       <h3 class="brief-label">첫 진영 <small>6라운드가 끝나면 서로 바꿈</small></h3>
       <div class="team-cards">
         ${card(TEAMS.DEFUSE, UI_ICONS.lock, ['<b>공격</b> · 폭탄 A·B 2기는 라운드마다 구역 안 <b>무작위 위치</b> (2층일 때도 있음)', `폭탄 앞 ${kbd('interact')} → <b>힘 잠금</b> 문제를 풀어 해체 (빨리 풀수록 빨리)`, '포스팀을 모두 쓰러뜨려도 <b>폭탄 2기를 해체해야</b> 승리'])}
@@ -331,6 +333,8 @@ export function teamScreen({ settings, onNext, onBack, onMap }) {
   const next = el.querySelector('[data-act="next"]');
   const refresh = () => {
     el.querySelectorAll('.map-card[data-map]').forEach((c) => c.classList.toggle('on', c.dataset.map === mapId));
+    const md = getMapDef(mapId);
+    el.querySelector('.map-desc').innerHTML = `<b>${esc(md.nameEn ?? '')}</b> ${esc(md.desc ?? '')}`;
     el.querySelectorAll('.team-card').forEach((c) => c.classList.toggle('on', c.dataset.team === team));
     el.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === difficulty));
     next.disabled = !team;

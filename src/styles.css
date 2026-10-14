@@ -6379,3 +6379,39 @@ button.kb-row:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* 작전 브리핑: 맵 5곳을 한 줄로 · 고른 맵 설명은 아래 한 줄 */
+.map-cards.compact {
+  grid-template-columns: repeat(5, 1fr);
+  width: min(1000px, 100%);
+}
+
+.map-cards.compact .map-card {
+  padding: 10px 12px;
+}
+
+.map-cards.compact .map-card b {
+  font-size: 15px;
+}
+
+.map-desc {
+  width: min(1000px, 100%);
+  min-height: 2.8em;
+  margin: 8px auto 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #b9c0c7;
+}
+
+.map-desc b {
+  margin-right: 6px;
+  font: 700 11px var(--display);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .map-cards.compact {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
