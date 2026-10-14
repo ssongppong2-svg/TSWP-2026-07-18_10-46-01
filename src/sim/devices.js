@@ -187,15 +187,17 @@ export class Devices {
   }
 
   // 탄성 발판: 목표 칸 가운데에 PAD_FLIGHT초 뒤 내려앉는 포물선 속도
+  //   중력이 약한 맵(달)은 비행 시간을 1/√(중력 배율)배로 늘림 → 지구와 같은 모양의 포물선 (낮게 날아 2층 바닥판 밑에 걸리지 않게)
   launch(a, d) {
     const m = this.map;
     const tx = m.cellX(d.to.c), tz = m.cellZ(d.to.r), ty = (d.to.f ? STORY : 0) + 0.2;
-    const T = PAD_FLIGHT, g = PLAYER.gravity * m.gravityAt(tx, tz); // 맵 중력에 맞춰 같은 곳에 내려앉게
+    const k = m.gravityAt(tx, tz);
+    const T = PAD_FLIGHT / Math.sqrt(Math.max(0.25, k)), g = PLAYER.gravity * k;
     a.vel.x = (tx - a.pos.x) / T;
     a.vel.z = (tz - a.pos.z) / T;
     a.vel.y = (ty - a.pos.y + 0.5 * g * T * T) / T;
     a.onGround = false;
-    a.padT = this.match.time + 0.8;
+    a.padT = this.match.time + 0.8 * (T / PAD_FLIGHT);
     d.st.t = 0;
     this.match.emit('padLaunch', { device: d, agent: a });
   }

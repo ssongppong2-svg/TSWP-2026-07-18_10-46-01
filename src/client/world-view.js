@@ -8,6 +8,25 @@ import { buildWallProps } from './wall-props.js';
 import { buildLabInterior, buildLabProps, buildMuseumProps } from './exhibits.js';
 import { coverHeights, puddleRoughness } from './weather.js';
 import { buildStructure, shadeFn } from './structure.js';
+import { themeTextures } from './theme-textures.js';
+import { buildThemeBackdrop } from './theme-backdrop.js';
+
+// 새 맵 테마 (달 기지 · 우주 화물선 · 거대한 새의 둥지): 표면 색·거칠기와 소품 모양
+//   (질감은 theme-textures.js, 하늘·원경은 theme-backdrop.js)
+const THEME_STYLE = {
+  moon: {
+    floor: '#d6d6d2', wall: '#eef0f2', wallTop: '#b9bcc0', ceil: 'tile', floorRough: 0.97, wallRough: 0.55, wallMetal: 0.12,
+    crate: '#ffffff', rail: '#8e959e', railTop: '#d4642a', chute: '#c9cdd2', trim: '#d4642a', roofTop: '#c7cacd', props: true,
+  },
+  ship: {
+    floor: '#a3acb8', wall: '#c2ccd8', wallTop: '#6a737e', ceil: 'deck', floorRough: 0.5, floorMetal: 0.55, wallRough: 0.45, wallMetal: 0.45,
+    crate: '#e6ebf0', rail: '#3b4046', railTop: '#d9b23a', chute: '#5e6874', trim: '#d9b23a', roofTop: '#3a4048', props: true,
+  },
+  nest: {
+    floor: '#e2c8a2', wall: '#c9a27a', wallTop: '#8a6a44', ceil: 'bark', floorRough: 0.98, wallRough: 0.95, wallMetal: 0,
+    crate: '#f2e6d4', rail: '#6b4c2e', railTop: '#8a6a44', chute: '#a07a4e', trim: '#7a5a38', roofTop: '#6b4c2e', props: false, eggs: true,
+  },
+};
 
 export const SITE_COLORS = { A: '#d9b45a', B: '#b9a0d8' };
 
@@ -23,7 +42,8 @@ export function buildWorld(map, baseTex) {
   group.name = 'world';
   // 맵 테마: 'industrial'(포스 바운드: 콘크리트·상자) / 'museum'(과학관: 광택 타일·전시물)
   const museum = map.def.theme === 'museum';
-  const tex = museum ? { ...baseTex, ...museumTextures() } : baseTex;
+  const style = THEME_STYLE[map.def.theme] ?? null;
+  const tex = museum ? { ...baseTex, ...museumTextures() } : style ? { ...baseTex, ...themeTextures(map.def.theme) } : baseTex;
   // 연구동 별관: 지붕 아래(실내)는 페인트 벽·비닐 타일 바닥·천장 텍스 (밖은 비 젖은 콘크리트 그대로)
   const labInside = !museum && map.def.decor?.interior === 'lab';
   const cover = labInside ? coverHeights(map) : null;
@@ -48,10 +68,10 @@ export function buildWorld(map, baseTex) {
     map: tex.floor,
     bumpMap: tex.floorBump,
     bumpScale: museum ? 0.6 : 1.2,
-    roughness: museum ? 0.4 : wet ? 0.7 : 0.9,
+    roughness: style ? style.floorRough : museum ? 0.4 : wet ? 0.7 : 0.9,
     roughnessMap: puddles,
-    metalness: 0.02,
-    color: day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
+    metalness: style?.floorMetal ?? 0.02,
+    color: style ? style.floor : day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff',
   });
   withFloorMarkings(floorMat, buildFloorMarkings(map), buildFloorShade(map, museum));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.width, map.depth), floorMat);
@@ -73,49 +93,51 @@ export function buildWorld(map, baseTex) {
     map: tex.wall,
     bumpMap: tex.wallBump,
     bumpScale: museum ? 0.8 : 2.0,
-    roughness: museum ? 0.82 : wet ? 0.74 : 0.93,
-    metalness: 0.02,
-    color: day ? (museum ? bright(0.96, 0.94, 0.9) : bright(1.75, 1.7, 1.62)) : museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
+    roughness: style ? style.wallRough : museum ? 0.82 : wet ? 0.74 : 0.93,
+    metalness: style?.wallMetal ?? 0.02,
+    color: style ? style.wall : day ? (museum ? bright(0.96, 0.94, 0.9) : bright(1.75, 1.7, 1.62)) : museum ? '#a19d96' : wet ? '#a7acb3' : '#ffffff',
   });
-  const floorCol = day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff';
+  const floorCol = style ? style.floor : day ? (museum ? bright(0.9, 0.88, 0.85) : bright(1.45, 1.43, 1.4)) : museum ? '#7f7c76' : wet ? '#868c94' : '#ffffff';
   const slabTex = worldTex(tex.floor);
   const mats = {
     wall: wallMat,
     inner: labInside ? new THREE.MeshStandardMaterial({ ...V, map: plasterTexture(), roughness: 0.86, metalness: 0, color: '#d9d9d4' }) : null,
-    wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
-    ceil: museum || labInside
-      ? new THREE.MeshStandardMaterial({ ...V, map: ceilingTileTexture(), color: '#d8d2c6', roughness: 0.92 })
-      : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
-    clad: museum ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
+    wallTop: new THREE.MeshStandardMaterial({ ...V, map: tex.wallTop, roughness: 0.7, metalness: day ? 0.1 : 0.5, color: style ? style.wallTop : day ? bright(1.5, 1.48, 1.44) : '#ffffff' }),
+    ceil: style?.ceil === 'bark'
+      ? new THREE.MeshStandardMaterial({ ...V, map: tex.wall, color: '#9a7a54', roughness: 0.95 })
+      : museum || labInside || style?.ceil === 'tile'
+        ? new THREE.MeshStandardMaterial({ ...V, map: ceilingTileTexture(), color: style ? '#eceff2' : '#d8d2c6', roughness: 0.92 })
+        : new THREE.MeshStandardMaterial({ ...V, map: deckTexture(), roughness: 0.55, metalness: 0.35, color: style ? '#7f8894' : day ? bright(1.7, 1.7, 1.75) : '#8e9196' }),
+    clad: museum || style ? null : new THREE.MeshStandardMaterial({ ...V, map: claddingTexture(), roughness: 0.6, metalness: 0.3, color: day ? bright(1.35, 1.32, 1.3) : '#9aa1a8' }),
     slabTop: new THREE.MeshStandardMaterial({ ...V, map: slabTex, bumpMap: worldTex(tex.floorBump), bumpScale: museum ? 0.6 : 1.2, roughness: museum ? 0.4 : 0.9, metalness: 0.02, color: floorCol }),
     grate: new THREE.MeshStandardMaterial({ ...V, map: grateTexture(), roughness: 0.55, metalness: 0.65, color: day ? bright(1.6, 1.6, 1.6) : '#c8ccd0' }),
-    edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
+    edge: new THREE.MeshStandardMaterial({ ...V, map: tex.wall, roughness: 0.9, color: style ? style.wall : museum ? '#d9d4c9' : day ? bright(1.4, 1.38, 1.34) : '#b7b9bc' }),
     edgeSteel: new THREE.MeshStandardMaterial({ ...V, color: '#4b5157', roughness: 0.5, metalness: 0.7 }),
     rail: museum
       ? new THREE.MeshStandardMaterial({ color: '#8f7442', roughness: 0.35, metalness: 0.8 })
-      : new THREE.MeshStandardMaterial({ color: '#3b4046', roughness: 0.55, metalness: 0.6 }),
+      : new THREE.MeshStandardMaterial({ color: style?.rail ?? '#3b4046', roughness: 0.55, metalness: style?.ceil === 'bark' ? 0 : 0.6 }),
     railTop: museum
       ? new THREE.MeshStandardMaterial({ color: '#7a5f45', roughness: 0.45 })
-      : new THREE.MeshStandardMaterial({ color: '#d0a62a', roughness: 0.45, metalness: 0.35 }),
+      : new THREE.MeshStandardMaterial({ color: style?.railTop ?? '#d0a62a', roughness: 0.45, metalness: style?.ceil === 'bark' ? 0 : 0.35 }),
     railGlass: new THREE.MeshStandardMaterial({ color: '#cfe3ec', transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.2, depthWrite: false }),
-    roofTop: new THREE.MeshStandardMaterial({ ...V, color: '#3d4044', roughness: 0.95 }),
+    roofTop: new THREE.MeshStandardMaterial({ ...V, color: style?.roofTop ?? '#3d4044', roughness: 0.95 }),
     tread: new THREE.MeshStandardMaterial({ ...V, map: slabTex, roughness: museum ? 0.35 : 0.85, color: museum ? bright(1.08, 1.06, 1.02) : floorCol }),
     chute: museum
       ? new THREE.MeshStandardMaterial({ ...V, color: '#dfe7ec', roughness: 0.12, metalness: 0.1 })
-      : new THREE.MeshStandardMaterial({ ...V, color: '#c8642a', roughness: 0.25, metalness: 0.35 }),
+      : new THREE.MeshStandardMaterial({ ...V, color: style?.chute ?? '#c8642a', roughness: 0.25, metalness: 0.35 }),
     chuteLip: museum
       ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85, side: THREE.DoubleSide })
-      : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
+      : new THREE.MeshStandardMaterial({ ...V, color: style?.trim ?? '#d0a62a', roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
     nosing: museum
       ? new THREE.MeshStandardMaterial({ ...V, color: '#b48a3e', roughness: 0.3, metalness: 0.85 })
-      : new THREE.MeshStandardMaterial({ ...V, color: '#d0a62a', roughness: 0.6, metalness: 0.1 }),
+      : new THREE.MeshStandardMaterial({ ...V, color: style?.trim ?? '#d0a62a', roughness: 0.6, metalness: 0.1 }),
   };
   group.add(buildStructure(map, mats, { museum, inner: indoor }));
   // 천장 등 (아트리움 광천장 자리는 따로 꾸밈)
   const ac = map.def.decor?.atriumCeiling;
-  group.add(buildCeilingFixtures(map, { museum, skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
-  // 벽에 붙은 소품 (배관·배전함·환풍구·소화기·표지 / 과학관: 소화전함·설명판·안내 화면·비상구)
-  group.add(buildWallProps(map, { museum }));
+  if (style?.props !== false) group.add(buildCeilingFixtures(map, { museum, skip: ac ? (c, r) => r >= ac.r0 && r <= ac.r1 && c >= ac.c0 && c <= ac.c1 : null }));
+  // 벽에 붙은 소품 (배관·배전함·환풍구·소화기·표지 / 과학관: 소화전함·설명판·안내 화면·비상구) — 둥지에는 없음
+  if (style?.props !== false) group.add(buildWallProps(map, { museum }));
 
   // ── 상자들 (같은 종류끼리 인스턴스로 그려서 가볍게)
   //   연구동 별관(decor.interior 'lab'): 지붕 아래 상자 칸은 방에 맞는 가구로 (실험대·흄 후드·서버 랙·책상·선반·데스크)
@@ -137,17 +159,21 @@ export function buildWorld(map, baseTex) {
     group.userData.tick = props.userData.tick;
   } else if (map.def.decor?.labProps && !furnished) group.add(buildLabProps(map));
   const shade = shadeFn(map, museum);
+  const theme = style;
   for (const [kind, style] of Object.entries(kinds)) {
     // 1층·2층 바닥 위의 상자 (map.props: 칸·높이)
     const cells = map.props.filter((p) => p.kind === kind && !furnished?.has(`${p.c},${p.r}`)).map(({ c, r, y }) => [c, r, y]);
     if (!cells.length) continue;
     const h = Object.values(TILES).find((t) => t.kind === kind).h;
-    const geo = new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
+    // 둥지: 큰 상자 → 커다란 알 · 작은 상자 → 잘린 가지 토막 (부딪히는 모양은 그대로 상자)
+    const egg = theme?.eggs && kind === 'bigCrate', log = theme?.eggs && kind === 'crate';
+    const geo = egg ? new THREE.SphereGeometry(1, 24, 18) : log ? new THREE.CylinderGeometry(0.55, 0.62, h, 14) : new THREE.BoxGeometry(CELL * style.inset, h, CELL * style.inset);
+    if (egg) geo.scale(0.98, h / 2, 0.98);
     geo.translate(0, h / 2, 0);
     const rough = wet ? style.rough * 0.6 : style.rough;
-    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: rough, metalness: style.metal, color: day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
-    const top = new THREE.MeshStandardMaterial({ color: style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
-    const mesh = new THREE.InstancedMesh(geo, [side, side, top, top, side, side], cells.length);
+    const side = new THREE.MeshStandardMaterial({ map: style.tex, roughness: egg ? 0.55 : rough, metalness: egg || log ? 0 : style.metal, color: theme ? theme.crate : day ? bright(1.6, 1.55, 1.5) : wet ? '#b3b7bc' : '#ffffff' });
+    const top = new THREE.MeshStandardMaterial({ color: log ? '#c49a62' : style.top, roughness: wet ? 0.25 : style.rough, metalness: style.metal });
+    const mesh = new THREE.InstancedMesh(geo, egg ? side : [side, side, top, top, side, side], cells.length);
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     cells.forEach(([c, r, y], i) => {
@@ -178,8 +204,9 @@ export function buildWorld(map, baseTex) {
 
   const lamps = addLamps(group, map);
   addDecor(group, map, museum);
-  // 맵 밖 원경 (완전한 실내 맵은 밖이 보이지 않으므로 만들지 않음)
-  if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
+  // 맵 밖 원경 (완전한 실내 맵은 밖이 보이지 않으므로 만들지 않음) · 새 테마는 별·지구·행성·거대한 새
+  if (style) group.add(buildThemeBackdrop(map, map.def.theme));
+  else if (!map.def.indoor) group.add(buildSkyline(map, map.def.light === 'sunset' ? 'sunset' : day ? 'day' : 'night'));
   group.userData.lamps = lamps;
   return group;
 }

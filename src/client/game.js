@@ -650,7 +650,7 @@ export class GameClient {
       if (isMe(e.agent)) {
         A.play('denied');
         const def = PATCHES[e.agent.patches[e.slot].id];
-        this.hud.banner(def.name, e.reason === 'gauge' ? '필살 게이지 미충전' : e.reason === 'noTarget' ? '조준선 가까이에 보이는 적이 없음' : '재사용 대기 중', 'small');
+        this.hud.banner(def.name, e.reason === 'gauge' ? '필살 게이지 미충전' : e.reason === 'noTarget' ? '조준선 가까이에 보이는 적이 없음' : e.reason === 'zeroG' ? '무중력 구역 — 무게가 0이라 추가 떨어지지 않음' : '재사용 대기 중', 'small');
       }
     });
     ev.on('captured', (e) => {

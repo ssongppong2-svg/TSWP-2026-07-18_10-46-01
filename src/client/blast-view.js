@@ -307,6 +307,7 @@ export class BlastView {
       rot: new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6), w: new THREE.Vector3((Math.random() - 0.5) * 22, (Math.random() - 0.5) * 22, (Math.random() - 0.5) * 22),
       size: new THREE.Vector3(sc * (0.8 + Math.random() * 0.8), sc * (0.35 + Math.random() * 0.4), sc * (0.8 + Math.random() * 0.6)),
       heat: 0.85 + Math.random() * 0.15, t: 0, life: 2.6 + Math.random() * 1.6, trail: 0,
+      g: this.map.gravityAt?.(x, z) ?? 1, // 그 자리 중력 배율 (달 1/6 · 무중력 0 — 파편이 떠다님)
     });
   }
 
@@ -390,7 +391,7 @@ export class BlastView {
     this.debris = this.debris.filter((d) => {
       d.t += dt;
       if (d.t >= d.life) return false;
-      d.v.y -= GRAV * dt;
+      d.v.y -= GRAV * d.g * dt;
       d.p.addScaledVector(d.v, dt);
       // 벽에 닿으면 튕겨 나옴
       if (Math.hypot(d.p.x - d.ox, d.p.z - d.oz) > d.limit) {

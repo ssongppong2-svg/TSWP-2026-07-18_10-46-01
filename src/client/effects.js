@@ -141,6 +141,7 @@ class Particles {
     this.grav = new Float32Array(max);
     this.drag = new Float32Array(max);
     this.next = 0;
+    this.gAt = null; // (x, z) → 그 자리 중력 배율 (달 1/6 · 무중력 0). 연기가 떠오르는 것도 부력이라 같이 줄어듦
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
@@ -186,7 +187,7 @@ class Particles {
       this.base[i * 3] = c.r;
       this.base[i * 3 + 1] = c.g;
       this.base[i * 3 + 2] = c.b;
-      this.grav[i] = gravity;
+      this.grav[i] = gravity * (this.gAt ? this.gAt(p.x, p.z) : 1);
       this.drag[i] = drag;
     }
   }
@@ -473,6 +474,8 @@ export class Effects {
     this.sparks = new Particles(this.group, 700, { additive: true, size: 0.08, map: glow });
     this.dust = new Particles(this.group, 700, { additive: false, size: 0.42, map: smoke });
     this.smoke = new Particles(this.group, 300, { additive: false, size: 0.7, map: smoke });
+    const gAt = (x, z) => this.match?.map?.gravityAt?.(x, z) ?? 1;
+    for (const ps of [this.sparks, this.dust, this.smoke]) ps.gAt = gAt;
 
     // 에너지 탄 궤적: 밝은 심 + 팀 색 빛무리 (머리가 밝고 꼬리로 갈수록 흐려짐)
     this.maxTracers = 600;
@@ -657,6 +660,7 @@ export class Effects {
       c.life = 2.2;
       c.bounced = false;
       c.floor = this.match.map.dropToGround(portPos.x, portPos.z, portPos.y) + 0.01;
+      c.g = this.match.map.gravityAt?.(portPos.x, portPos.z) ?? 1;
     }
   }
 
@@ -923,7 +927,7 @@ export class Effects {
       const c = this.casings[i];
       if (c.life > 0) {
         c.life -= dt;
-        c.v.y -= 18 * dt;
+        c.v.y -= 18 * (c.g ?? 1) * dt;
         c.p.addScaledVector(c.v, dt);
         c.r.x += c.w.x * dt;
         c.r.z += c.w.z * dt;

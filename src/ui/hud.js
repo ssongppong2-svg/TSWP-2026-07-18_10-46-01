@@ -596,17 +596,20 @@ export class Hud {
       E.armorLbl.innerHTML = kind ? `방탄<em>${kind.cls}등급${kind.helmet ? '·헬멧' : ''}</em>` : '방탄';
     });
 
-    // 지구력 · 장비 무게 (질량 kg과 무게 N = 질량 × 9.8)
+    // 지구력 · 장비 무게 (질량 kg과 무게 N = 질량 × 중력 — 지구 9.8 · 달 1.6 · 무중력 0: 질량은 그대로, 무게만 달라짐)
     const st = a.alive ? Math.round(a.stamina ?? 100) : 0;
     this.set('stamina', `${st}|${a.tired ? 1 : 0}`, () => {
       E.staminaBar.style.transform = `scaleX(${st / 100})`;
       E.stamina.dataset.level = a.tired ? 'tired' : st < 30 ? 'low' : 'ok';
     });
     const mass = carriedMass(a);
-    this.set('load', Math.round(mass * 10), () => {
+    const gk = this.match.map.gravityAt?.(a.pos.x, a.pos.z) ?? 1;
+    this.set('load', `${Math.round(mass * 10)}|${gk.toFixed(3)}`, () => {
       const f = loadFactors(mass);
-      E.load.textContent = `${mass.toFixed(1)} kg · ${Math.round(mass * LOAD.g)} N`;
-      E.load.title = f.over > 0 ? `무거움: 이동 ${Math.round((1 - f.speed) * 100)}% 느림 · 출발·멈춤이 둔함(관성)` : '가벼움';
+      const g = LOAD.g * gk;
+      E.load.textContent = `${mass.toFixed(1)} kg · ${Math.round(mass * g)} N`;
+      const wt = gk < 0.999 ? ` · 여기 중력 ${g.toFixed(1)} N/kg: 질량은 같고 무게만 ${gk <= 0.01 ? '0' : `${Math.round(gk * 100)}%`}` : '';
+      E.load.title = (f.over > 0 ? `무거움: 이동 ${Math.round((1 - f.speed) * 100)}% 느림 · 출발·멈춤이 둔함(관성)` : '가벼움') + wt;
       E.load.classList.toggle('heavy', f.over > 0);
     });
 

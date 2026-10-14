@@ -69,6 +69,24 @@ const WEATHER = {
     fog: ['#1d242e', 18, 96], top: '#0d1219', horizon: '#2c3440', glow: '#3d3329', overcast: 1, moon: 1.15, hemi: 1.25,
     sun: '#a7b8d6', sky: '#94a6c3', ground: '#40392f', exposure: 1.32, env: 0.3, lamps: 1.15,
   },
+  // 달: 공기가 없어 하늘은 까맣고, 햇빛은 하얗고 강하며 그림자가 짙음 (산란이 없어 그늘을 채우는 빛은 땅에 반사된 빛뿐)
+  moon: {
+    fog: ['#05060a', 140, 560], top: '#000000', horizon: '#07080c', glow: '#000000', overcast: 0, moon: 3.4, hemi: 0.75,
+    sun: '#ffffff', sky: '#5a6070', ground: '#9a968e', exposure: 1.05, env: 0.4, lamps: 0.7, sunDir: [0.62, 0.55, 0.42],
+    sunCol: '#ffffff', sunSize: 0.0009,
+  },
+  // 우주 화물선: 차가운 실내 조명 · 창밖은 별 (안개는 아주 멀리)
+  ship: {
+    fog: ['#0a0f18', 60, 300], top: '#000000', horizon: '#06080d', glow: '#000000', overcast: 0, moon: 1.1, hemi: 1.3,
+    sun: '#cfe4ff', sky: '#9ab4d8', ground: '#3a4250', exposure: 1.18, env: 0.45, lamps: 1.2, sunDir: [-0.4, 0.6, 0.7],
+    sunCol: '#dfefff', sunSize: 0.0007,
+  },
+  // 거대한 새의 둥지: 구름 위 맑은 한낮 (공기가 맑아 멀리까지 보임)
+  nest: {
+    fog: ['#cfe3f5', 90, 380], top: '#2f78d4', horizon: '#d8ebfa', glow: '#fff1cc', overcast: 0, moon: 2.9, hemi: 1.55,
+    sun: '#fff3dc', sky: '#d2e6ff', ground: '#7a6a50', exposure: 1.08, env: 0.55, lamps: 0.12, sunDir: [-0.35, 0.85, 0.4],
+    sunCol: '#fff6e6', cloudLit: '#ffffff', cloudShade: '#b4c2d4', clouds: 0.32,
+  },
 };
 WEATHER.clear = WEATHER.night;
 

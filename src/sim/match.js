@@ -1622,7 +1622,13 @@ export class Match {
         const pt = this.aimPoint(a, def.range);
         const up = this.map.raycast({ x: pt.x, y: pt.y + 1, z: pt.z }, { x: pt.x, y: pt.y + def.height, z: pt.z });
         const top = up ? Math.max(pt.y + 2, up.y - 1.2) : pt.y + def.height;
-        const g = def.g * this.map.gravity;
+        // 무중력 구역: 무게가 없어 추가 떨어지지 않음 → 쓰지 않음 (재사용 대기 없음)
+        const gk = this.map.gravityAt(pt.x, pt.z);
+        if (gk <= 0.01) {
+          this.emit('patchDenied', { agent: a, slot, reason: 'zeroG' });
+          return false;
+        }
+        const g = def.g * gk;
         const h = top - pt.y;
         const fall = g > 0 ? Math.sqrt((2 * h) / g) : 3;
         const total = def.warn + fall;

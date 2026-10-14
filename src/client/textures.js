@@ -814,3 +814,6 @@ export function conceptCardTexture(concept) {
   cardCache.set(concept.id, t);
   return t;
 }
+
+// 테마 질감(theme-textures.js)에서 함께 쓰는 그리기 도구
+export { makeCanvas, toTexture, rng, valueNoise, paintNoise, heightFromNoise, blotches, cracks, roundRect };
