@@ -101,8 +101,6 @@ export class Hud {
       <div class="pulse-hud"><div class="ph-screen"><div class="ph-fan"></div><i class="ph-me"></i><div class="ph-dots"></div></div>
         <div class="ph-text"><b>심장 박동</b><span class="ph-n">탐지 중</span></div></div>
       <div class="emp-hud"><b>EMP</b><span>전자 장비 먹통 · 지도·장비 정지 <em class="emp-sec"></em></span></div>
-      <div class="killcam"><div class="kc-frame"></div>
-        <div class="kc-top"><b>킬캠</b><span class="kc-who"></span><i class="kc-bar"><i></i></i><span class="kc-skip"></span></div></div>
       <div class="death-card"></div>
       <div class="hint-keys"></div>
       <div class="concept-toast"></div>
@@ -185,10 +183,6 @@ export class Hud {
       pulseN: $('.ph-n'),
       emp: $('.emp-hud'),
       empSec: $('.emp-sec'),
-      killcam: $('.killcam'),
-      kcWho: $('.kc-who'),
-      kcBar: $('.kc-bar i'),
-      kcSkip: $('.kc-skip'),
       deathCard: $('.death-card'),
       toast: $('.concept-toast'),
       spectate: $('.spectate'),
@@ -362,20 +356,6 @@ export class Hud {
       if (key) key.textContent = K(`patch${i}`);
     });
     if (this.cache) delete this.cache.gear; // 장비 칸의 키 표시도 다시
-  }
-
-  // 킬캠: 상대 시점 다시보기 (who = 상대 이름·무기, p = 진행 0~1) · null이면 숨김
-  setKillcam(kc) {
-    const E = this.els;
-    E.killcam.classList.toggle('show', !!kc);
-    this.root.classList.toggle('killcamming', !!kc);
-    if (!kc) return;
-    if (this.cache.kcWho !== kc.who) {
-      this.cache.kcWho = kc.who;
-      E.kcWho.innerHTML = kc.who;
-      E.kcSkip.innerHTML = `${kbd('jump')} 건너뛰기`;
-    }
-    E.kcBar.style.transform = `scaleX(${kc.p.toFixed(3)})`;
   }
 
   // 죽음 분석표: 무엇에 당했는지 · 받은 피해 · 내가 준 피해 · 다음엔

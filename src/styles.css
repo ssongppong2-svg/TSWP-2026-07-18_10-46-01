@@ -5991,74 +5991,7 @@ button.kb-row:hover {
   }
 }
 
-/* ───── 킬캠 (상대 시점 다시보기) · 죽음 분석표 ───── */
-.hud .killcam {
-  position: absolute;
-  inset: 0;
-  display: none;
-  pointer-events: none;
-}
-.hud .killcam.show {
-  display: block;
-}
-.hud .kc-frame {
-  position: absolute;
-  inset: 0;
-  box-shadow: inset 0 0 0 3px rgba(229, 83, 75, 0.55), inset 0 0 120px rgba(80, 0, 0, 0.45);
-  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
-}
-.hud .kc-top {
-  position: absolute;
-  left: 50%;
-  top: 92px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 7px 14px;
-  background: rgba(16, 8, 8, 0.72);
-  border: 1px solid rgba(229, 83, 75, 0.55);
-  font: 600 13px var(--mono);
-  color: #f3dcd9;
-  white-space: nowrap;
-}
-.hud .kc-top > b {
-  color: #ff6b61;
-  letter-spacing: 0.14em;
-}
-.hud .kc-top > b::before {
-  content: '●';
-  margin-right: 6px;
-  animation: blink 1s steps(2) infinite;
-}
-.hud .kc-bar {
-  position: relative;
-  display: block;
-  width: 120px;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.15);
-}
-.hud .kc-bar i {
-  position: absolute;
-  inset: 0;
-  background: #ff6b61;
-  transform-origin: left;
-  transform: scaleX(0);
-}
-.hud .kc-skip {
-  font-weight: 500;
-  font-size: 11px;
-  color: #c9b3b0;
-}
-.hud.killcamming .vh-weapon,
-.hud.killcamming .hud-bottom,
-.hud.killcamming .hint-keys,
-.hud.killcamming .vh-vitals,
-.hud.killcamming .spectate,
-.hud.killcamming .crosshair {
-  opacity: 0;
-}
-
+/* ───── 죽음 분석표 ───── */
 .hud .death-card {
   position: absolute;
   right: 18px;
